@@ -3,6 +3,7 @@ use axum::{
     body::Body,
     extract::{Path, State},
     response::{IntoResponse, Response},
+    routing::{Router, get, post},
 };
 use chrono::{Duration, Utc};
 
@@ -50,8 +51,19 @@ impl DefaultClaims {
     }
 }
 
-pub async fn get_token(Path(user_id): Path<String>) -> Response {
-    let key = EncodingKey::from_rsa_pem(&fs::read("assets/jwt.key").unwrap()).unwrap();
+pub fn add_tools(router: Router<McpGatewayAppState>) -> Router<McpGatewayAppState> {
+    router
+        .route("/token/{user_id}", get(get_token))
+        .route("/userconfigs/{user_id}", post(configure_user))
+}
+
+pub async fn get_token(
+    State(state): State<McpGatewayAppState>,
+    Path(user_id): Path<String>,
+) -> Response {
+    let key =
+        EncodingKey::from_rsa_pem(&fs::read(&state.config.token_verification_private_key).unwrap())
+            .unwrap();
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("test".to_string());
 

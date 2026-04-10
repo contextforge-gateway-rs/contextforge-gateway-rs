@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use axum_jwt_auth::JwtDecoder;
 use clap::Parser;
@@ -19,6 +19,7 @@ pub const MCP_SESSION_ID: &str = "mcp-session-id";
 pub struct McpGatewayAppState {
     pub(crate) jwt_token_decoder: Arc<dyn JwtDecoder<McpGatewayClaims> + Send + Sync>,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
+    pub(crate) config: Config,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -62,6 +63,13 @@ pub struct Config {
     pub redis_address: String,
     #[arg(long, env = "MCP_GATEWAY_RS_REDIS_PORT")]
     pub redis_port: u16,
+
+    #[arg(long, env = "MCP_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY")]
+    pub token_verification_public_key: PathBuf,
+
+    #[cfg(feature = "with_tools")]
+    #[arg(long, env = "MCP_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY")]
+    pub token_verification_private_key: PathBuf,
 }
 
 #[derive(Error, Debug)]

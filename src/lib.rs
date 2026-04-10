@@ -1,10 +1,7 @@
 use std::{fs, sync::Arc};
 
 use anyhow::Result;
-use axum::{
-    middleware,
-    routing::{get, post},
-};
+use axum::middleware;
 use axum_jwt_auth::LocalDecoder;
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
@@ -15,6 +12,7 @@ use rmcp::transport::{
 mod common;
 mod gateway;
 mod layers;
+#[cfg(feature = "with_tools")]
 mod tools;
 mod user_config_store;
 use gateway::McpService;
@@ -28,7 +26,6 @@ use crate::{
         claims_id::claims_layer, session_id::SessionIdLayer,
         user_config_store::user_congig_store_layer, virtual_host_id::virtual_host_id_layer,
     },
-    tools::{configure_user, get_token},
     user_config_store::RedisUserConfigStore,
 };
 
@@ -57,13 +54,14 @@ pub async fn run_gateway(config: Config) -> Result<()> {
 
     let local_docoder = LocalDecoder::builder()
         .keys(vec![DecodingKey::from_rsa_pem(&fs::read(
-            "assets/jwt.key.pub",
+            &config.token_verification_public_key,
         )?)?])
         .validation(validation)
         .build()?;
     let mcp_add_state = McpGatewayAppState {
         jwt_token_decoder: Arc::new(local_docoder),
         config_store: Arc::new(RedisUserConfigStore::new(redis_client)),
+        config: config.clone(),
     };
 
     let app = axum::Router::new()
@@ -78,10 +76,12 @@ pub async fn run_gateway(config: Config) -> Result<()> {
         ))
         .layer(SessionIdLayer)
         .layer(middleware::from_fn(virtual_host_id_layer))
-        .layer(cors_layer)
-        .route("/token/{user_id}", get(get_token))
-        .route("/userconfigs/{user_id}", post(configure_user))
-        .with_state(mcp_add_state);
+        .layer(cors_layer);
+
+    #[cfg(feature = "with_tools")]
+    let app = tools::add_tools(app);
+
+    let app = app.with_state(mcp_add_state);
 
     // Start HTTP server
 
