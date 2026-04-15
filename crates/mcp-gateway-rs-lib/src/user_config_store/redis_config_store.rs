@@ -21,11 +21,7 @@ impl UserConfigStore for RedisUserConfigStore {
             return Err(ConfigStoreError::InvalidConnection);
         };
 
-        let maybe_user_config: Result<Option<Vec<u8>>, RedisError> = cmd("GET")
-            .arg(key)
-            .take()
-            .query_async(&mut connection)
-            .await;
+        let maybe_user_config: Result<Option<Vec<u8>>, RedisError> = cmd("GET").arg(key).take().query_async(&mut connection).await;
 
         let Ok(Some(user_config)) = maybe_user_config else {
             return Err(ConfigStoreError::NoDataForKey);
@@ -38,11 +34,7 @@ impl UserConfigStore for RedisUserConfigStore {
         Ok(user_config)
     }
 
-    async fn set_config<'a>(
-        &self,
-        key: &'a str,
-        config: &'a UserConfig,
-    ) -> Result<(), ConfigStoreError> {
+    async fn set_config<'a>(&self, key: &'a str, config: &'a UserConfig) -> Result<(), ConfigStoreError> {
         let Ok(encoded) = rmp_serde::encode::to_vec::<UserConfig>(config) else {
             return Err(ConfigStoreError::DataEncoding);
         };
@@ -51,11 +43,7 @@ impl UserConfigStore for RedisUserConfigStore {
             return Err(ConfigStoreError::InvalidConnection);
         };
 
-        if connection
-            .set::<&str, &[u8], String>(key, &encoded)
-            .await
-            .is_ok()
-        {
+        if connection.set::<&str, &[u8], String>(key, &encoded).await.is_ok() {
             Ok(())
         } else {
             return Err(ConfigStoreError::CantWriteData);

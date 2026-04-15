@@ -4,13 +4,14 @@ WORKDIR /tmp/
 
 RUN <<EOF
 apt update
-apt install -y git ca-certificates protobuf-compiler git
+apt install -y git ca-certificates git
 EOF
 WORKDIR /tmp/mcp-gateway-rs
 COPY .cargo/config.toml ./.cargo/config.toml
 COPY crates ./crates
 COPY Cargo.toml ./Cargo.toml
 COPY Cargo.lock ./Cargo.lock
+COPY mcp-rust-sdk /tmp/mcp-rust-sdk
 
 
 RUN \
@@ -22,10 +23,11 @@ RUN --mount=type=cache,target=/app/target \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
     cargo build  --release
 
-FROM debian:trixie-slim
+FROM debian:trixie
 RUN <<EOF
 apt update
 apt upgrade -y
+apt install -y python3
 EOF
 
 WORKDIR /

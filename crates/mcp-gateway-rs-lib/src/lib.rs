@@ -7,7 +7,10 @@ use axum_jwt_auth::LocalDecoder;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rmcp::transport::{
     StreamableHttpServerConfig,
-    streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
+    streamable_http_server::{
+        session::remote::{RedisSessionManager, RemoteSessionManager},
+        tower::StreamableHttpService,
+    },
 };
 mod common;
 mod gateway;
@@ -37,9 +40,9 @@ pub async fn run_gateway(config: Config) -> Result<()> {
     let redis_client = RedisClient::open(redis_config)?;
 
     // Create streamable HTTP service
-    let mcp_service: StreamableHttpService<McpService, LocalSessionManager> = StreamableHttpService::new(
+    let mcp_service: StreamableHttpService<McpService, RemoteSessionManager> = StreamableHttpService::new(
         move || Ok(McpService::new()),
-        LocalSessionManager::default().into(),
+        RemoteSessionManager::new(Arc::new(RedisSessionManager::new(redis_client.clone()))).into(),
         StreamableHttpServerConfig::default(),
     );
 

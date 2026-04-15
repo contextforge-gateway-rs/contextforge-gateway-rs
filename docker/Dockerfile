@@ -22,6 +22,7 @@ FROM debian:trixie-slim
 RUN <<EOF
 apt update
 apt upgrade -y
+apt install -y python3
 EOF
 
 WORKDIR /

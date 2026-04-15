@@ -1,0 +1,115 @@
+#version: "3.9"          # Supported by both podman-compose and Docker Compose v2+
+name: counter-tools
+  
+
+networks:
+  counter-net:               # Single user-defined bridge network keeps traffic private
+    driver: bridge
+
+###############################################################################
+#  CORE SERVICE - ContextForge
+###############################################################################
+services:
+  counter-tool-one:
+    image: mcp-rust-sdk/counter-tool:latest
+    networks: [counter-net]
+    ports: [5601:5555]
+
+    environment:
+      - RUST_LOG=debug
+      - MCP_COUNTER_BIND_ADDRESS=0.0.0.0:5555
+      - MCP_COUNTER_ALLOWED_HOSTS=127.0.0.1,9.85.219.104,192.168.1.14
+            
+    sysctls:
+      - net.ipv4.tcp_fin_timeout=15
+      - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+    depends_on:
+      redis:
+        condition: service_started
+
+    deploy:      
+      resources:
+        limits:
+          cpus: '${GATEWAY_CPU_LIMIT:-8}'
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+
+  counter-tool-two:
+    image: mcp-rust-sdk/counter-tool:latest
+    networks: [counter-net]
+    ports: [5602:5555]
+
+    environment:
+      - RUST_LOG=debug
+      - MCP_COUNTER_BIND_ADDRESS=0.0.0.0:5555
+      - MCP_COUNTER_ALLOWED_HOSTS=127.0.0.1,9.85.219.104,192.168.1.14
+            
+    sysctls:
+      - net.ipv4.tcp_fin_timeout=15
+      - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+    depends_on:
+      redis:
+        condition: service_started
+
+    deploy:      
+      resources:
+        limits:
+          cpus: '${GATEWAY_CPU_LIMIT:-8}'
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}          
+
+
+    
+
+
+
+###############################################################################
+#  CACHE
+###############################################################################
+  redis:
+    image: redis:latest
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    # Performance tuning for 1000+ RPS high-concurrency load testing
+    command:
+      - "redis-server"
+      - "--maxmemory"
+      - "1gb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--tcp-backlog"
+      - "2048"
+      - "--timeout"
+      - "0"
+      - "--tcp-keepalive"
+      - "300"
+      - "--maxclients"
+      - "10000"
+    ports:
+      - "6379:6379"      # expose only if you want host access
+    networks: [counter-net]
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+

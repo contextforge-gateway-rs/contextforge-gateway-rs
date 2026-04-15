@@ -1,3 +1,5 @@
+mod common;
+
 mod mcp_call_validator;
 mod session_manager;
 use std::collections::HashMap;
@@ -230,7 +232,9 @@ impl ServerHandler for McpService {
         let (virtual_host, session_id) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
 
-        let Some((backend_name, tool_name)) = split_tool_name(&request.name) else {
+        let backend_names = session_manager.get_backend_names();
+
+        let Some(BackendToolPair { backend_name, tool_name }) = split_tool_name(&request.name, &backend_names) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... session id not created".into(),
@@ -543,8 +547,22 @@ impl ServerHandler for McpService {
     }
 }
 
-fn split_tool_name<'a>(tool_name: &'a std::borrow::Cow<'a, str>) -> Option<(&'a str, &'a str)> {
-    tool_name.split_once('-')
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+struct BackendToolPair<'a> {
+    backend_name: &'a str,
+    tool_name: &'a str,
+}
+
+fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(tool_name: &'a T, backend_names: &'a [N]) -> Option<BackendToolPair<'a>> {
+    for name in backend_names {
+        let tool_name = tool_name.as_ref();
+        let name = name.as_ref();
+        let extended_name = name.to_owned() + "-";
+        if tool_name.starts_with(&extended_name) {
+            return Some(BackendToolPair { backend_name: name, tool_name: &tool_name[extended_name.len()..] });
+        }
+    }
+    None
 }
 
 const TEST_IMAGE_DATA: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
@@ -569,4 +587,30 @@ fn merge_tools(server_capabilities: Vec<(String, ListToolsResult)>) -> Vec<Tool>
         })
         .sorted_by(|t, o| t.name.cmp(&o.name))
         .collect::<Vec<_>>()
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_splitting() {
+        let tool_name = "counter-one-increment";
+        let backend_names = vec!["counter-on", "counter-oneee", "counter-one"];
+        let pair = BackendToolPair { backend_name: "counter-one", tool_name: "increment" };
+        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        let tool_name = "counter-oneincrement";
+        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
+        let tool_name = "counteroneincrement";
+        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
+        let tool_name = "counter-one-get-value";
+        let pair = BackendToolPair { backend_name: "counter-one", tool_name: "get-value" };
+        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+
+        let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
+        let tool_name = "counter_one-get-value";
+        let pair = BackendToolPair { backend_name: "counter_one", tool_name: "get-value" };
+        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+    }
 }

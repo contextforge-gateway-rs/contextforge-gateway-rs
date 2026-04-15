@@ -25,6 +25,10 @@ impl<'a> SessionManager<'a> {
         Self { virtual_host, session_id, transports }
     }
 
+    pub fn get_backend_names(&self) -> Vec<&str> {
+        self.virtual_host.backends.keys().map(std::string::String::as_str).collect()
+    }
+
     pub async fn borrow_transports(&self) -> Vec<(String, Option<RunningService<RoleClient, InitializeRequestParams>>)> {
         let names: Vec<_> = self.virtual_host.backends.keys().cloned().collect();
         let mut transports = self.transports.lock().await;
