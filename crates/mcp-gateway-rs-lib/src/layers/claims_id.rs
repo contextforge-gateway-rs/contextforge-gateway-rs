@@ -90,7 +90,11 @@ use crate::common::{McpGatewayAppState, McpGatewayClaims};
 //     }
 // }
 
-pub async fn claims_layer(State(state): State<McpGatewayAppState>, request: http::Request<axum::body::Body>, next: Next) -> Response {
+pub async fn claims_layer(
+    State(state): State<McpGatewayAppState>,
+    request: http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
     let (mut parts, body) = request.into_parts();
     let mut new_parts = parts.clone();
     let decoder = state.jwt_token_decoder;

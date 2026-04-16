@@ -1,26 +1,30 @@
-mod common;
-
 mod mcp_call_validator;
 mod session_manager;
+mod session_store;
 use std::collections::HashMap;
+
+use http::{HeaderName, HeaderValue};
+use rmcp::transport::streamable_http_server::session::remote::SessionStore;
 use std::{collections::HashSet, sync::Arc};
+use tokio::sync::mpsc;
 
 use http::request::Parts;
 use itertools::Itertools;
 use mcp_call_validator::AuthorizedCallValidator;
 use rmcp::RoleClient;
-use rmcp::model::ErrorCode;
+use rmcp::model::{ErrorCode};
 use rmcp::service::RunningService;
+use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use rmcp::transport::{NewSessionId, StreamableHttpClientTransport};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
-        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo, GetPromptRequestParams,
-        GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, LoggingLevel, PaginatedRequestParams, Prompt, PromptArgument, PromptMessage,
-        PromptMessageContent, PromptMessageRole, RawImageContent, RawResource, RawResourceTemplate, ReadResourceRequestParams,
-        ReadResourceResult, Reference, ResourceContents, ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool,
+        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
+        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
+        RawImageContent, RawResource, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference,
+        ResourceContents, ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool,
         UnsubscribeRequestParams,
     },
     service::RequestContext,
@@ -29,25 +33,39 @@ use rmcp::{
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use crate::gateway::mcp_call_validator::InitializeCallValidator;
 use crate::gateway::session_manager::SessionManager;
-use crate::layers::virtual_host_id::VirtualHostId;
+pub use crate::gateway::session_store::RedisUserSessionStore;
+use crate::gateway::session_store::{SessionMapping, UserSession, UserSessionStore};
 use crate::{SessionId, user_config_store::UserConfig};
 
 #[derive(Clone)]
-pub struct McpService {
+pub struct McpService<T, S>
+where
+    T: UserSessionStore,
+    S: SessionStore,
+{
     subscriptions: Arc<Mutex<HashSet<String>>>,
     transports: Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>,
     log_level: Arc<Mutex<LoggingLevel>>,
     http_client: reqwest::Client,
+    user_session_store: T,
+    session_store: S,
 }
 
-impl McpService {
-    pub fn new() -> Self {
+impl<T, S> McpService<T, S>
+where
+    T: UserSessionStore,
+    S: SessionStore,
+{
+    pub fn with_stores(user_session_store: T, session_store: S) -> Self {
         Self {
             subscriptions: Arc::new(Mutex::new(HashSet::new())),
             transports: Arc::new(Mutex::new(HashMap::new())),
             log_level: Arc::new(Mutex::new(LoggingLevel::Debug)),
             http_client: reqwest::Client::new(),
+            user_session_store,
+            session_store,
         }
     }
 }
@@ -80,77 +98,87 @@ impl From<(&String, &SessionId)> for BackendTransportKey {
 
 impl From<(Option<ServerCapabilities>, Option<BackendService>)> for BackendTransportService {
     fn from((capabilities, service): (Option<ServerCapabilities>, Option<BackendService>)) -> Self {
-        Self { capabilities, service }
+        if let Some(service) = service {
+            Self { capabilities, service: Some(service) }
+        } else {
+            Self { capabilities, service: None }
+        }
     }
 }
 
-impl ServerHandler for McpService {
-    async fn initialize(&self, request: InitializeRequestParams, cx: RequestContext<RoleServer>) -> Result<InitializeResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-
-        let maybe_new_session = cx.extensions.get::<NewSessionId>();
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
-        info!(
-            "intialize user_config = {maybe_user_config:#?} new_session_id = {maybe_new_session:#?} virtual_host_id = {maybe_virtual_host_id:#?}"
-        );
-
-        let Some(new_session) = maybe_new_session else {
+impl<T, S> ServerHandler for McpService<T, S>
+where
+    T: UserSessionStore + Send + Sync + 'static,
+    S: SessionStore + Send + Sync + 'static,
+{
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        let call_validator = InitializeCallValidator::new(&cx);
+        let (virtual_host, downstream_session_id) = call_validator.validate()?;
+        let session_mapping = if let Ok(maybe_session_mapping) = self
+            .user_session_store
+            .get_session(&UserSession::new(String::new(), downstream_session_id.session_id.clone()))
+            .await
+        {
+            maybe_session_mapping.unwrap_or_default()
+        } else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... session id not created".into(),
+                message: "Internal problem... session store can't be accessed".into(),
                 data: None,
             });
         };
 
-        let Some(user_config) = maybe_user_config else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... user config not found".into(),
-                data: None,
-            });
-        };
-
-        let Some(virtual_host_id) = maybe_virtual_host_id else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... virutal host not known".into(),
-                data: None,
-            });
-        };
-
-        let Some(virtual_host) = user_config.virtual_hosts.get(virtual_host_id.value()) else {
-            return Err(ErrorData { code: ErrorCode::RESOURCE_NOT_FOUND, message: "No configuration".into(), data: None });
-        };
-
-        let tasks = virtual_host
+        let (downstream_session_id_channels, tasks): (Vec<_>, Vec<_>) = virtual_host
             .backends
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
                 let request = request.clone();
                 let backend_url = backend.url.clone();
-                let new_session_id = new_session.clone();
+                let downstream_session_id = downstream_session_id.clone();
+                let skip_init_config =
+                    if let Some(mapping) = session_mapping.get(name) { 
+                        Some(
+                            (mapping.session(), 
+                            HashMap::<HeaderName, HeaderValue>::new(), 
+                            None)) 
+                        } else { None };
 
-                Box::pin(async move {
-                    let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());
-                    let transport = StreamableHttpClientTransport::with_client(client, config);
-                    let maybe_running_service = request.serve(transport).await;
-                    if let Ok(running_service) = maybe_running_service {
-                        (name, Some(running_service))
-                    } else {
-                        warn!("initialize: Unable to initialize for {new_session_id:?} {name:?} {maybe_running_service:?}",);
-                        (name, None)
-                    }
-                })
+                    
+
+                let (upstream_session_id_tx, upstream_session_id_rx) = mpsc::channel::<Option<Arc<str>>>(100);
+
+                (
+                    (name, upstream_session_id_rx),
+                    Box::pin(async move {
+                        let upstream_session_id_tx = upstream_session_id_tx.clone();
+                        let mut config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());
+                        config.upstream_session_id_tx = Some(upstream_session_id_tx);
+                        config.skip_init = skip_init_config;
+
+                        let transport = StreamableHttpClientTransport::with_client(client, config);
+                        let maybe_running_service = request.serve(transport).await;
+                        if let Ok(running_service) = maybe_running_service {
+                            (name, Some(running_service))
+                        } else {
+                            warn!("initialize: Unable to initialize for {downstream_session_id:?} {name:?} {maybe_running_service:?}",);
+                            (name, None)
+                        }
+                    }),
+                )
             })
-            .collect::<Vec<_>>();
+            .unzip();
         let initialization_results = futures::future::join_all(tasks).await;
 
         let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
             .into_iter()
             .map(|(name, running_service)| {
-                info!("initialize: Adding transport: session_id {new_session:#?} backend {name} {running_service:?}");
+                info!("initialize: Adding transport: session_id {downstream_session_id:#?} backend {name} {running_service:?}");
+
                 let server_capabilities =
                     running_service.as_ref().and_then(|rs| rs.peer().peer_info().as_ref().map(|pi| pi.capabilities.clone()));
                 (
@@ -160,9 +188,23 @@ impl ServerHandler for McpService {
             })
             .unzip();
 
+        let mut session_mapping = SessionMapping::new();
+        for (host, mut session_id_rx) in downstream_session_id_channels.into_iter() {
+            if let Some(maybe_session_id) = session_id_rx.recv().await {
+                info!("initialize: host {host} got a session id {maybe_session_id:?}");
+                session_mapping.push(host.clone(), maybe_session_id);
+            }
+        }
+        let _ = self
+            .user_session_store
+            .set_session(&UserSession::new(String::new(), downstream_session_id.session_id.clone()), &session_mapping)
+            .await;
+
         let mut transports = self.transports.lock().await;
         for (name, svc) in backend_services {
-            transports.entry(BackendTransportKey::from((name.as_str(), new_session.value()))).insert_entry(svc);
+            transports
+                .entry(BackendTransportKey::from((name.as_str(), downstream_session_id.value())))
+                .insert_entry(svc);
         }
         drop(transports);
 
@@ -201,7 +243,8 @@ impl ServerHandler for McpService {
             })
             .collect::<Vec<_>>();
 
-        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> = futures::future::join_all(list_tools_tasks).await;
+        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
+            futures::future::join_all(list_tools_tasks).await;
 
         let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
             .into_iter()
@@ -219,7 +262,9 @@ impl ServerHandler for McpService {
 
         let responses = responses
             .into_iter()
-            .filter_map(|(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None })
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
             .collect::<Vec<_>>();
 
         let merged_list_tools = merge_tools(responses);
@@ -227,7 +272,11 @@ impl ServerHandler for McpService {
         Ok(ListToolsResult { meta: None, tools: merged_list_tools, next_cursor: None })
     }
 
-    async fn call_tool(&self, request: CallToolRequestParams, cx: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
         let (virtual_host, session_id) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
@@ -286,7 +335,8 @@ impl ServerHandler for McpService {
             });
         }
 
-        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> = futures::future::join_all(call_tool_tasks).await;
+        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> =
+            futures::future::join_all(call_tool_tasks).await;
 
         let (backend_services, responses): (Vec<_>, Vec<_>) = call_tool_tasks_results
             .into_iter()
@@ -300,7 +350,9 @@ impl ServerHandler for McpService {
 
         let responses = responses
             .into_iter()
-            .filter_map(|(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None })
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
             .collect::<Vec<_>>();
 
         responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
@@ -374,7 +426,8 @@ impl ServerHandler for McpService {
             }])),
             _ => {
                 if uri.starts_with("test://template/") && uri.ends_with("/data") {
-                    let id = uri.strip_prefix("test://template/").and_then(|s| s.strip_suffix("/data")).unwrap_or("unknown");
+                    let id =
+                        uri.strip_prefix("test://template/").and_then(|s| s.strip_suffix("/data")).unwrap_or("unknown");
                     Ok(ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
                         uri: uri.into(),
                         mime_type: Some("application/json".into()),
@@ -414,7 +467,11 @@ impl ServerHandler for McpService {
         })
     }
 
-    async fn subscribe(&self, request: SubscribeRequestParams, cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
@@ -425,7 +482,11 @@ impl ServerHandler for McpService {
         Ok(())
     }
 
-    async fn unsubscribe(&self, request: UnsubscribeRequestParams, cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
@@ -458,23 +519,32 @@ impl ServerHandler for McpService {
                         PromptArgument::new("style").with_description("The greeting style").with_required(false),
                     ]),
                 ),
-                Prompt::new("test_prompt_with_embedded_resource", Some("A test prompt that includes an embedded resource"), None),
+                Prompt::new(
+                    "test_prompt_with_embedded_resource",
+                    Some("A test prompt that includes an embedded resource"),
+                    None,
+                ),
                 Prompt::new("test_prompt_with_image", Some("A test prompt that includes an image"), None),
             ],
             next_cursor: None,
         })
     }
 
-    async fn get_prompt(&self, request: GetPromptRequestParams, cx: RequestContext<RoleServer>) -> Result<GetPromptResult, ErrorData> {
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, ErrorData> {
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
         info!("get_prompt user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
         match request.name.as_str() {
-            "test_simple_prompt" => {
-                Ok(GetPromptResult::new(vec![PromptMessage::new_text(PromptMessageRole::User, "This is a simple test prompt.")])
-                    .with_description("A simple test prompt"))
-            },
+            "test_simple_prompt" => Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+                PromptMessageRole::User,
+                "This is a simple test prompt.",
+            )])
+            .with_description("A simple test prompt")),
             "test_prompt_with_arguments" => {
                 let args = request.arguments.unwrap_or_default();
                 let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("World");
@@ -499,10 +569,14 @@ impl ServerHandler for McpService {
             ])
             .with_description("A prompt with an embedded resource")),
             "test_prompt_with_image" => {
-                let image_content = RawImageContent { data: TEST_IMAGE_DATA.into(), mime_type: "image/png".into(), meta: None };
+                let image_content =
+                    RawImageContent { data: TEST_IMAGE_DATA.into(), mime_type: "image/png".into(), meta: None };
                 Ok(GetPromptResult::new(vec![
                     PromptMessage::new_text(PromptMessageRole::User, "Here is an image:"),
-                    PromptMessage::new(PromptMessageRole::User, PromptMessageContent::Image { image: image_content.no_annotation() }),
+                    PromptMessage::new(
+                        PromptMessageRole::User,
+                        PromptMessageContent::Image { image: image_content.no_annotation() },
+                    ),
                 ])
                 .with_description("A prompt with an image"))
             },
@@ -510,7 +584,11 @@ impl ServerHandler for McpService {
         }
     }
 
-    async fn complete(&self, request: CompleteRequestParams, cx: RequestContext<RoleServer>) -> Result<CompleteResult, ErrorData> {
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
@@ -553,7 +631,10 @@ struct BackendToolPair<'a> {
     tool_name: &'a str,
 }
 
-fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(tool_name: &'a T, backend_names: &'a [N]) -> Option<BackendToolPair<'a>> {
+fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
+    tool_name: &'a T,
+    backend_names: &'a [N],
+) -> Option<BackendToolPair<'a>> {
     for name in backend_names {
         let tool_name = tool_name.as_ref();
         let name = name.as_ref();
@@ -565,7 +646,8 @@ fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(tool_name: &'a T, backend_n
     None
 }
 
-const TEST_IMAGE_DATA: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+const TEST_IMAGE_DATA: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 // Small base64-encoded WAV (silence)
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {

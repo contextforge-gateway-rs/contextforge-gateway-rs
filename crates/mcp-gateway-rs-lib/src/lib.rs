@@ -8,7 +8,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rmcp::transport::{
     StreamableHttpServerConfig,
     streamable_http_server::{
-        session::remote::{RedisSessionManager, RemoteSessionManager},
+        session::remote::{RedisSessionStore, RemoteSessionManager},
         tower::StreamableHttpService,
     },
 };
@@ -26,8 +26,9 @@ use tracing::info;
 
 use crate::{
     common::{MCP_AUDIENCE, McpGatewayAppState, RedisClient, RedisConfig},
+    gateway::RedisUserSessionStore,
     layers::{
-        claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_congig_store_layer,
+        claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
     },
     user_config_store::RedisUserConfigStore,
@@ -38,11 +39,17 @@ pub use crate::common::Config;
 pub async fn run_gateway(config: Config) -> Result<()> {
     let redis_config = RedisConfig::try_from(&config)?;
     let redis_client = RedisClient::open(redis_config)?;
+    let redis_user_session_store = RedisUserSessionStore::new(redis_client.clone());
+    let redis_session_store = RedisSessionStore::new(redis_client.clone());
+    let redis_session_store_service = redis_session_store.clone();
 
     // Create streamable HTTP service
-    let mcp_service: StreamableHttpService<McpService, RemoteSessionManager> = StreamableHttpService::new(
-        move || Ok(McpService::new()),
-        RemoteSessionManager::new(Arc::new(RedisSessionManager::new(redis_client.clone()))).into(),
+    let mcp_service: StreamableHttpService<
+        McpService<RedisUserSessionStore, RedisSessionStore>,
+        RemoteSessionManager<RedisSessionStore>,
+    > = StreamableHttpService::new(
+        move || Ok(McpService::with_stores(redis_user_session_store.clone(), redis_session_store_service.clone())),
+        Arc::new(RemoteSessionManager::new(redis_session_store)),
         StreamableHttpServerConfig::default(),
     );
 
@@ -63,7 +70,7 @@ pub async fn run_gateway(config: Config) -> Result<()> {
 
     let app = axum::Router::new()
         .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
-        .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_congig_store_layer))
+        .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
         .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
         .layer(SessionIdLayer)
         .layer(middleware::from_fn(virtual_host_id_layer))

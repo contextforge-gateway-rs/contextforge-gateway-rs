@@ -83,10 +83,7 @@ impl TryFrom<&Config> for RedisConfig {
         let _: Authority = format!("{}:{}", value.redis_address, value.redis_port)
             .parse::<Authority>()
             .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
-        Ok(Self {
-            address: value.redis_address.clone(),
-            port: value.redis_port,
-        })
+        Ok(Self { address: value.redis_address.clone(), port: value.redis_port })
     }
 
     type Error = ConfigValidationError;

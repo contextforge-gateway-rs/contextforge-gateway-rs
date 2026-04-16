@@ -42,12 +42,20 @@ pub enum ConfigStoreError {
     CantWriteData,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct User<'a> {
+    name: &'static str,
+    key: &'a str,
+}
+
+impl<'a> User<'a> {
+    pub fn new(key: &'a str) -> Self {
+        Self { name: "UserConfig", key }
+    }
+}
+
 #[async_trait]
 pub trait UserConfigStore: Send + Sync {
-    async fn get_config<'a>(&self, key: &'a str) -> Result<UserConfig, ConfigStoreError>;
-    async fn set_config<'a>(
-        &self,
-        key: &'a str,
-        user_config: &'a UserConfig,
-    ) -> Result<(), ConfigStoreError>;
+    async fn get_config<'a>(&self, key: &'a User) -> Result<UserConfig, ConfigStoreError>;
+    async fn set_config<'a>(&self, key: &'a User, user_config: &'a UserConfig) -> Result<(), ConfigStoreError>;
 }

@@ -18,7 +18,7 @@ use url::Url;
 
 use crate::{
     common::{MCP_AUDIENCE, McpGatewayAppState},
-    user_config_store::UserConfig,
+    user_config_store::{User, UserConfig},
 };
 
 #[derive(Deserialize, Serialize)]
@@ -64,8 +64,10 @@ pub async fn health() -> Response {
 }
 
 pub async fn get_token(State(state): State<McpGatewayAppState>, Path(user_id): Path<String>) -> Response {
-    let key = EncodingKey::from_rsa_pem(&fs::read(&state.config.token_verification_private_key).expect("Expecting this to work"))
-        .expect("Expecting this to work");
+    let key = EncodingKey::from_rsa_pem(
+        &fs::read(&state.config.token_verification_private_key).expect("Expecting this to work"),
+    )
+    .expect("Expecting this to work");
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("test".to_owned());
 
@@ -82,7 +84,7 @@ pub async fn configure_user(
     State(state): State<McpGatewayAppState>,
     Json(user_config): Json<UserConfig>,
 ) -> Response {
-    if state.config_store.set_config(&user_id, &user_config).await.is_ok() {
+    if state.config_store.set_config(&User::new(&user_id), &user_config).await.is_ok() {
         Response::builder()
             .status(StatusCode::ACCEPTED)
             .header(header::CONTENT_TYPE, "text/plain")

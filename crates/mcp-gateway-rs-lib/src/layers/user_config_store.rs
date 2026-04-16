@@ -6,10 +6,10 @@ use tracing::{debug, info, warn};
 
 use crate::{
     common::{McpGatewayAppState, McpGatewayClaims},
-    user_config_store::ConfigStoreError,
+    user_config_store::{ConfigStoreError, User},
 };
 
-pub async fn user_congig_store_layer(
+pub async fn user_config_store_layer(
     State(state): State<McpGatewayAppState>,
     mut request: http::Request<axum::body::Body>,
     next: Next,
@@ -18,7 +18,7 @@ pub async fn user_congig_store_layer(
     if let Some(claims) = maybe_claims {
         let subject = claims.standard_claims.sub();
         debug!("Getting user config for {subject}");
-        match state.config_store.get_config(subject).await {
+        match state.config_store.get_config(&User::new(subject)).await {
             Ok(user_config) => {
                 info!("Got config for user {subject} {user_config:?}");
                 request.extensions_mut().insert(user_config);
