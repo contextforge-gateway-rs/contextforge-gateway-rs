@@ -73,6 +73,12 @@ pub struct Config {
 
     #[arg(long, env = "MCP_GATEWAY_ENABLE_OPEN_TELEMETRY")]
     pub enable_open_telemetry: Option<bool>,
+
+    #[arg(long, env = "MCP_GATEWAY_CPUS")]
+    pub number_of_cpus: Option<usize>,
+
+    #[arg(long, env = "MCP_GATEWAY_SINGLE_RUNTIME")]
+    pub single_runtime: Option<bool>,
 }
 
 #[derive(Error, Debug)]

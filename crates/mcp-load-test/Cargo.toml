@@ -17,6 +17,7 @@ log = "0.4.29"
 tokio.workspace = true
 http.workspace = true
 reqwest.workspace = true
+uuid = { version = "1.23.1", features = ["v4"] }
 
 
 [lints]

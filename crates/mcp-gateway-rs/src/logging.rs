@@ -40,8 +40,8 @@ pub fn init_tracing_logging(configuration: &Config) -> Guard {
 
     let file_layer = fmt::layer()
         .with_writer(non_blocking_appender)
-        .with_span_events(FmtSpan::NONE)
         .with_target(true)
+        .with_span_events(FmtSpan::NONE)
         .with_ansi(false)
         .with_filter(filter::filter_fn(|meta| !meta.is_span()))
         .with_filter(file_filter);

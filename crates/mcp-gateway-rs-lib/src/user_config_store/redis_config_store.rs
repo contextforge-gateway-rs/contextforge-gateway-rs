@@ -23,7 +23,13 @@ impl RedisUserConfigStore {
 impl UserConfigStore for RedisUserConfigStore {
     async fn get_config<'a>(&self, user_key: &'a User) -> Result<UserConfig, ConfigStoreError> {
         let has_key = { self.cache.lock().await.contains_key(user_key.key) };
-        if !has_key {
+        if has_key {
+            if let Some(user_config) = self.cache.lock().await.get_mut(user_key.key) {
+                Ok(user_config.clone())
+            } else {
+                return Err(ConfigStoreError::NoDataForKey);
+            }
+        } else {
             let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
                 return Err(ConfigStoreError::DataEncoding);
             };
@@ -45,12 +51,6 @@ impl UserConfigStore for RedisUserConfigStore {
 
             self.cache.lock().await.insert(user_key.key.to_owned(), user_config.clone());
             Ok(user_config)
-        } else {
-            if let Some(user_config) = self.cache.lock().await.get_mut(user_key.key) {
-                Ok(user_config.clone())
-            } else {
-                return Err(ConfigStoreError::NoDataForKey);
-            }
         }
     }
 

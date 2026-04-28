@@ -24,7 +24,13 @@ impl RedisUserSessionStore {
 impl UserSessionStore for RedisUserSessionStore {
     async fn get_session<'a>(&self, session_key: &'a UserSession) -> Result<Option<SessionMapping>, SessionStoreError> {
         let has_key = { self.cache.lock().await.contains_key(session_key) };
-        if !has_key {
+        if has_key {
+            if let Some(user_session) = self.cache.lock().await.get_mut(session_key) {
+                Ok(Some(user_session.clone()))
+            } else {
+                Ok(None)
+            }
+        } else {
             let Ok(key) = rmp_serde::encode::to_vec::<UserSession>(session_key) else {
                 return Err(SessionStoreError::DataEncoding);
             };
@@ -46,12 +52,6 @@ impl UserSessionStore for RedisUserSessionStore {
 
             self.cache.lock().await.insert(session_key.clone(), user_session.clone());
             Ok(Some(user_session))
-        } else {
-            if let Some(user_session) = self.cache.lock().await.get_mut(session_key) {
-                Ok(Some(user_session.clone()))
-            } else {
-                Ok(None)
-            }
         }
     }
 

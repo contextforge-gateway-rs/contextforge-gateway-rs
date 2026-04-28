@@ -1,0 +1,709 @@
+use std::collections::HashMap;
+
+use http::{HeaderName, HeaderValue};
+
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::mpsc;
+
+use super::mcp_call_validator::AuthorizedCallValidator;
+use http::request::Parts;
+use itertools::Itertools;
+use rmcp::RoleClient;
+use rmcp::model::ErrorCode;
+use rmcp::service::RunningService;
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::{
+    ErrorData, RoleServer, ServerHandler, ServiceExt,
+    model::{
+        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
+        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
+        RawImageContent, RawResource, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference,
+        ResourceContents, ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool,
+        UnsubscribeRequestParams,
+    },
+    service::RequestContext,
+};
+
+use tokio::sync::Mutex;
+use tracing::{debug, info, warn};
+
+use crate::gateway::mcp_call_validator::InitializeCallValidator;
+use crate::gateway::session_manager::SessionManager;
+pub use crate::gateway::session_store::LocalUserSessionStore;
+pub use crate::gateway::session_store::RedisUserSessionStore;
+use crate::gateway::session_store::{SessionMapping, UserSession, UserSessionStore};
+use crate::{SessionId, user_config_store::UserConfig};
+
+#[derive(Clone)]
+pub struct McpService<T>
+where
+    T: UserSessionStore,
+{
+    subscriptions: Arc<Mutex<HashSet<String>>>,
+    transports: Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>,
+    log_level: Arc<Mutex<LoggingLevel>>,
+    http_client: reqwest::Client,
+    user_session_store: T,
+}
+
+impl<T> McpService<T>
+where
+    T: UserSessionStore,
+{
+    pub fn with_stores(user_session_store: T) -> Self {
+        Self {
+            subscriptions: Arc::new(Mutex::new(HashSet::new())),
+            transports: Arc::new(Mutex::new(HashMap::new())),
+            log_level: Arc::new(Mutex::new(LoggingLevel::Debug)),
+            http_client: reqwest::Client::new(),
+            user_session_store,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BackendTransportKey {
+    backend_name: String,
+    session_id: String,
+}
+
+pub type BackendService = RunningService<RoleClient, InitializeRequestParams>;
+
+#[derive(Debug)]
+pub struct ServiceHolder {
+    pub name: String,
+    pub running_service: Option<RunningService<RoleClient, InitializeRequestParams>>,
+}
+
+impl ServiceHolder {
+    pub fn new(
+        name: String,
+        running_service: Option<RunningService<RoleClient, InitializeRequestParams>>,
+    ) -> ServiceHolder {
+        Self { name, running_service }
+    }
+}
+
+#[derive(Debug)]
+pub struct BackendTransportService {
+    capabilities: Option<ServerCapabilities>,
+    pub(crate) service: Option<BackendService>,
+}
+
+impl From<(&str, &str)> for BackendTransportKey {
+    fn from((backend_name, session_name): (&str, &str)) -> Self {
+        Self { backend_name: backend_name.to_owned(), session_id: session_name.to_owned() }
+    }
+}
+
+impl From<(&String, &SessionId)> for BackendTransportKey {
+    fn from((backend_name, session_name): (&String, &SessionId)) -> Self {
+        Self { backend_name: backend_name.to_owned(), session_id: session_name.value().to_owned() }
+    }
+}
+
+impl From<(Option<ServerCapabilities>, Option<BackendService>)> for BackendTransportService {
+    fn from((capabilities, service): (Option<ServerCapabilities>, Option<BackendService>)) -> Self {
+        if let Some(service) = service {
+            Self { capabilities, service: Some(service) }
+        } else {
+            Self { capabilities, service: None }
+        }
+    }
+}
+
+impl<T> ServerHandler for McpService<T>
+where
+    T: UserSessionStore + Send + Sync + 'static,
+{
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        let call_validator = InitializeCallValidator::new(&cx);
+        let (virtual_host, downstream_session_id) = call_validator.validate()?;
+        let session_mapping = if let Ok(maybe_session_mapping) = self
+            .user_session_store
+            .get_session(&UserSession::new(String::new(), Arc::clone(&downstream_session_id.session_id)))
+            .await
+        {
+            maybe_session_mapping.unwrap_or_default()
+        } else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Internal problem... session store can't be accessed".into(),
+                data: None,
+            });
+        };
+
+        let (downstream_session_id_channels, tasks): (Vec<_>, Vec<_>) = virtual_host
+            .backends
+            .iter()
+            .map(|(name, backend)| {
+                let client = self.http_client.clone();
+                let request = request.clone();
+                let backend_url = backend.url.clone();
+                let downstream_session_id = downstream_session_id.clone();
+                let skip_init_config =
+                    session_mapping.get(name).map(|mapping| (mapping.session(),
+                            HashMap::<HeaderName, HeaderValue>::new(),
+                            None));
+
+
+
+                let (upstream_session_id_tx, upstream_session_id_rx) = mpsc::channel::<Option<Arc<str>>>(100);
+
+                (
+                    (name, upstream_session_id_rx),
+                    Box::pin(async move {
+                        let upstream_session_id_tx = upstream_session_id_tx.clone();
+                        let mut config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());                        
+                        config.upstream_session_id_tx = Some(upstream_session_id_tx);
+                        config.skip_init = skip_init_config;
+
+                        let transport = StreamableHttpClientTransport::with_client(client, config);
+                        let maybe_running_service = request.serve(transport).await;
+                        if let Ok(running_service) = maybe_running_service {
+                            info!("initialize: intialized for {downstream_session_id:?} {name:?}");
+                            (name, Some(running_service))
+                        } else {
+                            warn!("initialize: Unable to initialize for {downstream_session_id:?} {name:?} {maybe_running_service:?}",);
+                            (name, None)
+                        }
+                    }),
+                )
+            })
+            .unzip();
+        let initialization_results = futures::future::join_all(tasks).await;
+
+        let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
+            .into_iter()
+            .map(|(name, running_service)| {
+                info!("initialize: Adding transport: session_id {downstream_session_id:#?} backend {name} {running_service:?}");
+
+                let server_capabilities =
+                    running_service.as_ref().and_then(|rs| rs.peer().peer_info().as_ref().map(|pi| pi.capabilities.clone()));
+                (
+                    (name.clone(), server_capabilities.clone()),
+                    (name.clone(), BackendTransportService::from((server_capabilities, running_service))),
+                )
+            })
+            .unzip();
+
+        let mut session_mapping = SessionMapping::new();
+        for (host, mut session_id_rx) in downstream_session_id_channels {
+            if let Some(maybe_session_id) = session_id_rx.recv().await {
+                info!("initialize: host {host} got a session id {maybe_session_id:?}");
+                session_mapping.push(host.clone(), maybe_session_id.as_ref());
+            }
+        }
+        let _ = self
+            .user_session_store
+            .set_session(
+                &UserSession::new(String::new(), Arc::clone(&downstream_session_id.session_id)),
+                &session_mapping,
+            )
+            .await;
+
+        let mut transports = self.transports.lock().await;
+        for (name, svc) in backend_services {
+            transports
+                .entry(BackendTransportKey::from((name.as_str(), downstream_session_id.value())))
+                .insert_entry(svc);
+        }
+        drop(transports);
+
+        Ok(InitializeResult::new(merge_capabilities(capabilities))
+            .with_server_info(Implementation::new("rust-conformance-server", "0.1.0"))
+            .with_instructions("Rust MCP conformance test server"))
+    }
+
+    async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+        Ok(())
+    }
+
+    async fn list_tools(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let mcp_call_validator = AuthorizedCallValidator::new("list_tools", &cx);
+        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+
+        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+
+        let list_tools_tasks = backend_transports
+            .into_iter()
+            .map(|service_holder| {
+                let request = request.clone();
+                async move {
+                    if let Some(service) = service_holder.running_service {
+                        let response = service.list_tools(request).await;
+                        (service_holder.name, Some(service), Some(response))
+                    } else {
+                        (service_holder.name, None, None)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
+            futures::future::join_all(list_tools_tasks).await;
+
+        let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
+            .into_iter()
+            .map(|(name, service, response)| {
+                info!("list_tools: backend {name} {response:?}");
+                ((name.clone(), service), (name, response))
+            })
+            .unzip();
+
+        let mut transports = self.transports.lock().await;
+        for (name, svc) in backend_services {
+            transports.entry(BackendTransportKey::from((&name, session_id))).and_modify(|e| e.service = svc);
+        }
+        drop(transports);
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
+            .collect::<Vec<_>>();
+
+        let merged_list_tools = merge_tools(responses);
+
+        Ok(ListToolsResult { meta: None, tools: merged_list_tools, next_cursor: None })
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
+        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+
+        let backend_names = session_manager.get_backend_names();
+
+        let Some(BackendToolPair { backend_name, tool_name }) = split_tool_name(&request.name, &backend_names) else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... wrong tool name".into(),
+                data: None,
+            });
+        };
+
+        let backend_transports = session_manager.borrow_transports().await;
+        info!("Borrowed transports {session_id:?} {backend_transports:?}");
+
+        let (services, call_tool_tasks): (Vec<_>, Vec<_>) = backend_transports
+            .into_iter()
+            .map(|service_holder| {
+                debug!(
+                    "call_tool: Finding backend for {} {service_holder:?} {backend_name} tool_name = {tool_name}",
+                    &request.name,
+
+                );
+                if service_holder.name == backend_name {
+                    let mut request = request.clone();
+                    request.name = tool_name.to_owned().into();
+                    (
+                        None,
+                        Some(async move {
+                            if let Some(service) = service_holder.running_service {
+                                let response = service.call_tool(request).await;
+
+                                (service_holder.name, Some(service), Some(response))
+                            } else {
+                                warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} tool_name = {tool_name}");
+                                (service_holder.name, None, None)
+                            }
+                        }),
+                    )
+                } else {
+                    (Some(service_holder), None)
+                }
+            })
+            .unzip();
+
+        let call_tool_tasks = call_tool_tasks.into_iter().flatten().collect::<Vec<_>>();
+        if call_tool_tasks.len() > 1 {
+            warn!("call_tool: More than one tool matching for tool name {}", request.name);
+
+            session_manager.cleanup_backends("call_tool: invalid session.. duplicate tools detected").await;
+
+            return Err(ErrorData {
+                code: ErrorCode::INVALID_REQUEST,
+                message: "Routing problem... multiple matching tools".into(),
+                data: None,
+            });
+        }
+
+        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> =
+            futures::future::join_all(call_tool_tasks).await;
+
+        let (backend_services, responses): (Vec<_>, Vec<_>) = call_tool_tasks_results
+            .into_iter()
+            .map(|(name, service, response)| {
+                info!("call_tool: backend {name} {response:?}");
+                (ServiceHolder::new(name.clone(), service), (name, response))
+            })
+            .unzip();
+
+        session_manager.return_transports(backend_services.into_iter().chain(services.into_iter().flatten())).await;
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
+            .collect::<Vec<_>>();
+
+        responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... got no responses from backends".into(),
+            data: None,
+        })
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("list_resources user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        Ok(ListResourcesResult {
+            meta: None,
+            resources: vec![
+                RawResource {
+                    uri: "test://static-text".into(),
+                    name: "Static Text Resource".into(),
+                    title: None,
+                    description: Some("A static text resource for testing".into()),
+                    mime_type: Some("text/plain".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                }
+                .no_annotation(),
+                RawResource {
+                    uri: "test://static-binary".into(),
+                    name: "Static Binary Resource".into(),
+                    title: None,
+                    description: Some("A static binary/blob resource for testing".into()),
+                    mime_type: Some("image/png".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                }
+                .no_annotation(),
+            ],
+            next_cursor: None,
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("read_resource user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let uri = request.uri.as_str();
+        match uri {
+            "test://static-text" => Ok(ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
+                uri: uri.into(),
+                mime_type: Some("text/plain".into()),
+                text: "This is the content of the static text resource.".into(),
+                meta: None,
+            }])),
+            "test://static-binary" => Ok(ReadResourceResult::new(vec![ResourceContents::BlobResourceContents {
+                uri: uri.into(),
+                mime_type: Some("image/png".into()),
+                blob: TEST_IMAGE_DATA.into(),
+                meta: None,
+            }])),
+            _ => {
+                if uri.starts_with("test://template/") && uri.ends_with("/data") {
+                    let id =
+                        uri.strip_prefix("test://template/").and_then(|s| s.strip_suffix("/data")).unwrap_or("unknown");
+                    Ok(ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
+                        uri: uri.into(),
+                        mime_type: Some("application/json".into()),
+                        text: format!(r#"{{"id":"{id}","templateTest":true,"data":"Data for ID: {id}"}}"#),
+                        meta: None,
+                    }]))
+                } else {
+                    Err(ErrorData::resource_not_found(format!("Resource not found: {uri}"), None))
+                }
+            },
+        }
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("list_resource_templates user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        Ok(ListResourceTemplatesResult {
+            meta: None,
+            resource_templates: vec![
+                RawResourceTemplate {
+                    uri_template: "test://template/{id}/data".into(),
+                    name: "Dynamic Resource".into(),
+                    title: None,
+                    description: Some("A dynamic resource with parameter substitution".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                }
+                .no_annotation(),
+            ],
+            next_cursor: None,
+        })
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("subscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+
+        let mut subs = self.subscriptions.lock().await;
+        subs.insert(request.uri.clone());
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("unsubscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+
+        let mut subs = self.subscriptions.lock().await;
+        subs.remove(request.uri.as_str());
+        Ok(())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("list_prompts user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+
+        Ok(ListPromptsResult {
+            meta: None,
+            prompts: vec![
+                Prompt::new("test_simple_prompt", Some("A simple test prompt with no arguments"), None),
+                Prompt::new(
+                    "test_prompt_with_arguments",
+                    Some("A test prompt that accepts arguments"),
+                    Some(vec![
+                        PromptArgument::new("name").with_description("The name to greet").with_required(true),
+                        PromptArgument::new("style").with_description("The greeting style").with_required(false),
+                    ]),
+                ),
+                Prompt::new(
+                    "test_prompt_with_embedded_resource",
+                    Some("A test prompt that includes an embedded resource"),
+                    None,
+                ),
+                Prompt::new("test_prompt_with_image", Some("A test prompt that includes an image"), None),
+            ],
+            next_cursor: None,
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("get_prompt user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        match request.name.as_str() {
+            "test_simple_prompt" => Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+                PromptMessageRole::User,
+                "This is a simple test prompt.",
+            )])
+            .with_description("A simple test prompt")),
+            "test_prompt_with_arguments" => {
+                let args = request.arguments.unwrap_or_default();
+                let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("World");
+                let style = args.get("style").and_then(|v| v.as_str()).unwrap_or("friendly");
+                Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    format!("Please greet {name} in a {style} style."),
+                )])
+                .with_description("A prompt with arguments"))
+            },
+            "test_prompt_with_embedded_resource" => Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(PromptMessageRole::User, "Here is a resource:"),
+                PromptMessage::new_resource(
+                    PromptMessageRole::User,
+                    "test://static-text".into(),
+                    Some("text/plain".into()),
+                    Some("Resource content for prompt".into()),
+                    None,
+                    None,
+                    None,
+                ),
+            ])
+            .with_description("A prompt with an embedded resource")),
+            "test_prompt_with_image" => {
+                let image_content =
+                    RawImageContent { data: TEST_IMAGE_DATA.into(), mime_type: "image/png".into(), meta: None };
+                Ok(GetPromptResult::new(vec![
+                    PromptMessage::new_text(PromptMessageRole::User, "Here is an image:"),
+                    PromptMessage::new(
+                        PromptMessageRole::User,
+                        PromptMessageContent::Image { image: image_content.no_annotation() },
+                    ),
+                ])
+                .with_description("A prompt with an image"))
+            },
+            _ => Err(ErrorData::invalid_params(format!("Unknown prompt: {}", request.name), None)),
+        }
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        cx: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("complete user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let values = match &request.r#ref {
+            Reference::Resource(_) => {
+                if request.argument.name == "id" {
+                    vec!["1".into(), "2".into(), "3".into()]
+                } else {
+                    vec![]
+                }
+            },
+            Reference::Prompt(prompt_ref) => {
+                if request.argument.name == "name" {
+                    vec!["Alice".into(), "Bob".into(), "Charlie".into()]
+                } else if request.argument.name == "style" {
+                    vec!["friendly".into(), "formal".into(), "casual".into()]
+                } else {
+                    vec![prompt_ref.name.clone()]
+                }
+            },
+        };
+        Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| ErrorData::internal_error(e, None))?))
+    }
+
+    async fn set_level(&self, request: SetLevelRequestParams, cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+        let maybe_parts = cx.extensions.get::<Parts>();
+        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
+        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        info!("set_level user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mut level = self.log_level.lock().await;
+        *level = request.level;
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+struct BackendToolPair<'a> {
+    backend_name: &'a str,
+    tool_name: &'a str,
+}
+
+fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
+    tool_name: &'a T,
+    backend_names: &'a [N],
+) -> Option<BackendToolPair<'a>> {
+    for name in backend_names {
+        let tool_name = tool_name.as_ref();
+        let name = name.as_ref();
+        let extended_name = name.to_owned() + "-";
+        if tool_name.starts_with(&extended_name) {
+            return Some(BackendToolPair { backend_name: name, tool_name: &tool_name[extended_name.len()..] });
+        }
+    }
+    None
+}
+
+const TEST_IMAGE_DATA: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+// Small base64-encoded WAV (silence)
+
+fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
+    ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().enable_logging().build()
+}
+
+fn merge_tools(server_capabilities: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
+    server_capabilities
+        .into_iter()
+        .flat_map(|(backend_name, result)| {
+            result
+                .tools
+                .into_iter()
+                .map(|mut t| {
+                    t.name = format!("{backend_name}-{}", t.name).into();
+                    t
+                })
+                .collect::<Vec<_>>()
+        })
+        .sorted_by(|t, o| t.name.cmp(&o.name))
+        .collect::<Vec<_>>()
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_splitting() {
+        let tool_name = "counter-one-increment";
+        let backend_names = vec!["counter-on", "counter-oneee", "counter-one"];
+        let pair = BackendToolPair { backend_name: "counter-one", tool_name: "increment" };
+        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        let tool_name = "counter-oneincrement";
+        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
+        let tool_name = "counteroneincrement";
+        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
+        let tool_name = "counter-one-get-value";
+        let pair = BackendToolPair { backend_name: "counter-one", tool_name: "get-value" };
+        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+
+        let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
+        let tool_name = "counter_one-get-value";
+        let pair = BackendToolPair { backend_name: "counter_one", tool_name: "get-value" };
+        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+    }
+}

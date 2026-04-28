@@ -1,4 +1,4 @@
-//mod inmemory_config_store;
+mod local_session_store;
 mod redis_session_store;
 
 use std::sync::Arc;
@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 //pub use inmemory_config_store::InMemoryUserSessionStore;
+pub use local_session_store::LocalUserSessionStore;
 pub use redis_session_store::RedisUserSessionStore;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -32,8 +33,8 @@ impl SessionMapping {
     pub fn new() -> Self {
         Self { session_mapping: vec![] }
     }
-    pub fn push(&mut self, host: String, upstream_session: Option<Arc<str>>) {
-        self.session_mapping.push(SessionMap { upstream_session_id: upstream_session.clone(), backend_name: host });
+    pub fn push(&mut self, host: String, upstream_session: Option<&Arc<str>>) {
+        self.session_mapping.push(SessionMap { upstream_session_id: upstream_session.cloned(), backend_name: host });
     }
 
     pub fn get<'a>(&'a self, host: &'a str) -> Option<&'a SessionMap> {

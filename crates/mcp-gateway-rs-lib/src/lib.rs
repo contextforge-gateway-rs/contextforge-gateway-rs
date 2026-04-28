@@ -7,10 +7,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rmcp::transport::{
     StreamableHttpServerConfig,
     streamable_http_server::{
-        session::{
-            local::LocalSessionManager,
-            remote::{RedisSessionStore, RemoteSessionManager},
-        },
+        session::{local::LocalSessionManager, remote::RedisSessionStore},
         tower::StreamableHttpService,
     },
 };
@@ -31,7 +28,7 @@ use tracing::info;
 
 use crate::{
     common::{MCP_AUDIENCE, McpGatewayAppState, RedisClient, RedisConfig},
-    gateway::RedisUserSessionStore,
+    gateway::{LocalUserSessionStore, RedisUserSessionStore},
     layers::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
@@ -47,16 +44,19 @@ pub async fn run_gateway(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let redis_config = RedisConfig::try_from(&config)?;
     let redis_client = RedisClient::open(redis_config)?;
-    let redis_user_session_store = RedisUserSessionStore::new(redis_client.clone());
+    let user_session_store = LocalUserSessionStore::new();
+    //let user_session_store = RedisUserSessionStore::new(redis_client.clone());
     let redis_session_store = RedisSessionStore::new(redis_client.clone());
 
+    let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
+
     // Create streamable HTTP service
-    let mcp_service: StreamableHttpService<McpService<RedisUserSessionStore>, LocalSessionManager> =
+    let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
         StreamableHttpService::new(
-            move || Ok(McpService::with_stores(redis_user_session_store.clone())),
+            move || Ok(McpService::with_stores(user_session_store.clone())),
             //Arc::new(LORemoteSessionManager::new(redis_session_store)),
             local_session_manager,
-            StreamableHttpServerConfig::default(),
+            streamable_config,
         );
 
     let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);

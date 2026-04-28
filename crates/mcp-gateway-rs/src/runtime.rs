@@ -1,8 +1,8 @@
+use mcp_gateway_rs_lib::Config;
 use tokio::{
     io,
-    runtime::{Builder, Handle, LocalOptions, LocalRuntime, Runtime},
+    runtime::{Builder, Runtime},
 };
-use tracing::info;
 
 #[derive(Debug)]
 pub struct RuntimeBuilder<'a> {
@@ -12,6 +12,16 @@ pub struct RuntimeBuilder<'a> {
     event_interval: Option<u32>,
     max_io_events_per_tick: Option<usize>,
     thread_name: &'a str,
+}
+
+impl<'b> From<&'b Config> for RuntimeBuilder<'_> {
+    fn from(config: &'b Config) -> Self {
+        Self {
+            single_threaded: config.single_runtime.unwrap_or_default(),
+            number_of_threads: config.number_of_cpus.unwrap_or(num_cpus::get()),
+            ..Default::default()
+        }
+    }
 }
 
 pub enum RuntimeType {
@@ -24,24 +34,22 @@ impl Default for RuntimeBuilder<'_> {
         Self {
             single_threaded: true,
             number_of_threads: num_cpus::get(),
-            global_queue_interval: Default::default(),
-            event_interval: Default::default(),
-            max_io_events_per_tick: Default::default(),
+            global_queue_interval: Option::default(),
+            event_interval: Option::default(),
+            max_io_events_per_tick: Option::default(),
             thread_name: "mcp-gateway-rs-runtime",
         }
     }
 }
 
-impl<'a> RuntimeBuilder<'a> {
+impl RuntimeBuilder<'_> {
     pub fn build(self) -> RuntimeType {
         if self.single_threaded {
             RuntimeType::SingleThreaded(
                 (0..self.number_of_threads)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, j)| {
+                    .map(|i| {
                         let mut builder = Builder::new_current_thread();
-                        let builder = builder.enable_all().name(self.thread_name);
+                        let builder = builder.enable_all().name(format!("{}{}", self.thread_name, i));
                         let builder = if let Some(global_queue_interval) = self.global_queue_interval {
                             builder.global_queue_interval(global_queue_interval)
                         } else {
