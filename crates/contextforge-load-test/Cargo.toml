@@ -1,5 +1,5 @@
 [package]
-name = "mcp-load-test"
+name = "contextforge-load-test"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,8 +7,8 @@ license-file.workspace = true
 keywords.workspace = true
 homepage.workspace = true
 readme.workspace = true
-license.workspace = true
 repository.workspace = true
+
 
 
 [dependencies]

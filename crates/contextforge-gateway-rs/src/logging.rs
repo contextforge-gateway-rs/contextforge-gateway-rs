@@ -9,19 +9,19 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
-use mcp_gateway_rs_lib::Config;
+use contextforge_gateway_rs_lib::Config;
 
 #[allow(dead_code)]
 pub enum Guard {
     Appender(WorkerGuard),
 }
 
-const CONTROLLER_NAME: &str = "MCP-GATEWAY-RS";
+const CONTROLLER_NAME: &str = "CONTEXTFORGE-GATEWAY-RS";
 
 pub fn init_tracing_logging(configuration: &Config) -> Guard {
     let registry = Registry::default();
 
-    let file_appender = tracing_appender::rolling::never(".", "mcp-gateway-rs.log");
+    let file_appender = tracing_appender::rolling::never(".", "contextforge-gateway-rs.log");
     let (non_blocking_appender, guard) = tracing_appender::non_blocking(file_appender);
     let file_filter =
         tracing_subscriber::EnvFilter::new(std::env::var("RUST_FILE_LOG").unwrap_or_else(|_| "debug".to_owned()));

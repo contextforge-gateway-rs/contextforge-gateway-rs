@@ -4,8 +4,7 @@ mod runtime;
 use std::{sync::Arc, thread};
 
 use clap::Parser;
-
-use mcp_gateway_rs_lib::Config;
+use contextforge_gateway_rs_lib::Config;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use tracing::{debug, error, info, warn};
 
@@ -40,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         thread::Builder::new().name("mcp-gateway-rs".to_owned()).spawn(move || {
                             r.block_on(async {
                                 tokio::select! {
-                                    res = mcp_gateway_rs_lib::run_gateway(config,local_session_manager) => {
+                                    res = contextforge_gateway_rs_lib::run_gateway(config,local_session_manager) => {
                                         if res.is_ok(){
                                             debug!("Gateway process terminated");
                                         }else{
@@ -69,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             if let Ok(runtime) = runtime {
                 runtime.block_on(async {
                     tokio::select! {
-                        _ = mcp_gateway_rs_lib::run_gateway(config,local_session_manager) => {
+                        _ = contextforge_gateway_rs_lib::run_gateway(config,local_session_manager) => {
                         info!("Gateway Runtime Terminated!");
                         }
                     }

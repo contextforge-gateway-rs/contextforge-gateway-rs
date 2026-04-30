@@ -1,9 +1,9 @@
 #version: "3.9"          # Supported by both podman-compose and Docker Compose v2+
 name: mcp-gateway-rs
-  
 
 networks:
-  mcp-gateway-net:               # Single user-defined bridge network keeps traffic private
+  mcp-gateway-net:
+    # Single user-defined bridge network keeps traffic private
     driver: bridge
 
 ###############################################################################
@@ -17,10 +17,10 @@ services:
   nginx:
     image: nginx:latest
     restart: unless-stopped
-    
+
     ports:
-       - "8080:80"       
-    networks: [mcp-gateway-net]
+      - "8080:80"
+    networks: [contextforge-gateway-net]
     dns:
       - 127.0.0.11
     command: [nginx, '-g', 'daemon off;']
@@ -51,26 +51,24 @@ services:
           cpus: '2'
           memory: 512M
 
-
   # ──────────────────────────────────────────────────────────────────────
   # mcp-gateway-rs
-  # 
-  # 
+  #
+  #
   # ──────────────────────────────────────────────────────────────────────
 
   mcp-gateway-rs:
-    image: ghcr.io/mcp-gateway-rs:latest
-    networks: [mcp-gateway-net]
-
+    image: ghcr.io/contextforge-gateway-rs:latest
+    networks: [contextforge-gateway-net]
 
     environment:
-      - MCP_GATEWAY_RS_ADDRESS=0.0.0.0:4445
-      - MCP_GATEWAY_RS_REDIS_HOSTNAME=redis
-      - MCP_GATEWAY_RS_REDIS_PORT=6379
-      - MCP_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
-      - MCP_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
+      - CONTEXTFORGE_GATEWAY_RS_ADDRESS=0.0.0.0:4445
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
+      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
+      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
-            
+
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -83,10 +81,19 @@ services:
       redis:
         condition: service_started
 
-
     healthcheck:
       ## Uncomment for HTTP healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; import json; resp = urllib.request.urlopen('http://localhost:4445/mcp-rs/health', timeout=5); data = json.loads(resp.read()); print(data.get('status') == 'healthy'); exit(0 if data.get('status') == 'healthy' else 1)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; import json; resp =
+            urllib.request.urlopen('http://localhost:4445/contextforge-rs/healt\
+            h', timeout=5); data = json.loads(resp.read());
+            print(data.get('status') == 'healthy'); exit(0 if data.get('status')
+            == 'healthy' else 1)",
+        ]
 
       interval: 30s
       timeout: 10s
@@ -111,21 +118,19 @@ services:
     volumes:
       - ../assets/:/keys:z # mount catalog configuration
 
-
-  mcp-gateway-one:
-    image: ghcr.io/mcp-gateway-rs:latest
-    networks: [mcp-gateway-net]
+  contextforge-gateway-one:
+    image: ghcr.io/contextforge-gateway-rs:latest
+    networks: [contextforge-gateway-net]
     ports: [5551:4445]
 
-
     environment:
-      - MCP_GATEWAY_RS_ADDRESS=0.0.0.0:4445
-      - MCP_GATEWAY_RS_REDIS_HOSTNAME=redis
-      - MCP_GATEWAY_RS_REDIS_PORT=6379
-      - MCP_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
-      - MCP_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
+      - CONTEXTFORGE_GATEWAY_RS_ADDRESS=0.0.0.0:4445
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
+      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
+      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
-            
+
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -137,7 +142,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-
 
     deploy:
       resources:
@@ -155,20 +159,19 @@ services:
     volumes:
       - ../assets/:/keys:z # mount catalog configuration
 
-  mcp-gateway-two:
-    image: ghcr.io/mcp-gateway-rs:latest
-    networks: [mcp-gateway-net]
+  contextforge-gateway-two:
+    image: ghcr.io/contextforge-gateway-rs:latest
+    networks: [contextforge-gateway-net]
     ports: [5552:4445]
 
-
     environment:
-      - MCP_GATEWAY_RS_ADDRESS=0.0.0.0:4445
-      - MCP_GATEWAY_RS_REDIS_HOSTNAME=redis
-      - MCP_GATEWAY_RS_REDIS_PORT=6379
-      - MCP_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
-      - MCP_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
+      - CONTEXTFORGE_GATEWAY_RS_ADDRESS=0.0.0.0:4445
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
+      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
+      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
-            
+
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -180,7 +183,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-
 
     deploy:
       resources:
@@ -196,12 +198,7 @@ services:
     # ──────────────────────────────────────────────────────────────────────
     # Mount catalog configuration and SSL certificates
     volumes:
-      - ../assets/:/keys:z # mount catalog configuration      
-
-
-      
-
-
+      - ../assets/:/keys:z # mount catalog configuration
 
   mcp-counter-tool-one:
     image: ghcr.io/mcp-counter-tool:latest
@@ -210,7 +207,7 @@ services:
 
     environment:
       - RUST_LOG=debug
-            
+
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -223,7 +220,7 @@ services:
       redis:
         condition: service_started
 
-    deploy:      
+    deploy:
       resources:
         limits:
           cpus: '${GATEWAY_CPU_LIMIT:-8}'
@@ -239,7 +236,7 @@ services:
 
     environment:
       - RUST_LOG=debug
-            
+
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -252,23 +249,18 @@ services:
       redis:
         condition: service_started
 
-    deploy:      
+    deploy:
       resources:
         limits:
           cpus: '${GATEWAY_CPU_LIMIT:-8}'
           memory: ${GATEWAY_MEM_LIMIT:-8G}
         reservations:
           cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}          
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}
 
-
-    
-
-
-
-###############################################################################
-#  CACHE
-###############################################################################
+  ###############################################################################
+  #  CACHE
+  ###############################################################################
   redis:
     image: redis:latest
     ulimits:
@@ -291,7 +283,7 @@ services:
       - "--maxclients"
       - "10000"
     ports:
-      - "6379:6379"      # expose only if you want host access
+      - "6379:6379" # expose only if you want host access
     networks: [mcp-gateway-net]
     deploy:
       resources:
@@ -301,4 +293,3 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
-

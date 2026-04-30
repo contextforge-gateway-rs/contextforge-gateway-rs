@@ -6,7 +6,7 @@ use tower::Service;
 use tower_layer::Layer;
 use tracing::info;
 
-use crate::common::MCP_SESSION_ID;
+use crate::const_values::MCP_SESSION_ID;
 
 #[derive(Debug, Clone)]
 pub struct SessionIdLayer;
@@ -51,9 +51,7 @@ where
         if let Some(session_id_header_value) = maybe_session {
             info!("MCP Session ID {:?}", session_id_header_value.to_str());
             if let Ok(session_id) = session_id_header_value.to_str() {
-                request.extensions_mut().insert(SessionId {
-                    value: session_id.to_owned(),
-                });
+                request.extensions_mut().insert(SessionId { value: session_id.to_owned() });
             }
         }
 

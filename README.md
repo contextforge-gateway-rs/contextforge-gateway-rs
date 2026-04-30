@@ -1,4 +1,4 @@
-# MCP Gateway
+# ContextForge Dataplane
 
 
 ## Running
@@ -11,7 +11,7 @@
 3. Get a test JWT token
 ```bash
 curl --request GET \
-  --url http://127.0.0.1:8001/mcp-rs/admin/tokens/admin@example.com \
+  --url http://127.0.0.1:8001/contextforge-rs/admin/tokens/admin@example.com \
   --header 'accept: application/json' \  
   --header 'content-type: application/json'
 ```
@@ -19,7 +19,7 @@ curl --request GET \
 4. Use the token to add a test user to Redis
 ```bash
 curl --request POST \
-  --url http://127.0.0.1:8001/mcp-rs/admin/userconfigs/admin@example.com \
+  --url http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/admin@example.com \
   --header 'authorization: Bearer {{token}}' \
   --header 'content-type: application/json' \
   --data '{
@@ -38,6 +38,3 @@ curl --request POST \
 5. Start backend service 
 
 6. Spin up MCP Inspector to test the calls
-
-
-

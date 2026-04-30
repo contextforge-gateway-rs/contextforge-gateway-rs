@@ -1,4 +1,4 @@
-use mcp_gateway_rs_lib::Config;
+use contextforge_gateway_rs_lib::Config;
 use tokio::{
     io,
     runtime::{Builder, Runtime},

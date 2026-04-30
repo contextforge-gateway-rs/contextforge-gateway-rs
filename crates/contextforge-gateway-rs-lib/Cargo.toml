@@ -1,6 +1,6 @@
 
 [package]
-name = "mcp-gateway-rs-lib"
+name = "contextforge-gateway-rs-lib"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -27,7 +27,8 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 use crate::{
-    common::{MCP_AUDIENCE, McpGatewayAppState, RedisClient, RedisConfig},
+    common::{ContextForgeGatewayAppState, RedisClient, RedisConfig},
+    const_values::CONEXT_FORGE_GATEWAY_AUDIENCE,
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
@@ -62,13 +63,13 @@ pub async fn run_gateway(
     let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
     let mut validation = Validation::new(Algorithm::RS256);
-    validation.set_audience(&[MCP_AUDIENCE]);
+    validation.set_audience(&[CONEXT_FORGE_GATEWAY_AUDIENCE]);
 
     let local_docoder = LocalDecoder::builder()
         .keys(vec![DecodingKey::from_rsa_pem(&fs::read(&config.token_verification_public_key)?)?])
         .validation(validation)
         .build()?;
-    let mcp_add_state = McpGatewayAppState {
+    let mcp_add_state = ContextForgeGatewayAppState {
         jwt_token_decoder: Arc::new(local_docoder),
         config_store: Arc::new(RedisUserConfigStore::new(redis_client)),
         config: config.clone(),
@@ -87,7 +88,7 @@ pub async fn run_gateway(
 
     let app = app.with_state(mcp_add_state);
 
-    let app = axum::Router::new().nest("/mcp-rs", app);
+    let app = axum::Router::new().nest("/contextforge-rs", app);
 
     let listener = Tcp::new(config.address);
 

@@ -8,7 +8,7 @@ pub const INITIALIZE_MCP_SESSION: &str = r#"{"method":"initialize","params":{"pr
 pub const NOTIFY_MCP_SESSION: &str = r#"{"method":"notifications/initialized","jsonrpc":"2.0"}"#;
 //pub const COUNTER_ONE_INC: &'static str = r#"{"method":"tools/call","params":{"name":"increment","arguments":{},"_meta":{"progressToken":1}},"jsonrpc":"2.0","id":5}"#;
 pub const COUNTER_ONE_INC: &str = r#"{"method":"tools/call","params":{"name":"counter-one-increment","arguments":{},"_meta":{"progressToken":1}},"jsonrpc":"2.0","id":1}"#;
-pub const MCP_ENDPOINT: &str = "/mcp-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp";
+pub const MCP_ENDPOINT: &str = "/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp";
 //pub const MCP_ENDPOINT: &'static str = "/mcp";
 //pub const MCP_ENDPOINT: &'static str = "/servers/b97eaa969a39421685be13ce5fa06207/mcp";
 
@@ -19,7 +19,7 @@ struct Session {
 }
 
 async fn get_token(user: &mut GooseUser) -> TransactionResult {
-    let response = match user.get("/mcp-rs/admin/tokens/admin@example.com").await?.response {
+    let response = match user.get("/contextforge-rs/admin/tokens/admin@example.com").await?.response {
         Ok(r) => match r.text().await {
             Ok(j) => j,
             Err(e) => return Err(Box::new(e.into())),
@@ -193,7 +193,7 @@ async fn all_session(user: &mut GooseUser) -> TransactionResult {
 async fn main() -> Result<(), GooseError> {
     GooseAttack::initialize()?
         .register_scenario(
-            scenario!("MCPCounter")
+            scenario!("ContextForgeMCPCounter")
                 .register_transaction(transaction!(get_token).set_on_start())
                 .register_transaction(transaction!(all_session).set_name("All sessions").set_sequence(1)),
             // .register_transaction(transaction!(initialize_session).set_name("MCP Init").set_sequence(1))

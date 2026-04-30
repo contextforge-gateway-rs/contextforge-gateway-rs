@@ -5,16 +5,16 @@ use openid::Claims;
 use tracing::{debug, info, warn};
 
 use crate::{
-    common::{McpGatewayAppState, McpGatewayClaims},
+    common::{ContextForgeGatewayAppState, ContextForgeGatewayClaims},
     user_config_store::{ConfigStoreError, User},
 };
 
 pub async fn user_config_store_layer(
-    State(state): State<McpGatewayAppState>,
+    State(state): State<ContextForgeGatewayAppState>,
     mut request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    let maybe_claims = request.extensions().get::<McpGatewayClaims>();
+    let maybe_claims = request.extensions().get::<ContextForgeGatewayClaims>();
     if let Some(claims) = maybe_claims {
         let subject = claims.standard_claims.sub();
         debug!("Getting user config for {subject}");

@@ -17,7 +17,8 @@ use std::fs;
 use url::Url;
 
 use crate::{
-    common::{MCP_AUDIENCE, McpGatewayAppState},
+    common::ContextForgeGatewayAppState,
+    const_values::CONEXT_FORGE_GATEWAY_AUDIENCE,
     user_config_store::{User, UserConfig},
 };
 
@@ -34,7 +35,7 @@ struct DefaultClaims {
 impl DefaultClaims {
     fn new(user_id: String) -> Self {
         let url = "http://mcp-gateway-rs".parse().expect("Expecting this to work");
-        let audience = MCP_AUDIENCE.to_owned();
+        let audience = CONEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
         let user_info = openid::Userinfo { sub: user_id.clone(), ..Default::default() };
         Self {
             iss: url,
@@ -48,7 +49,7 @@ impl DefaultClaims {
     }
 }
 
-pub fn add_tools(router: Router<McpGatewayAppState>) -> Router<McpGatewayAppState> {
+pub fn add_tools(router: Router<ContextForgeGatewayAppState>) -> Router<ContextForgeGatewayAppState> {
     router
         .route("/admin/tokens/{user_id}", get(get_token))
         .route("/admin/userconfigs/{user_id}", post(configure_user))
@@ -63,7 +64,7 @@ pub async fn health() -> Response {
         .expect("Expecting this to work")
 }
 
-pub async fn get_token(State(state): State<McpGatewayAppState>, Path(user_id): Path<String>) -> Response {
+pub async fn get_token(State(state): State<ContextForgeGatewayAppState>, Path(user_id): Path<String>) -> Response {
     let key = EncodingKey::from_rsa_pem(
         &fs::read(&state.config.token_verification_private_key).expect("Expecting this to work"),
     )
@@ -81,7 +82,7 @@ pub async fn get_token(State(state): State<McpGatewayAppState>, Path(user_id): P
 //#[debug_handler]
 pub async fn configure_user(
     Path(user_id): Path<String>,
-    State(state): State<McpGatewayAppState>,
+    State(state): State<ContextForgeGatewayAppState>,
     Json(user_config): Json<UserConfig>,
 ) -> Response {
     if state.config_store.set_config(&User::new(&user_id), &user_config).await.is_ok() {

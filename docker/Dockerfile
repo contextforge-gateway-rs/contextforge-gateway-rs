@@ -5,9 +5,9 @@ RUN <<EOF
 apt update
 apt install -y git ca-certificates protobuf-compiler
 git config --global http.sslVerify false
-git clone https://github.com/mcp-gateway-rs/mcp-gateway-rs
+git clone https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 EOF
-WORKDIR /tmp/mcp-gateway-rs
+WORKDIR /tmp/contextforge-gateway-rs
 COPY .cargo/config.toml ./.cargo/config.toml
 RUN \
     --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
@@ -26,7 +26,7 @@ apt install -y python3
 EOF
 
 WORKDIR /
-COPY --from=builder /tmp/mcp-gateway-rs/target/release/mcp-gateway-rs /mcp-gateway-rs
-LABEL org.opencontainers.image.source=https://github.com/mcp-gateway-rs/mcp-gateway-rs
-LABEL org.opencontainers.image.description="Mcp-gateway-rs - open source highly experimental MCP Gateway  in Rust."
-ENTRYPOINT ["/mcp-gateway-rs"]
+COPY --from=builder /tmp/contextforge-gateway-rs/target/release/contextforge-gateway-rs /contextforge-gateway-rs
+LABEL org.opencontainers.image.source=https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
+LABEL org.opencontainers.image.description="Mcp-gateway-rs - open source highly experimental dataplane for Contextforge Gateway."
+ENTRYPOINT ["/contextforge-gateway-rs"]

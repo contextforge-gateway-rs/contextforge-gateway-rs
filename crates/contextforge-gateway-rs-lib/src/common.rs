@@ -12,38 +12,33 @@ use thiserror::Error;
 
 use crate::user_config_store::UserConfigStore;
 
-pub const MCP_AUDIENCE: &str = "mcp-audience";
-pub const MCP_SESSION_ID: &str = "mcp-session-id";
-
 #[derive(Clone)]
-pub struct McpGatewayAppState {
-    pub(crate) jwt_token_decoder: Arc<dyn JwtDecoder<McpGatewayClaims> + Send + Sync>,
+pub struct ContextForgeGatewayAppState {
+    pub(crate) jwt_token_decoder: Arc<dyn JwtDecoder<ContextForgeGatewayClaims> + Send + Sync>,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
     pub(crate) config: Config,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct McpGatewayClaims {
+pub struct ContextForgeGatewayClaims {
     pub additional_claim: Option<String>,
     #[serde(flatten)]
     pub standard_claims: StandardClaims,
 }
 
-impl CustomClaims for McpGatewayClaims {
+impl CustomClaims for ContextForgeGatewayClaims {
     fn standard_claims(&self) -> &StandardClaims {
         &self.standard_claims
     }
 }
 
-impl CompactJson for McpGatewayClaims {}
+impl CompactJson for ContextForgeGatewayClaims {}
 
 pub type RedisClient = redis::Client;
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Debug, Clone)]
 pub struct RedisConfig {
-    #[arg(long, env = "MCP_GATEWAY_RS_REDIS_HOSTNAME")]
     address: String,
-    #[arg(long, env = "MCP_GATEWAY_RS_REDIS_PORT")]
     port: u16,
 }
 
@@ -57,27 +52,27 @@ impl IntoConnectionInfo for RedisConfig {
 #[command(name = "mcp-gateway-rs")]
 #[command(about = "Minimal, fast and experimental MCP Gateway")]
 pub struct Config {
-    #[arg(long, env = "MCP_GATEWAY_RS_ADDRESS")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ADDRESS")]
     pub address: SocketAddr,
-    #[arg(long, env = "MCP_GATEWAY_RS_REDIS_HOSTNAME")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME")]
     pub redis_address: String,
-    #[arg(long, env = "MCP_GATEWAY_RS_REDIS_PORT")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_PORT")]
     pub redis_port: u16,
 
-    #[arg(long, env = "MCP_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY")]
     pub token_verification_public_key: PathBuf,
 
     #[cfg(feature = "with_tools")]
-    #[arg(long, env = "MCP_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY")]
     pub token_verification_private_key: PathBuf,
 
-    #[arg(long, env = "MCP_GATEWAY_ENABLE_OPEN_TELEMETRY")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY")]
     pub enable_open_telemetry: Option<bool>,
 
-    #[arg(long, env = "MCP_GATEWAY_CPUS")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_GATEWAY_CPUS")]
     pub number_of_cpus: Option<usize>,
 
-    #[arg(long, env = "MCP_GATEWAY_SINGLE_RUNTIME")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_SINGLE_RUNTIME")]
     pub single_runtime: Option<bool>,
 }
 
