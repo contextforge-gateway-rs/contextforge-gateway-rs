@@ -2,21 +2,30 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use lru_cache::LruCache;
+use lru_time_cache::LruCache;
 use redis::{AsyncCommands, RedisError, cmd};
 use tokio::sync::Mutex;
 
 use super::{SessionMapping, SessionStoreError, UserSession, UserSessionStore};
-use crate::common::RedisClient;
+use crate::{
+    common::RedisClient,
+    const_values::{LRU_CACHE_ENTRIES, LRU_CACHE_EXPIRY_DURATION},
+};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RedisUserSessionStore {
     redis_client: RedisClient,
     cache: Arc<Mutex<LruCache<UserSession, SessionMapping>>>,
 }
 impl RedisUserSessionStore {
     pub fn new(redis_client: RedisClient) -> Self {
-        Self { redis_client, cache: Arc::new(Mutex::new(LruCache::new(50_000))) }
+        Self {
+            redis_client,
+            cache: Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(
+                LRU_CACHE_EXPIRY_DURATION,
+                LRU_CACHE_ENTRIES,
+            ))),
+        }
     }
 }
 

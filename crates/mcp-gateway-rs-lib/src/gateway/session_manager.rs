@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
-use super::gateway::{BackendTransportKey, BackendTransportService, ServiceHolder};
+use super::mcp_gateway::{BackendTransportKey, BackendTransportService, ServiceHolder};
 use crate::{layers::session_id::SessionId, user_config_store::VirtualHost};
 
 pub struct SessionManager<'a> {

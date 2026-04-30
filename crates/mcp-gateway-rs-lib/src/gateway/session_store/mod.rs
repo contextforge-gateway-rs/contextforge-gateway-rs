@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 //pub use inmemory_config_store::InMemoryUserSessionStore;
 pub use local_session_store::LocalUserSessionStore;
-pub use redis_session_store::RedisUserSessionStore;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SessionMap {

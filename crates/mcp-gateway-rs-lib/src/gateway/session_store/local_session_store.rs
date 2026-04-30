@@ -2,19 +2,26 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use lru_cache::LruCache;
+use lru_time_cache::LruCache;
 
 use tokio::sync::Mutex;
 
+use crate::const_values::{LRU_CACHE_ENTRIES, LRU_CACHE_EXPIRY_DURATION};
+
 use super::{SessionMapping, SessionStoreError, UserSession, UserSessionStore};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalUserSessionStore {
     cache: Arc<Mutex<LruCache<UserSession, SessionMapping>>>,
 }
 impl LocalUserSessionStore {
     pub fn new() -> Self {
-        Self { cache: Arc::new(Mutex::new(LruCache::new(50_000))) }
+        Self {
+            cache: Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(
+                LRU_CACHE_EXPIRY_DURATION,
+                LRU_CACHE_ENTRIES,
+            ))),
+        }
     }
 }
 

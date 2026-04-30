@@ -9,11 +9,14 @@ use rmcp::transport::{
     streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
 };
 mod common;
+mod const_values;
 mod gateway;
 mod layers;
 mod tcp;
+
 #[cfg(feature = "with_tools")]
 mod tools;
+
 mod user_config_store;
 use gateway::McpService;
 use layers::session_id::SessionId;
@@ -25,7 +28,7 @@ use tracing::info;
 
 use crate::{
     common::{MCP_AUDIENCE, McpGatewayAppState, RedisClient, RedisConfig},
-    gateway::{LocalUserSessionStore, RedisUserSessionStore},
+    gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,

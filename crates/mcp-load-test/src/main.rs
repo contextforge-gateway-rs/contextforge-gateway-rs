@@ -194,7 +194,7 @@ async fn main() -> Result<(), GooseError> {
     GooseAttack::initialize()?
         .register_scenario(
             scenario!("MCPCounter")
-                .register_transaction(transaction!(get_cf_token).set_on_start())
+                .register_transaction(transaction!(get_token).set_on_start())
                 .register_transaction(transaction!(all_session).set_name("All sessions").set_sequence(1)),
             // .register_transaction(transaction!(initialize_session).set_name("MCP Init").set_sequence(1))
             // .register_transaction(transaction!(counter_call).set_name("MCP Counter Call").set_sequence(2))

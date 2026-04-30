@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::mpsc::{self, Receiver};
 
 use super::mcp_call_validator::AuthorizedCallValidator;
 use http::request::Parts;
@@ -31,8 +30,8 @@ use tracing::{debug, info, warn};
 use crate::gateway::mcp_call_validator::InitializeCallValidator;
 use crate::gateway::session_manager::SessionManager;
 pub use crate::gateway::session_store::LocalUserSessionStore;
-pub use crate::gateway::session_store::RedisUserSessionStore;
-use crate::gateway::session_store::{SessionMapping, UserSession, UserSessionStore};
+
+use crate::gateway::session_store::{UserSession, UserSessionStore};
 use crate::{SessionId, user_config_store::UserConfig};
 
 #[derive(Clone)]
@@ -161,7 +160,7 @@ where
                     //(name, upstream_session_id_rx),
                     Box::pin(async move {
                         // let upstream_session_id_tx = upstream_session_id_tx.clone();
-                        let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());                        
+                        let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());
                         // config.upstream_session_id_tx = Some(upstream_session_id_tx);
                         // config.skip_init = skip_init_config;
 
@@ -177,9 +176,10 @@ where
                     })
                 //)
             }).collect();
-            //.unzip();
+        //.unzip();
         //let initialization_results : Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)>= futures::future::join_all(tasks).await;
-        let initialization_results : Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)>= futures::future::join_all(tasks).await;
+        let initialization_results: Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)> =
+            futures::future::join_all(tasks).await;
 
         let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
             .into_iter()
