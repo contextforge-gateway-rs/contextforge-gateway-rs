@@ -6,7 +6,7 @@ use super::mcp_call_validator::AuthorizedCallValidator;
 use http::request::Parts;
 use itertools::Itertools;
 use rmcp::RoleClient;
-use rmcp::model::ErrorCode;
+use rmcp::model::{ErrorCode, Resource};
 use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -17,9 +17,8 @@ use rmcp::{
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
         PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
-        RawImageContent, RawResource, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference,
-        ResourceContents, ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool,
-        UnsubscribeRequestParams,
+        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference,
+        ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
     service::RequestContext,
 };
@@ -137,8 +136,6 @@ where
             });
         };
 
-        //&String,Receiver<Option<Arc<str>>>
-        //let (downstream_session_id_channels, tasks): (Vec<(&String,Receiver<Option<Arc<str>>>)>, Vec<_>) = virtual_host
         let tasks: Vec<_> = virtual_host
             .backends
             .iter()
@@ -147,23 +144,9 @@ where
                 let request = request.clone();
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
-                // let skip_init_config =
-                //     session_mapping.get(name).map(|mapping| (mapping.session(),
-                //             HashMap::<HeaderName, HeaderValue>::new(),
-                //             None::<>));
 
-
-
-                //let (upstream_session_id_tx, upstream_session_id_rx) = mpsc::channel::<Option<Arc<str>>>(100);
-
-                //(
-                    //(name, upstream_session_id_rx),
                     Box::pin(async move {
-                        // let upstream_session_id_tx = upstream_session_id_tx.clone();
                         let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());
-                        // config.upstream_session_id_tx = Some(upstream_session_id_tx);
-                        // config.skip_init = skip_init_config;
-
                         let transport = StreamableHttpClientTransport::with_client(client, config);
                         let maybe_running_service = request.serve(transport).await;
                         if let Ok(running_service) = maybe_running_service {
@@ -176,8 +159,7 @@ where
                     })
                 //)
             }).collect();
-        //.unzip();
-        //let initialization_results : Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)>= futures::future::join_all(tasks).await;
+
         let initialization_results: Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)> =
             futures::future::join_all(tasks).await;
 
@@ -195,14 +177,6 @@ where
             })
             .unzip();
 
-        //Receiver<Option<Arc<str>>>
-        //let mut session_mapping = SessionMapping::new();
-        // for (host, mut session_id_rx) in downstream_session_id_channels {
-        //     if let Some(maybe_session_id) = session_id_rx.recv().await {
-        //         info!("initialize: host {host} got a session id {maybe_session_id:?}");
-        //         session_mapping.push(host.clone(), maybe_session_id.as_ref());
-        //     }
-        // }
         let _ = self
             .user_session_store
             .set_session(
@@ -377,41 +351,57 @@ where
 
     async fn list_resources(
         &self,
-        _request: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         cx: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("list_resources user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
-        Ok(ListResourcesResult {
-            meta: None,
-            resources: vec![
-                RawResource {
-                    uri: "test://static-text".into(),
-                    name: "Static Text Resource".into(),
-                    title: None,
-                    description: Some("A static text resource for testing".into()),
-                    mime_type: Some("text/plain".into()),
-                    size: None,
-                    icons: None,
-                    meta: None,
+        let mcp_call_validator = AuthorizedCallValidator::new("list_resources", &cx);
+        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+
+        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+
+        let list_resources_tasks = backend_transports
+            .into_iter()
+            .map(|service_holder| {
+                let request = request.clone();
+                async move {
+                    if let Some(service) = service_holder.running_service {
+                        let response = service.list_resources(request).await;
+                        (service_holder.name, Some(service), Some(response))
+                    } else {
+                        (service_holder.name, None, None)
+                    }
                 }
-                .no_annotation(),
-                RawResource {
-                    uri: "test://static-binary".into(),
-                    name: "Static Binary Resource".into(),
-                    title: None,
-                    description: Some("A static binary/blob resource for testing".into()),
-                    mime_type: Some("image/png".into()),
-                    size: None,
-                    icons: None,
-                    meta: None,
-                }
-                .no_annotation(),
-            ],
-            next_cursor: None,
-        })
+            })
+            .collect::<Vec<_>>();
+
+        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
+            futures::future::join_all(list_resources_tasks).await;
+
+        let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
+            .into_iter()
+            .map(|(name, service, response)| {
+                info!("list_resources: backend {name} {response:?}");
+                ((name.clone(), service), (name, response))
+            })
+            .unzip();
+
+        let mut transports = self.transports.lock().await;
+        for (name, svc) in backend_services {
+            transports.entry(BackendTransportKey::from((&name, session_id))).and_modify(|e| e.service = svc);
+        }
+        drop(transports);
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
+            .collect::<Vec<_>>();
+
+        let merged_list_resources = merge_resources(responses);
+
+        Ok(ListResourcesResult { meta: None, resources: merged_list_resources, next_cursor: None })
     }
 
     async fn read_resource(
@@ -419,39 +409,93 @@ where
         request: ReadResourceRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("read_resource user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
-        let uri = request.uri.as_str();
-        match uri {
-            "test://static-text" => Ok(ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
-                uri: uri.into(),
-                mime_type: Some("text/plain".into()),
-                text: "This is the content of the static text resource.".into(),
-                meta: None,
-            }])),
-            "test://static-binary" => Ok(ReadResourceResult::new(vec![ResourceContents::BlobResourceContents {
-                uri: uri.into(),
-                mime_type: Some("image/png".into()),
-                blob: TEST_IMAGE_DATA.into(),
-                meta: None,
-            }])),
-            _ => {
-                if uri.starts_with("test://template/") && uri.ends_with("/data") {
-                    let id =
-                        uri.strip_prefix("test://template/").and_then(|s| s.strip_suffix("/data")).unwrap_or("unknown");
-                    Ok(ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
-                        uri: uri.into(),
-                        mime_type: Some("application/json".into()),
-                        text: format!(r#"{{"id":"{id}","templateTest":true,"data":"Data for ID: {id}"}}"#),
-                        meta: None,
-                    }]))
+        let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
+        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+
+        let backend_names = session_manager.get_backend_names();
+
+        let Some(BackendResourcePair { backend_name, resource_uri }) =
+            split_resource_name(&request.uri, &backend_names)
+        else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... wrong resource name".into(),
+                data: None,
+            });
+        };
+
+        let backend_transports = session_manager.borrow_transports().await;
+        info!("Borrowed transports {session_id:?} {backend_transports:?}");
+
+        let (services, call_tool_tasks): (Vec<_>, Vec<_>) = backend_transports
+            .into_iter()
+            .map(|service_holder| {
+                debug!(
+                    "read_resource: Finding backend for {} {service_holder:?} {backend_name} read_resource = {resource_uri}",
+                    &request.uri,
+
+                );
+                if service_holder.name == backend_name {
+                    let mut request = request.clone();
+                    request.uri = String::from(resource_uri);
+                    (
+                        None,
+                        Some(async move {
+                            if let Some(service) = service_holder.running_service {
+                                let response = service.read_resource(request).await;
+
+                                (service_holder.name, Some(service), Some(response))
+                            } else {
+                                warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} resource_name = {resource_uri}");
+                                (service_holder.name, None, None)
+                            }
+                        }),
+                    )
                 } else {
-                    Err(ErrorData::resource_not_found(format!("Resource not found: {uri}"), None))
+                    (Some(service_holder), None)
                 }
-            },
+            })
+            .unzip();
+
+        let call_tool_tasks = call_tool_tasks.into_iter().flatten().collect::<Vec<_>>();
+        if call_tool_tasks.len() > 1 {
+            warn!("read_resource: More than one tool matching for tool name {}", request.uri);
+
+            session_manager.cleanup_backends("read_resource: invalid session.. duplicate resources detected").await;
+
+            return Err(ErrorData {
+                code: ErrorCode::INVALID_REQUEST,
+                message: "Routing problem... multiple matching resources".into(),
+                data: None,
+            });
         }
+
+        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> =
+            futures::future::join_all(call_tool_tasks).await;
+
+        let (backend_services, responses): (Vec<_>, Vec<_>) = call_tool_tasks_results
+            .into_iter()
+            .map(|(name, service, response)| {
+                info!("read_resource: backend {name} {response:?}");
+                (ServiceHolder::new(name.clone(), service), (name, response))
+            })
+            .unzip();
+
+        session_manager.return_transports(backend_services.into_iter().chain(services.into_iter().flatten())).await;
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
+            .collect::<Vec<_>>();
+
+        responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... got no responses from backends".into(),
+            data: None,
+        })
     }
 
     async fn list_resource_templates(
@@ -644,6 +688,12 @@ struct BackendToolPair<'a> {
     tool_name: &'a str,
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+struct BackendResourcePair<'a> {
+    backend_name: &'a str,
+    resource_uri: &'a str,
+}
+
 fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
     tool_name: &'a T,
     backend_names: &'a [N],
@@ -667,8 +717,8 @@ fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabiliti
     ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().enable_logging().build()
 }
 
-fn merge_tools(server_capabilities: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
-    server_capabilities
+fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
+    tools
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result
@@ -682,6 +732,42 @@ fn merge_tools(server_capabilities: Vec<(String, ListToolsResult)>) -> Vec<Tool>
         })
         .sorted_by(|t, o| t.name.cmp(&o.name))
         .collect::<Vec<_>>()
+}
+
+fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resource> {
+    resources
+        .into_iter()
+        .flat_map(|(backend_name, result)| {
+            result
+                .resources
+                .into_iter()
+                .map(|mut t| {
+                    t.name = format!("{backend_name}-{}", t.name);
+                    t.uri = format!("{backend_name}-{}", t.uri);
+                    t
+                })
+                .collect::<Vec<_>>()
+        })
+        .sorted_by(|t, o| t.name.cmp(&o.name))
+        .collect::<Vec<_>>()
+}
+
+fn split_resource_name<'a, T: AsRef<str>, N: AsRef<str>>(
+    resource_uri: &'a T,
+    backend_names: &'a [N],
+) -> Option<BackendResourcePair<'a>> {
+    for name in backend_names {
+        let resource_uri = resource_uri.as_ref();
+        let name = name.as_ref();
+        let extended_name = name.to_owned() + "-";
+        if resource_uri.starts_with(&extended_name) {
+            return Some(BackendResourcePair {
+                backend_name: name,
+                resource_uri: &resource_uri[extended_name.len()..],
+            });
+        }
+    }
+    None
 }
 
 #[cfg(test)]

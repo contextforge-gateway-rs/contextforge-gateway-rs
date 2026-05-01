@@ -7,7 +7,7 @@ use reqwest::RequestBuilder;
 pub const INITIALIZE_MCP_SESSION: &str = r#"{"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"sampling":{},"elicitation":{},"roots":{"listChanged":true},"tasks":{"list":{},"cancel":{},"requests":{"sampling":{"createMessage":{}},"elicitation":{"create":{}}}}},"clientInfo":{"name":"inspector-client","version":"0.21.1"}},"jsonrpc":"2.0","id":0}"#;
 pub const NOTIFY_MCP_SESSION: &str = r#"{"method":"notifications/initialized","jsonrpc":"2.0"}"#;
 //pub const COUNTER_ONE_INC: &'static str = r#"{"method":"tools/call","params":{"name":"increment","arguments":{},"_meta":{"progressToken":1}},"jsonrpc":"2.0","id":5}"#;
-pub const COUNTER_ONE_INC: &str = r#"{"method":"tools/call","params":{"name":"counter-one-increment","arguments":{},"_meta":{"progressToken":1}},"jsonrpc":"2.0","id":1}"#;
+pub const COUNTER_ONE_INC: &str = r#"{"method":"tools/call","params":{"name":"gateway-one-increment","arguments":{},"_meta":{"progressToken":1}},"jsonrpc":"2.0","id":1}"#;
 pub const MCP_ENDPOINT: &str = "/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp";
 //pub const MCP_ENDPOINT: &'static str = "/mcp";
 //pub const MCP_ENDPOINT: &'static str = "/servers/b97eaa969a39421685be13ce5fa06207/mcp";
@@ -97,9 +97,10 @@ async fn counter_call(user: &mut GooseUser) -> TransactionResult {
                 let status = r.status();
                 let payload = r.text().await?;
                 if status == http::StatusCode::OK {
-                    if !payload.contains("\"isError\":false") && payload.contains(&format!("\"text\":\"{}\"", i + 1)) {
+                    if !payload.contains("\"isError\":false") && !payload.contains(&format!("\"text\":\"{}\"", i + 1)) {
                         let _ = user.log_debug("Counter has a problem ", None, None, Some(&payload));
                         return Err(Box::new(TransactionError::Custom("counting problem".to_owned())));
+                    } else {
                     }
                 } else {
                     return Err(Box::new(TransactionError::Custom("wrong response code ".to_owned())));

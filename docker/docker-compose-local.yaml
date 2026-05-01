@@ -1,76 +1,80 @@
 #version: "3.9"          # Supported by both podman-compose and Docker Compose v2+
-name: counter-tools
+name: mcp-gatewys
   
 
 networks:
-  counter-net:               # Single user-defined bridge network keeps traffic private
+  gateways-net:               # Single user-defined bridge network keeps traffic private
     driver: bridge
 
 ###############################################################################
 #  CORE SERVICE - ContextForge
 ###############################################################################
 services:
-  # counter-tool-one:
-  #   image: mcp-rust-sdk/counter-tool:latest
-  #   networks: [counter-net]
-  #   ports: [5601:5555]
+  gateway-one:
+    image: mcp_counter
+    build:
+      dockerfile: mcp_counter.Dockerfile
 
-  #   environment:
-  #     - RUST_LOG=debug
-  #     - MCP_COUNTER_BIND_ADDRESS=0.0.0.0:5555
-  #     - MCP_COUNTER_ALLOWED_HOSTS=127.0.0.1,9.85.219.104,192.168.1.14
+    networks: [gateways-net]
+    ports: [5555:5555]
+
+    environment:
+      - RUST_LOG=warn
+      - MCP_SERVER_BIND_ADDRESS=0.0.0.0:5555
+      - MCP_SERVER_ALLOWED_HOSTS=127.0.0.1,9.85.219.104,192.168.1.14
             
-  #   sysctls:
-  #     - net.ipv4.tcp_fin_timeout=15
-  #     - net.ipv4.ip_local_port_range=1024 65535
-  #   ulimits:
-  #     nofile:
-  #       soft: 65535
-  #       hard: 65535
+    sysctls:
+      - net.ipv4.tcp_fin_timeout=15
+      - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
 
-  #   depends_on:
-  #     redis:
-  #       condition: service_started
+    depends_on:
+      redis:
+        condition: service_started
 
-  #   deploy:      
-  #     resources:
-  #       limits:
-  #         cpus: '${GATEWAY_CPU_LIMIT:-8}'
-  #         memory: ${GATEWAY_MEM_LIMIT:-8G}
-  #       reservations:
-  #         cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-  #         memory: ${GATEWAY_MEM_RESERVATION:-4G}
+    deploy:      
+      resources:
+        limits:
+          cpus: '${GATEWAY_CPU_LIMIT:-8}'
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}
 
-  # counter-tool-two:
-  #   image: mcp-rust-sdk/counter-tool:latest
-  #   networks: [counter-net]
-  #   ports: [5602:5555]
+  gateway-two:
+    image: mcp_conformance
+    build:
+      dockerfile: mcp_conformance.Dockerfile
+    networks: [gateways-net]
+    ports: [5556:5556]
 
-  #   environment:
-  #     - RUST_LOG=debug
-  #     - MCP_COUNTER_BIND_ADDRESS=0.0.0.0:5555
-  #     - MCP_COUNTER_ALLOWED_HOSTS=127.0.0.1,9.85.219.104,192.168.1.14
-            
-  #   sysctls:
-  #     - net.ipv4.tcp_fin_timeout=15
-  #     - net.ipv4.ip_local_port_range=1024 65535
-  #   ulimits:
-  #     nofile:
-  #       soft: 65535
-  #       hard: 65535
+    environment:
+      - RUST_LOG=warn
+      - PORT=5556
+      
+    sysctls:
+      - net.ipv4.tcp_fin_timeout=15
+      - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
 
-  #   depends_on:
-  #     redis:
-  #       condition: service_started
+    depends_on:
+      redis:
+        condition: service_started
 
-  #   deploy:      
-  #     resources:
-  #       limits:
-  #         cpus: '${GATEWAY_CPU_LIMIT:-8}'
-  #         memory: ${GATEWAY_MEM_LIMIT:-8G}
-  #       reservations:
-  #         cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-  #         memory: ${GATEWAY_MEM_RESERVATION:-4G}          
+    deploy:      
+      resources:
+        limits:
+          cpus: '${GATEWAY_CPU_LIMIT:-8}'
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}          
 
 
     
@@ -103,7 +107,8 @@ services:
       - "10000"
     ports:
       - "6379:6379"      # expose only if you want host access
-    networks: [counter-net]
+
+    networks: [gateways-net]
     deploy:
       resources:
         limits:

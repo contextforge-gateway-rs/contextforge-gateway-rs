@@ -2,12 +2,18 @@
 
 
 ## Running
+1. Start Redis and gateways
+```
+docker compose -f docker/docker-compose-local.yaml up -d
+```
 
-1. Generate your own public/private key for token validation
 2. Run gateway
 ```bash 
-    cargo run --bin mcp-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16
+    cargo run --bin contextforge-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16
 ```
+
+This should spin up Redis instance and two mcp-gateways: a simple counter and a conformance test server from mcp-rust-sdk
+
 3. Get a test JWT token
 ```bash
 curl --request GET \
@@ -24,17 +30,25 @@ curl --request POST \
   --header 'content-type: application/json' \
   --data '{
   "virtualHosts": {
-    "c0ffee00f001f00lf00ldeadbeefdead": {
-      "backends": {
-        "counter-one": {
-          "url": "http://127.0.0.1:6666/mcp"
+      "c0ffee00f001f00lf00ldeadbeefdead": {
+        "backends": {
+          "gateway-one": {
+            "url": "http://127.0.0.1:5555/mcp"
+          },
+          "gateway-two": {
+            "url": "http://127.0.0.1:5556/mcp"
+          }        
         }
       }
     }
-  }
 }'
 ```
 
-5. Start backend service 
-
 6. Spin up MCP Inspector to test the calls
+
+
+## Performance Tests
+```bash
+cargo run --release --bin contextforge-load-test -- --host 'http://127.0.0.1:8001' -r 40 -u 120 --run-time 120s --report-file report.html
+
+```
