@@ -31,5 +31,5 @@ EOF
 WORKDIR /
 COPY --from=builder /tmp/contextforge-gateway-rs/target/release/contextforge-gateway-rs /contextforge-gateway-rs
 LABEL org.opencontainers.image.source=https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
-LABEL org.opencontainers.image.description="Mcp-gateway-rs - open source highly experimental dataplane for Contextforge Gateway."
+LABEL org.opencontainers.image.description="contextforge-gateway-rs - open source highly experimental dataplane for Contextforge Gateway."
 ENTRYPOINT ["/contextforge-gateway-rs"]

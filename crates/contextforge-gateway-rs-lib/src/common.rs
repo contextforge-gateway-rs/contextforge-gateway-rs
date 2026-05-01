@@ -49,8 +49,8 @@ impl IntoConnectionInfo for RedisConfig {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "mcp-gateway-rs")]
-#[command(about = "Minimal, fast and experimental MCP Gateway")]
+#[command(name = "contextforge-gateway-rs")]
+#[command(about = "Minimal, fast and experimental Gateway/Dataplane for ContextForge")]
 pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ADDRESS")]
     pub address: SocketAddr,

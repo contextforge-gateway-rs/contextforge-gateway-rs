@@ -57,7 +57,7 @@ services:
   #
   # ──────────────────────────────────────────────────────────────────────
 
-  mcp-gateway-rs:
+  contextforge-gateway-rs:
     image: ghcr.io/contextforge-gateway-rs:latest
     networks: [contextforge-gateway-net]
 

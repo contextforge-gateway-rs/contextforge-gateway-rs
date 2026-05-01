@@ -17,7 +17,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = Config::parse();
-    println!("mcp-gateway-rs {config:?}");
+    println!("contextforge-gateway-rs {config:?}");
     let _guard = logging::init_tracing_logging(&config);
 
     let builder = runtime::RuntimeBuilder::from(&config);
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let config = config.clone();
                         let local_session_manager = Arc::clone(&local_session_manager);
 
-                        thread::Builder::new().name("mcp-gateway-rs".to_owned()).spawn(move || {
+                        thread::Builder::new().name("contextforge-gateway-rs".to_owned()).spawn(move || {
                             r.block_on(async {
                                 tokio::select! {
                                     res = contextforge_gateway_rs_lib::run_gateway(config,local_session_manager) => {

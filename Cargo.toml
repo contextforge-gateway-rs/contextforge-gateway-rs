@@ -11,10 +11,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.91.1"
 license-file = "./LICENSE.md"
-keywords = ["mcp", "gateway", "rust", "axum"]
-homepage = "https://github.com/mcp-gateway-rs"
+keywords = ["mcp", "gateway", "rust", "contextforge", "a2a", "ai", "llm"]
+homepage = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
 readme = "./README.md"
-repository = "https://github.com/mcp-gateway-rs"
+repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
 
 
 [workspace.dependencies]
@@ -22,7 +22,15 @@ contextforge-gateway-rs = { path = "./crates/contextforge-gateway-rs" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib", features = [
     "with_tools",
 ] }
-rmcp = {version="1.3.0", features=["server","client", "auth","transport-streamable-http-server","reqwest","transport-streamable-http-client-reqwest", "elicitation"], git="https://github.com/mcp-gateway-rs/mcp-rust-sdk", branch="enabling_propagation_of_new_session_id_2"}
+rmcp = { version = "1.5.0", features = [
+    "server",
+    "client",
+    "auth",
+    "transport-streamable-http-server",
+    "reqwest",
+    "transport-streamable-http-client-reqwest",
+    "elicitation",
+], git = "https://github.com/contextforge-gateway-rs/mcp-rust-sdk", branch = "enabling_propagation_of_new_session_id_2" }
 # rmcp = { version = "1.5.0", features = [
 #     "server",
 #     "client",

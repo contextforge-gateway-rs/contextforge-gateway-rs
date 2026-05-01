@@ -34,7 +34,7 @@ struct DefaultClaims {
 
 impl DefaultClaims {
     fn new(user_id: String) -> Self {
-        let url = "http://mcp-gateway-rs".parse().expect("Expecting this to work");
+        let url = "http://contextforge-gateway-rs".parse().expect("Expecting this to work");
         let audience = CONEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
         let user_info = openid::Userinfo { sub: user_id.clone(), ..Default::default() };
         Self {

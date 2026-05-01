@@ -2910,7 +2910,7 @@ dependencies = [
 [[package]]
 name = "rmcp"
 version = "1.5.0"
-source = "git+https://github.com/mcp-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#15429d6045d237036217a4063771edefe43b0716"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#d97d104ba49efab838e9b22920658a7990b20563"
 dependencies = [
  "async-trait",
  "base64",
@@ -2943,7 +2943,7 @@ dependencies = [
 [[package]]
 name = "rmcp-macros"
 version = "1.5.0"
-source = "git+https://github.com/mcp-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#15429d6045d237036217a4063771edefe43b0716"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#d97d104ba49efab838e9b22920658a7990b20563"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",

@@ -5,7 +5,7 @@ RUN <<EOF
 apt update
 apt install -y git ca-certificates protobuf-compiler
 git config --global http.sslVerify false
-git clone https://github.com/mcp-gateway-rs/mcp-rust-sdk.git rust-sdk
+git clone https://github.com/contextforge-gateway-rs/mcp-rust-sdk.git rust-sdk
 EOF
 WORKDIR /tmp/rust-sdk
 RUN git checkout enabling_propagation_of_new_session_id_2 
