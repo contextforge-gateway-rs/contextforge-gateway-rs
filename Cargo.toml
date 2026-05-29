@@ -40,6 +40,7 @@ tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.48.0", features = ["full"] }
 axum = "0.8"
+axum-otel-metrics = "0.13"
 tower-http = { version = "0.6.8", features = ["full"] }
 tower = "0.5.3"
 http = "1.4.0"

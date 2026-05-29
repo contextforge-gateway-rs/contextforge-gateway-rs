@@ -1,0 +1,271 @@
+# ContextForge Gateway (Rust) + self-hosted Langfuse for OpenTelemetry trace
+# verification (issue #4721).
+#
+# This overlay layers Langfuse on top of the local gateway compose stack so the
+# gateway (running on the host) can export OTLP/HTTP-protobuf traces directly
+# into Langfuse, which only accepts the HTTP transport.
+#
+# Bring-up:
+#   docker compose \
+#     -f docker/docker-compose-local.yaml \
+#     -f docker/docker-compose-langfuse.yaml \
+#     up -d
+#
+# Langfuse UI:    http://localhost:3100   (admin@example.com / changeme)
+# OTLP endpoint:  http://localhost:3100/api/public/otel/v1/traces
+# Default keys:   public=pk-lf-contextforge  secret=sk-lf-contextforge
+#
+# Modeled on mcp-context-forge/docker-compose.with-langfuse.yml, slimmed for
+# this repo:
+#   * No `gateway:` overrides (Rust gateway runs on the host, not in compose).
+#   * No fast-test / a2a sidecar overrides.
+#   * Reuses `gateways-net` already declared by docker-compose-local.yaml.
+#
+# All credentials below are local-only development defaults and may be
+# overridden via environment variables before `docker compose up`.
+###############################################################################
+
+###############################################################################
+#  VOLUMES
+###############################################################################
+volumes:
+  langfuse-postgres-data:
+    driver: local
+  langfuse-clickhouse-data:
+    driver: local
+  langfuse-clickhouse-logs:
+    driver: local
+  langfuse-minio-data:
+    driver: local
+  langfuse-redis-data:
+    driver: local
+
+###############################################################################
+#  SERVICES
+#  NOTE: service names use hyphens (not underscores) because the AWS S3 SDK
+#  inside Langfuse validates hostnames and rejects underscores.
+###############################################################################
+services:
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Langfuse Web - UI, API, and OTLP/HTTP ingestion endpoint
+  # ──────────────────────────────────────────────────────────────────────
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    restart: unless-stopped
+    networks: [gateways-net]
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-cache:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+    ports:
+      - "${LANGFUSE_PORT:-3100}:3000"  # Langfuse UI + OTLP/HTTP ingest
+    environment: &langfuse-env
+      # ── Core ──
+      NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:${LANGFUSE_PORT:-3100}}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-langfuse-contextforge-secret}
+      SALT: ${LANGFUSE_SALT:-langfuse-contextforge-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+      # ── PostgreSQL ──
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_POSTGRES_PASSWORD:-langfuse}@langfuse-db:5432/langfuse
+      # ── ClickHouse ──
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      # ── Redis ──
+      REDIS_HOST: langfuse-cache
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}
+      REDIS_TLS_ENABLED: "false"
+      # ── MinIO (S3-compatible object storage) ──
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_USE_AZURE_BLOB: "false"
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      # ── Auto-provision org, project, and API keys on first boot ──
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-contextforge}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-ContextForge}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-contextforge-gateway-rs}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-ContextForge Gateway (Rust)}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-contextforge}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-contextforge}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-Admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-changeme}
+    healthcheck:
+      # Next.js binds to the container hostname, not 127.0.0.1; resolve with $(hostname).
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$(hostname):3000/api/public/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Langfuse Worker - async event processing (ClickHouse ingestion, evals)
+  # ──────────────────────────────────────────────────────────────────────
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    restart: unless-stopped
+    networks: [gateways-net]
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-cache:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+    environment:
+      <<: *langfuse-env
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Langfuse PostgreSQL - operational data store
+  # ──────────────────────────────────────────────────────────────────────
+  langfuse-db:
+    image: docker.io/postgres:${LANGFUSE_POSTGRES_VERSION:-17}
+    restart: unless-stopped
+    networks: [gateways-net]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-langfuse}
+      POSTGRES_DB: langfuse
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # ClickHouse - OLAP store for trace analytics
+  # ──────────────────────────────────────────────────────────────────────
+  langfuse-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server
+    restart: unless-stopped
+    networks: [gateways-net]
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # MinIO - S3-compatible object storage for Langfuse events and media
+  # ──────────────────────────────────────────────────────────────────────
+  langfuse-minio:
+    image: cgr.dev/chainguard/minio
+    restart: unless-stopped
+    networks: [gateways-net]
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${LANGFUSE_MINIO_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Langfuse Redis - separate instance (Langfuse requires `requirepass` auth)
+  # ──────────────────────────────────────────────────────────────────────
+  langfuse-cache:
+    image: docker.io/redis:7
+    restart: unless-stopped
+    networks: [gateways-net]
+    command: >
+      --requirepass ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}
+      --maxmemory-policy noeviction
+    volumes:
+      - langfuse-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M

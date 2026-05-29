@@ -245,6 +245,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-otel-metrics"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b6d12cc3a75242e592c1631a1ec518ce585586b67c921547e751a81c548c55"
+dependencies = [
+ "axum",
+ "futures-util",
+ "http",
+ "http-body",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
+ "pin-project-lite",
+ "tower",
+]
+
+[[package]]
 name = "axum-server"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -561,6 +578,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "axum-otel-metrics",
  "axum-server",
  "chrono",
  "clap",
@@ -2183,6 +2201,12 @@ dependencies = [
  "tonic",
  "tonic-prost",
 ]
+
+[[package]]
+name = "opentelemetry-semantic-conventions"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_sdk"

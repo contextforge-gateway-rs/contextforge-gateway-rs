@@ -1,0 +1,61 @@
+# ContextForge Gateway (Rust) + OpenTelemetry Collector overlay for local
+# metrics verification (issue #4721 follow-up).
+#
+# Langfuse only ingests traces (see docker-compose-langfuse.yaml). To verify
+# the OTLP metrics pipeline added by axum-otel-metrics we run a vanilla
+# OpenTelemetry Collector with a `debug` exporter that prints every received
+# metric/trace to stdout.
+#
+# Bring-up (full stack: local + Langfuse traces + collector metrics):
+#   docker compose \
+#     -f docker/docker-compose-local.yaml \
+#     -f docker/docker-compose-langfuse.yaml \
+#     -f docker/docker-compose-otel-collector.yaml \
+#     up -d
+#
+# Or just the collector by itself:
+#   docker compose \
+#     -f docker/docker-compose-local.yaml \
+#     -f docker/docker-compose-otel-collector.yaml \
+#     up -d otel-collector
+#
+# Gateway flags to push metrics into this collector (host-side):
+#   --enable-otel-metrics true \
+#   --otlp-metrics-endpoint http://127.0.0.1:4318/v1/metrics
+#
+# Inspect:
+#   docker logs otel-collector --tail 200
+#
+# Reuses `gateways-net` already declared by docker-compose-local.yaml.
+
+services:
+  otel-collector:
+    image: docker.io/otel/opentelemetry-collector-contrib:0.74.0
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      # OTLP/HTTP receiver - host-side gateway pushes metrics here.
+      - "4318:4318"
+      # Prometheus-text endpoint exposed by the `prometheus` exporter,
+      # scraped by the prometheus service below.
+      - "8889:8889"
+    networks: [gateways-net]
+
+  prometheus:
+    image: docker.io/prom/prometheus:v2.55.0
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2h
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      # Browse metrics at http://localhost:9090 (Graph tab).
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+    networks: [gateways-net]

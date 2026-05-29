@@ -249,6 +249,140 @@ With `--runtime-plugins-enabled true`, the response content should include the b
 [cpex:payload-marker]
 ```
 
+## Tracing & Metrics (Langfuse + OTel Collector + Prometheus)
+
+Issue [#4721](https://github.com/IBM/mcp-context-forge/issues/4721) adds OTLP
+**traces** and **metrics** to the Rust dataplane. A local verification stack
+ships under `docker/` so the same release binary can be exercised end-to-end
+without any external services.
+
+The stack consists of three overlays composed on top of `docker-compose-local.yaml`:
+
+| Component       | Role                                                    | UI / endpoint                                  |
+| --------------- | ------------------------------------------------------- | ---------------------------------------------- |
+| Langfuse        | Trace backend (OTLP/HTTP receiver, span viewer)         | http://localhost:3100 (`admin@example.com` / `admin`) |
+| OTel Collector  | Receives OTLP from the gateway, fans out traces + metrics | OTLP/HTTP `:4318`, Prometheus exposition `:8889`, stdout via `docker logs` |
+| Prometheus      | Scrapes the collector's `/metrics` for browsable PromQL | http://localhost:9090                          |
+
+### 1. Bring up the verification stack
+
+```bash
+docker compose \
+  -f docker/docker-compose-local.yaml \
+  -f docker/docker-compose-langfuse.yaml \
+  -f docker/docker-compose-otel-collector.yaml \
+  up -d
+```
+
+Wait for all containers to become healthy:
+
+```bash
+docker compose \
+  -f docker/docker-compose-local.yaml \
+  -f docker/docker-compose-langfuse.yaml \
+  -f docker/docker-compose-otel-collector.yaml \
+  ps
+```
+
+### 2. Run the gateway with traces and metrics enabled
+
+```bash
+RUST_TRACE_LOG=debug \
+cargo run --release --bin contextforge-gateway-rs -- \
+  --address 0.0.0.0:8001 \
+  --redis-port 6379 --redis-address 127.0.0.1 --redis-mode=plain-text \
+  --token-verification-public-key assets/jwt.key.pub \
+  --number-of-cpus 4 \
+  --upstream-connection-mode=plain-text-or-tls \
+  --enable-open-telemetry true \
+  --enable-otel-metrics true \
+  --otlp-protocol http-protobuf \
+  --otlp-endpoint  http://127.0.0.1:3100/api/public/otel/v1/traces \
+  --otlp-headers   "Authorization=Basic cGstbGYtY29udGV4dGZvcmdlOnNrLWxmLWNvbnRleHRmb3JnZQ==" \
+  --otlp-metrics-endpoint http://127.0.0.1:4318/v1/metrics \
+  --otlp-service-name contextforge-gateway-rs
+```
+
+Relevant flags (all also configurable via environment variables — see `--help`):
+
+| Flag                          | Env var                                            | Purpose                                                       |
+| ----------------------------- | -------------------------------------------------- | ------------------------------------------------------------- |
+| `--enable-open-telemetry`     | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY`    | Turn on the OTel tracer pipeline.                             |
+| `--otlp-endpoint`             | `OTEL_EXPORTER_OTLP_ENDPOINT`                      | Trace destination (Langfuse OTLP/HTTP URL here).              |
+| `--otlp-headers`              | `OTEL_EXPORTER_OTLP_HEADERS`                       | Auth header for Langfuse (Basic auth, base64 of `pk:sk`).     |
+| `--enable-otel-metrics`       | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OTEL_METRICS`      | Turn on the OTel meter pipeline (added in #4721).             |
+| `--otlp-metrics-endpoint`     | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`              | Metrics destination (Collector OTLP/HTTP `/v1/metrics`).      |
+| `--otlp-service-name`         | `OTEL_SERVICE_NAME`                                | `service.name` resource attribute on every span and metric.   |
+
+> `RUST_TRACE_LOG=debug` is required: the `tower_http::TraceLayer` emits
+> `DEBUG`-level spans, and the default filter (`info`) would drop them before
+> they ever reach the OTLP exporter — no spans would land in Langfuse.
+
+### 3. Generate traffic
+
+```bash
+for i in {1..10}; do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    http://127.0.0.1:8001/contextforge-rs/admin/tokens/admin@example.com
+done
+```
+
+A `404` response is expected without configured users; the request is still
+traced and counted as a metric sample.
+
+### 4. Inspect the data
+
+* **Langfuse — traces:** open http://localhost:3100, log in, project
+  `contextforge`. Each curl produces one span (HTTP method, route, status,
+  latency).
+* **Prometheus — metrics:** open http://localhost:9090.
+  * `Status → Targets` should show `otel-collector:8889` as **UP**.
+  * Try these queries in the `Graph` tab:
+    * `http_server_request_duration_count` — request count, broken down by
+      `http_request_method`, `http_response_status_code`, and `service_name`.
+    * `histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket[1m])))` — p95 latency.
+    * `http_server_active_requests` — gauge of in-flight requests.
+    * `http_server_request_body_size_sum` / `http_server_response_body_size_sum` — payload throughput.
+* **Collector stdout:** `docker logs otel-collector --tail 200` for raw OTLP
+  dumps (both traces and metrics, via the `logging` exporter).
+
+Metrics are exported by the gateway every 30 s (one `PeriodicReader` tick), so
+allow ~35 s after the first request before the first data point appears in
+Prometheus.
+
+### Architecture
+
+```
+ContextForge Gateway (release binary, :8001)
+        │
+        │  OTLP/HTTP (protobuf)
+        │
+        ├──► :3100 ── Langfuse  ──► trace UI
+        │
+        └──► :4318 ── OTel Collector
+                          │
+                          ├──► stdout (logging exporter, docker logs)
+                          │
+                          └──► :8889 ── Prometheus ──► PromQL UI :9090
+```
+
+### Out of scope (tracked separately)
+
+* W3C trace-context propagation across gateway hops — issue
+  [#4723](https://github.com/IBM/mcp-context-forge/issues/4723).
+* MCP-semantic spans (tool names, JSON-RPC method attributes) — issue
+  [#4722](https://github.com/IBM/mcp-context-forge/issues/4722).
+
+### Tear down
+
+```bash
+docker compose \
+  -f docker/docker-compose-local.yaml \
+  -f docker/docker-compose-langfuse.yaml \
+  -f docker/docker-compose-otel-collector.yaml \
+  down
+```
+
 ## Performance Tests
 
 As above and then run:

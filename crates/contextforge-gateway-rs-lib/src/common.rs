@@ -122,6 +122,20 @@ pub enum LogRotation {
     Never,
 }
 
+/// Wire protocol used to export OpenTelemetry data to the collector / backend.
+///
+/// `Grpc` targets the standard OTLP/gRPC port (e.g. `4317`) used by
+/// collectors such as the OpenTelemetry Collector and Tempo.
+/// `HttpProtobuf` targets OTLP over HTTP/1.1 with a protobuf payload
+/// (e.g. `4318/v1/traces`) and is the only protocol supported by Langfuse's
+/// OTel ingestion endpoint (`/api/public/otel/v1/traces`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default)]
+pub enum OtlpProtocol {
+    #[default]
+    Grpc,
+    HttpProtobuf,
+}
+
 #[derive(Debug, Clone, Parser, Default)]
 #[command(name = "contextforge-gateway-rs")]
 #[command(about = "Minimal, fast and experimental Gateway/Dataplane for ContextForge")]
@@ -141,6 +155,45 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY")]
     pub enable_open_telemetry: Option<bool>,
+
+    /// OTLP exporter endpoint. For `grpc` this is the collector address
+    /// (e.g. `http://127.0.0.1:4317`). For `http-protobuf` this must be the
+    /// full traces URL (e.g. `http://langfuse-web:3000/api/public/otel/v1/traces`
+    /// for Langfuse, or `http://collector:4318/v1/traces` for the OTel Collector).
+    #[arg(long, env = "OTEL_EXPORTER_OTLP_ENDPOINT")]
+    pub otlp_endpoint: Option<String>,
+
+    /// OTLP wire protocol. Use `http-protobuf` when exporting directly to
+    /// Langfuse (it does not accept gRPC).
+    #[arg(long, env = "OTEL_EXPORTER_OTLP_PROTOCOL")]
+    pub otlp_protocol: Option<OtlpProtocol>,
+
+    /// Additional headers to attach to every OTLP request, formatted as
+    /// `key1=value1,key2=value2`. Used to pass authentication (for example
+    /// Langfuse's `Authorization=Basic <base64(public:secret)>`).
+    #[arg(long, env = "OTEL_EXPORTER_OTLP_HEADERS")]
+    pub otlp_headers: Option<String>,
+
+    /// Overrides the `service.name` OpenTelemetry resource attribute.
+    /// Defaults to `CONTEXTFORGE-GATEWAY-RS`.
+    #[arg(long, env = "OTEL_SERVICE_NAME")]
+    pub otlp_service_name: Option<String>,
+
+    /// Enables OTLP export of HTTP server metrics (request counts, latency
+    /// histograms, in-flight gauge, body sizes) emitted by `axum-otel-metrics`.
+    /// Independent from `enable_open_telemetry` so traces and metrics can be
+    /// turned on individually. Langfuse does not ingest metrics, so this
+    /// typically targets an OpenTelemetry Collector.
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ENABLE_OTEL_METRICS")]
+    pub enable_otel_metrics: Option<bool>,
+
+    /// OTLP metrics endpoint. For `grpc` defaults to `http://127.0.0.1:4317`;
+    /// for `http-protobuf` defaults to `http://127.0.0.1:4318/v1/metrics`.
+    /// Kept separate from `otlp_endpoint` so traces and metrics can be routed
+    /// to different backends (typical: traces to Langfuse, metrics to an
+    /// OTel Collector).
+    #[arg(long, env = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")]
+    pub otlp_metrics_endpoint: Option<String>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_GATEWAY_CPUS")]
     pub number_of_cpus: Option<usize>,
@@ -334,5 +387,45 @@ fn extract_identity(config: &Config) -> crate::Result<reqwest::Identity> {
         },
 
         _ => Err("Invalid/missing configuration".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Config;
+
+    /// Smallest possible argv accepted by [`Config::parse_from`]. Provides
+    /// the three required Redis flags so the parser succeeds without env.
+    const MIN_ARGS: &[&str] = &[
+        "contextforge-gateway-rs",
+        "--redis-address",
+        "127.0.0.1",
+        "--redis-port",
+        "6379",
+        "--redis-mode",
+        "plain-text",
+    ];
+
+    fn parse(extra: &[&str]) -> Config {
+        let mut argv: Vec<&str> = MIN_ARGS.to_vec();
+        argv.extend_from_slice(extra);
+        Config::try_parse_from(argv).expect("Config should parse")
+    }
+
+    #[test]
+    fn metrics_flags_default_to_none() {
+        let cfg = parse(&[]);
+        assert_eq!(cfg.enable_otel_metrics, None);
+        assert_eq!(cfg.otlp_metrics_endpoint, None);
+    }
+
+    #[test]
+    fn metrics_flags_round_trip_from_argv() {
+        let cfg =
+            parse(&["--enable-otel-metrics", "true", "--otlp-metrics-endpoint", "http://collector:4318/v1/metrics"]);
+        assert_eq!(cfg.enable_otel_metrics, Some(true));
+        assert_eq!(cfg.otlp_metrics_endpoint.as_deref(), Some("http://collector:4318/v1/metrics"));
     }
 }
