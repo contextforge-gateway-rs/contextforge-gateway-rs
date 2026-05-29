@@ -1,6 +1,7 @@
 use std::{fs, sync::Arc};
 
 use axum::middleware;
+use axum_otel_metrics::HttpMetricsLayerBuilder;
 use contextforge_gateway_rs_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
 use jsonwebtoken::DecodingKey;
@@ -22,12 +23,13 @@ pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
 use gateway::McpService;
 use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 use transports::{DownstreamTls, Tcp};
 use typed_builder::TypedBuilder;
 pub use user_config_store::RedisUserConfigStore;
 pub use user_config_store::{ConfigStoreError, UserConfigStore};
 
-pub use crate::common::{Config, LogRotation};
+pub use crate::common::{Config, LogRotation, OtlpProtocol};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -128,7 +130,10 @@ impl Gateway {
         let app = tools::add_tools(app);
 
         let app = app.with_state(mcp_add_state);
-        let app = axum::Router::new().nest("/contextforge-rs", app);
+        let app = axum::Router::new()
+            .nest("/contextforge-rs", app)
+            .layer(TraceLayer::new_for_http())
+            .layer(HttpMetricsLayerBuilder::new().build());
 
         let mut handlers = vec![];
 

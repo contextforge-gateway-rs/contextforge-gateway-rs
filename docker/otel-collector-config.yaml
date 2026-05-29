@@ -1,0 +1,48 @@
+# OpenTelemetry Collector configuration for local metrics verification
+# (issue #4721 follow-up).
+#
+# Receives OTLP/HTTP from the host-side ContextForge Gateway and dumps
+# everything to stdout via the `debug` exporter so we can eyeball the
+# semantic-convention HTTP metrics emitted by axum-otel-metrics:
+#   - http.server.active_requests
+#   - http.server.request.duration
+#   - http.server.request.body.size
+#   - http.server.response.body.size
+#
+# View captured metrics with:
+#   docker logs otel-collector --tail 200
+#
+# Or browse them in Prometheus at http://localhost:9090 (the prometheus
+# service scrapes the `prometheus` exporter exposed on :8889 below).
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  logging:
+    verbosity: detailed
+  # Exposes /metrics on :8889 in Prometheus text format so the prometheus
+  # service can scrape converted OTLP metrics.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    send_timestamps: true
+    metric_expiration: 5m
+    # Copy resource attributes (service.name, service.version, ...) onto
+    # every metric series so Prometheus queries can filter by service.
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [logging, prometheus]
+    traces:
+      receivers: [otlp]
+      exporters: [logging]
+  telemetry:
+    logs:
+      level: info
