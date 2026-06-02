@@ -161,7 +161,7 @@ pub struct Config {
     /// full traces URL (e.g. `http://langfuse-web:3000/api/public/otel/v1/traces`
     /// for Langfuse, or `http://collector:4318/v1/traces` for the OTel Collector).
     #[arg(long, env = "OTEL_EXPORTER_OTLP_ENDPOINT")]
-    pub otlp_endpoint: Option<String>,
+    pub otlp_endpoint: Option<http::Uri>,
 
     /// OTLP wire protocol. Use `http-protobuf` when exporting directly to
     /// Langfuse (it does not accept gRPC).
