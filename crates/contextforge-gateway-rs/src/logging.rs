@@ -76,8 +76,10 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
 
         let exporter = match protocol {
             OtlpProtocol::Grpc => {
-                let endpoint =
-                    configuration.otlp_endpoint.clone().unwrap_or_else(|| DEFAULT_GRPC_TRACES_ENDPOINT.to_owned());
+                let endpoint = configuration
+                    .otlp_endpoint
+                    .as_ref()
+                    .map_or_else(|| DEFAULT_GRPC_TRACES_ENDPOINT.to_owned(), ToString::to_string);
                 SpanExporter::builder()
                     .with_tonic()
                     .with_endpoint(endpoint)
@@ -86,8 +88,10 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
                     .build()?
             },
             OtlpProtocol::HttpProtobuf => {
-                let endpoint =
-                    configuration.otlp_endpoint.clone().unwrap_or_else(|| DEFAULT_HTTP_TRACES_ENDPOINT.to_owned());
+                let endpoint = configuration
+                    .otlp_endpoint
+                    .as_ref()
+                    .map_or_else(|| DEFAULT_HTTP_TRACES_ENDPOINT.to_owned(), ToString::to_string);
                 let mut builder = SpanExporter::builder()
                     .with_http()
                     .with_endpoint(endpoint)
