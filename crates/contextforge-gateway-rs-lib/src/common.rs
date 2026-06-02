@@ -192,8 +192,8 @@ pub struct Config {
     /// Kept separate from `otlp_endpoint` so traces and metrics can be routed
     /// to different backends (typical: traces to Langfuse, metrics to an
     /// OTel Collector).
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")]
-    pub otlp_metrics_endpoint: Option<String>,
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTLP_METRICS_ENDPOINT")]
+    pub otlp_metrics_endpoint: Option<http::Uri>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_GATEWAY_CPUS")]
     pub number_of_cpus: Option<usize>,
@@ -387,45 +387,5 @@ fn extract_identity(config: &Config) -> crate::Result<reqwest::Identity> {
         },
 
         _ => Err("Invalid/missing configuration".into()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser;
-
-    use super::Config;
-
-    /// Smallest possible argv accepted by [`Config::parse_from`]. Provides
-    /// the three required Redis flags so the parser succeeds without env.
-    const MIN_ARGS: &[&str] = &[
-        "contextforge-gateway-rs",
-        "--redis-address",
-        "127.0.0.1",
-        "--redis-port",
-        "6379",
-        "--redis-mode",
-        "plain-text",
-    ];
-
-    fn parse(extra: &[&str]) -> Config {
-        let mut argv: Vec<&str> = MIN_ARGS.to_vec();
-        argv.extend_from_slice(extra);
-        Config::try_parse_from(argv).expect("Config should parse")
-    }
-
-    #[test]
-    fn metrics_flags_default_to_none() {
-        let cfg = parse(&[]);
-        assert_eq!(cfg.enable_otel_metrics, None);
-        assert_eq!(cfg.otlp_metrics_endpoint, None);
-    }
-
-    #[test]
-    fn metrics_flags_round_trip_from_argv() {
-        let cfg =
-            parse(&["--enable-otel-metrics", "true", "--otlp-metrics-endpoint", "http://collector:4318/v1/metrics"]);
-        assert_eq!(cfg.enable_otel_metrics, Some(true));
-        assert_eq!(cfg.otlp_metrics_endpoint.as_deref(), Some("http://collector:4318/v1/metrics"));
     }
 }

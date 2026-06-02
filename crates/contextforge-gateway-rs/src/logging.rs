@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use contextforge_gateway_rs_lib::{Config, LogRotation, OtlpProtocol};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::{MetricExporter, Protocol, SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_otlp::{MetricExporter, Protocol, SpanExporter, WithExportConfig, WithHttpConfig, WithTonicConfig};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler};
+use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     Layer, Registry, filter,
@@ -26,12 +27,13 @@ pub struct Guard {
 }
 
 const CONTROLLER_NAME: &str = "CONTEXTFORGE-GATEWAY-RS";
-const DEFAULT_GRPC_ENDPOINT: &str = "http://127.0.0.1:4317";
+const DEFAULT_GRPC_TRACES_ENDPOINT: &str = "http://127.0.0.1:4317";
+const DEFAULT_GRPC_METRICS_ENDPOINT: &str = "http://127.0.0.1:4317";
 const DEFAULT_HTTP_TRACES_ENDPOINT: &str = "http://127.0.0.1:4318/v1/traces";
 const DEFAULT_HTTP_METRICS_ENDPOINT: &str = "http://127.0.0.1:4318/v1/metrics";
 const METRICS_EXPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
-pub fn init_tracing_logging(configuration: &Config) -> Guard {
+pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std::error::Error + Send + Sync>> {
     let registry = Registry::default();
 
     let log_name = configuration.log_name.clone().unwrap_or("contextforge-gateway-rs.log".to_owned());
@@ -70,17 +72,18 @@ pub fn init_tracing_logging(configuration: &Config) -> Guard {
     if let Some(true) = configuration.enable_open_telemetry {
         let protocol = configuration.otlp_protocol.clone().unwrap_or_default();
         let service_name = configuration.otlp_service_name.clone().unwrap_or_else(|| CONTROLLER_NAME.to_owned());
-        let headers = parse_otlp_headers(configuration.otlp_headers.as_deref());
+        let headers = parse_otlp_headers(configuration.otlp_headers.as_deref())?;
 
         let exporter = match protocol {
             OtlpProtocol::Grpc => {
-                let endpoint = configuration.otlp_endpoint.clone().unwrap_or_else(|| DEFAULT_GRPC_ENDPOINT.to_owned());
+                let endpoint =
+                    configuration.otlp_endpoint.clone().unwrap_or_else(|| DEFAULT_GRPC_TRACES_ENDPOINT.to_owned());
                 SpanExporter::builder()
                     .with_tonic()
                     .with_endpoint(endpoint)
+                    .with_metadata(headers_to_metadata(&headers))
                     .with_timeout(std::time::Duration::from_secs(3))
-                    .build()
-                    .expect("failed to build OTLP/gRPC span exporter")
+                    .build()?
             },
             OtlpProtocol::HttpProtobuf => {
                 let endpoint =
@@ -93,7 +96,7 @@ pub fn init_tracing_logging(configuration: &Config) -> Guard {
                 if !headers.is_empty() {
                     builder = builder.with_headers(headers);
                 }
-                builder.build().expect("failed to build OTLP/HTTP span exporter")
+                builder.build()?
             },
         };
 
@@ -111,15 +114,15 @@ pub fn init_tracing_logging(configuration: &Config) -> Guard {
         let tracer = tracer_provider.tracer(CONTROLLER_NAME);
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-        let meter_provider = init_meter_provider(configuration, &service_name);
+        let meter_provider = init_meter_provider(configuration, &service_name)?;
 
         registry.with(console_layer).with(file_layer).with(telemetry.with_filter(tracing_filter)).init();
 
-        Guard { appender: guard, meter_provider }
+        Ok(Guard { appender: guard, meter_provider })
     } else {
-        let meter_provider = init_meter_provider(configuration, CONTROLLER_NAME);
+        let meter_provider = init_meter_provider(configuration, CONTROLLER_NAME)?;
         registry.with(console_layer).with(file_layer).init();
-        Guard { appender: guard, meter_provider }
+        Ok(Guard { appender: guard, meter_provider })
     }
 }
 
@@ -133,28 +136,35 @@ pub fn init_tracing_logging(configuration: &Config) -> Guard {
 /// Returns `None` when metrics are disabled; the returned provider must be
 /// held alive (via [`Guard`]) for the [`PeriodicReader`]'s background task
 /// to keep exporting.
-fn init_meter_provider(configuration: &Config, service_name: &str) -> Option<SdkMeterProvider> {
+fn init_meter_provider(
+    configuration: &Config,
+    service_name: &str,
+) -> Result<Option<SdkMeterProvider>, Box<dyn std::error::Error + Send + Sync>> {
     if configuration.enable_otel_metrics != Some(true) {
-        return None;
+        return Ok(None);
     }
 
     let protocol = configuration.otlp_protocol.clone().unwrap_or_default();
-    let headers = parse_otlp_headers(configuration.otlp_headers.as_deref());
+    let headers = parse_otlp_headers(configuration.otlp_headers.as_deref())?;
 
     let exporter = match protocol {
         OtlpProtocol::Grpc => {
-            let endpoint =
-                configuration.otlp_metrics_endpoint.clone().unwrap_or_else(|| DEFAULT_GRPC_ENDPOINT.to_owned());
+            let endpoint = configuration
+                .otlp_metrics_endpoint
+                .as_ref()
+                .map_or_else(|| DEFAULT_GRPC_METRICS_ENDPOINT.to_owned(), ToString::to_string);
             MetricExporter::builder()
                 .with_tonic()
                 .with_endpoint(endpoint)
+                .with_metadata(headers_to_metadata(&headers))
                 .with_timeout(std::time::Duration::from_secs(3))
-                .build()
-                .expect("failed to build OTLP/gRPC metric exporter")
+                .build()?
         },
         OtlpProtocol::HttpProtobuf => {
-            let endpoint =
-                configuration.otlp_metrics_endpoint.clone().unwrap_or_else(|| DEFAULT_HTTP_METRICS_ENDPOINT.to_owned());
+            let endpoint = configuration
+                .otlp_metrics_endpoint
+                .as_ref()
+                .map_or_else(|| DEFAULT_HTTP_METRICS_ENDPOINT.to_owned(), ToString::to_string);
             let mut builder = MetricExporter::builder()
                 .with_http()
                 .with_endpoint(endpoint)
@@ -163,7 +173,7 @@ fn init_meter_provider(configuration: &Config, service_name: &str) -> Option<Sdk
             if !headers.is_empty() {
                 builder = builder.with_headers(headers);
             }
-            builder.build().expect("failed to build OTLP/HTTP metric exporter")
+            builder.build()?
         },
     };
 
@@ -179,31 +189,55 @@ fn init_meter_provider(configuration: &Config, service_name: &str) -> Option<Sdk
         .build();
 
     global::set_meter_provider(provider.clone());
-    Some(provider)
+    Ok(Some(provider))
 }
 
-/// Parse a comma separated list of `key=value` pairs into a header map.
+/// Converts a header [`HashMap`] to a tonic [`MetadataMap`] for gRPC metadata
+/// attachment. Entries whose key or value cannot be encoded as valid ASCII gRPC
+/// metadata are logged and skipped; they do not abort startup.
+fn headers_to_metadata(headers: &HashMap<String, String>) -> MetadataMap {
+    let mut map = MetadataMap::new();
+    for (k, v) in headers {
+        match (MetadataKey::from_bytes(k.as_bytes()), MetadataValue::try_from(v.as_str())) {
+            (Ok(key), Ok(val)) => {
+                map.insert(key, val);
+            },
+            _ => {
+                tracing::warn!("skipping gRPC metadata entry with invalid key or value: {k:?}={v:?}");
+            },
+        }
+    }
+    map
+}
+
+/// Parses a comma-separated `key=value` header string into a [`HashMap`].
 ///
-/// Whitespace around keys and values is trimmed. Empty entries and entries
-/// without an `=` are silently ignored so partial or malformed input never
-/// breaks telemetry startup.
-fn parse_otlp_headers(raw: Option<&str>) -> HashMap<String, String> {
+/// Whitespace around keys and values is trimmed. Empty segments (from
+/// trailing commas or whitespace-only entries) are silently skipped.
+/// Any non-empty segment that is missing the `=` separator, or has an
+/// empty key, is treated as a configuration error so the application
+/// fails fast rather than silently dropping user-supplied headers.
+fn parse_otlp_headers(raw: Option<&str>) -> Result<HashMap<String, String>, Box<dyn std::error::Error + Send + Sync>> {
     let mut out = HashMap::new();
-    let Some(raw) = raw else { return out };
+    let Some(raw) = raw else { return Ok(out) };
     for entry in raw.split(',') {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
         }
-        if let Some((key, value)) = entry.split_once('=') {
-            let key = key.trim();
-            let value = value.trim();
-            if !key.is_empty() {
-                out.insert(key.to_owned(), value.to_owned());
-            }
+        match entry.split_once('=') {
+            None => {
+                return Err(format!("malformed OTLP header entry (missing '=' separator): {entry:?}").into());
+            },
+            Some((key, _)) if key.trim().is_empty() => {
+                return Err(format!("malformed OTLP header entry (empty key): {entry:?}").into());
+            },
+            Some((key, value)) => {
+                out.insert(key.trim().to_owned(), value.trim().to_owned());
+            },
         }
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -212,23 +246,27 @@ mod tests {
 
     #[test]
     fn parse_otlp_headers_handles_empty_and_missing_input() {
-        assert!(parse_otlp_headers(None).is_empty());
-        assert!(parse_otlp_headers(Some("")).is_empty());
-        assert!(parse_otlp_headers(Some(" , , ")).is_empty());
+        assert!(parse_otlp_headers(None).unwrap().is_empty());
+        assert!(parse_otlp_headers(Some("")).unwrap().is_empty());
+        assert!(parse_otlp_headers(Some(" , , ")).unwrap().is_empty());
     }
 
     #[test]
     fn parse_otlp_headers_parses_multiple_entries_and_trims_whitespace() {
-        let parsed = parse_otlp_headers(Some(" Authorization = Basic abc , X-Project=demo "));
+        let parsed = parse_otlp_headers(Some(" Authorization = Basic abc , X-Project=demo ")).unwrap();
         assert_eq!(parsed.get("Authorization"), Some(&"Basic abc".to_owned()));
         assert_eq!(parsed.get("X-Project"), Some(&"demo".to_owned()));
         assert_eq!(parsed.len(), 2);
     }
 
     #[test]
-    fn parse_otlp_headers_ignores_malformed_entries() {
-        let parsed = parse_otlp_headers(Some("no-equals,=missing-key,good=value"));
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed.get("good"), Some(&"value".to_owned()));
+    fn parse_otlp_headers_rejects_entry_without_separator() {
+        assert!(parse_otlp_headers(Some("no-equals")).is_err());
+        assert!(parse_otlp_headers(Some("good=value,no-equals")).is_err());
+    }
+
+    #[test]
+    fn parse_otlp_headers_rejects_entry_with_empty_key() {
+        assert!(parse_otlp_headers(Some("=missing-key")).is_err());
     }
 }

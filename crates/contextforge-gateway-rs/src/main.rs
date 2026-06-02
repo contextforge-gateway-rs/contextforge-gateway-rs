@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let config = Config::parse();
     println!("contextforge-gateway-rs {config:?}");
-    let _guard = logging::init_tracing_logging(&config);
+    let _guard = logging::init_tracing_logging(&config)?;
 
     let runtime = runtime::Runtime::from(&config);
 
