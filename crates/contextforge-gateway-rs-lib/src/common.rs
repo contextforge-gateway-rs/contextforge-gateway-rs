@@ -176,7 +176,7 @@ pub struct Config {
 
     /// Overrides the `service.name` OpenTelemetry resource attribute.
     /// Defaults to `CONTEXTFORGE-GATEWAY-RS`.
-    #[arg(long, env = "OTEL_SERVICE_NAME")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_SERVICE_NAME")]
     pub otlp_service_name: Option<String>,
 
     /// Enables OTLP export of HTTP server metrics (request counts, latency
@@ -192,7 +192,7 @@ pub struct Config {
     /// Kept separate from `otlp_endpoint` so traces and metrics can be routed
     /// to different backends (typical: traces to Langfuse, metrics to an
     /// OTel Collector).
-    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTLP_METRICS_ENDPOINT")]
+    #[arg(long, env = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")]
     pub otlp_metrics_endpoint: Option<http::Uri>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_GATEWAY_CPUS")]

@@ -312,7 +312,7 @@ Relevant flags (all also configurable via environment variables — see `--help`
 | `--otlp-headers`              | `OTEL_EXPORTER_OTLP_HEADERS`                       | Auth header for Langfuse (Basic auth, base64 of `pk:sk`).     |
 | `--enable-otel-metrics`       | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OTEL_METRICS`      | Turn on the OTel meter pipeline (added in #4721).             |
 | `--otlp-metrics-endpoint`     | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`              | Metrics destination (Collector OTLP/HTTP `/v1/metrics`).      |
-| `--otlp-service-name`         | `OTEL_SERVICE_NAME`                                | `service.name` resource attribute on every span and metric.   |
+| `--otlp-service-name`         | `CONTEXTFORGE_GATEWAY_RS_SERVICE_NAME`             | `service.name` resource attribute on every span and metric.   |
 
 > `RUST_TRACE_LOG=debug` is required: the `tower_http::TraceLayer` emits
 > `DEBUG`-level spans, and the default filter (`info`) would drop them before
