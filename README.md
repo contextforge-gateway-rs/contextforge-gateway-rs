@@ -308,11 +308,11 @@ Relevant flags (all also configurable via environment variables — see `--help`
 | Flag                          | Env var                                            | Purpose                                                       |
 | ----------------------------- | -------------------------------------------------- | ------------------------------------------------------------- |
 | `--enable-open-telemetry`     | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY`    | Turn on the OTel tracer pipeline.                             |
-| `--otlp-endpoint`             | `OTEL_EXPORTER_OTLP_ENDPOINT`                      | Trace destination (Langfuse OTLP/HTTP URL here).              |
-| `--otlp-headers`              | `OTEL_EXPORTER_OTLP_HEADERS`                       | Auth header for Langfuse (Basic auth, base64 of `pk:sk`).     |
+| `--otlp-endpoint`             | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_ENDPOINT`         | Trace destination (Langfuse OTLP/HTTP URL here).              |
+| `--otlp-headers`              | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_HEADERS`          | Auth header for Langfuse (Basic auth, base64 of `pk:sk`).     |
 | `--enable-otel-metrics`       | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OTEL_METRICS`      | Turn on the OTel meter pipeline (added in #4721).             |
-| `--otlp-metrics-endpoint`     | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`              | Metrics destination (Collector OTLP/HTTP `/v1/metrics`).      |
-| `--otlp-service-name`         | `CONTEXTFORGE_GATEWAY_RS_SERVICE_NAME`             | `service.name` resource attribute on every span and metric.   |
+| `--otlp-metrics-endpoint`     | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Metrics destination (Collector OTLP/HTTP `/v1/metrics`).      |
+| `--otlp-service-name`         | `CONTEXTFORGE_GATEWAY_RS_OTEL_SERVICE_NAME`                   | `service.name` resource attribute on every span and metric.   |
 
 > `RUST_TRACE_LOG=debug` is required: the `tower_http::TraceLayer` emits
 > `DEBUG`-level spans, and the default filter (`info`) would drop them before

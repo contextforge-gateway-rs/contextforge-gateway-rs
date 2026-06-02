@@ -160,23 +160,23 @@ pub struct Config {
     /// (e.g. `http://127.0.0.1:4317`). For `http-protobuf` this must be the
     /// full traces URL (e.g. `http://langfuse-web:3000/api/public/otel/v1/traces`
     /// for Langfuse, or `http://collector:4318/v1/traces` for the OTel Collector).
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_ENDPOINT")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_ENDPOINT")]
     pub otlp_endpoint: Option<http::Uri>,
 
     /// OTLP wire protocol. Use `http-protobuf` when exporting directly to
     /// Langfuse (it does not accept gRPC).
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_PROTOCOL")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_PROTOCOL")]
     pub otlp_protocol: Option<OtlpProtocol>,
 
     /// Additional headers to attach to every OTLP request, formatted as
     /// `key1=value1,key2=value2`. Used to pass authentication (for example
     /// Langfuse's `Authorization=Basic <base64(public:secret)>`).
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_HEADERS")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_HEADERS")]
     pub otlp_headers: Option<String>,
 
     /// Overrides the `service.name` OpenTelemetry resource attribute.
     /// Defaults to `CONTEXTFORGE-GATEWAY-RS`.
-    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_SERVICE_NAME")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTEL_SERVICE_NAME")]
     pub otlp_service_name: Option<String>,
 
     /// Enables OTLP export of HTTP server metrics (request counts, latency
@@ -192,7 +192,7 @@ pub struct Config {
     /// Kept separate from `otlp_endpoint` so traces and metrics can be routed
     /// to different backends (typical: traces to Langfuse, metrics to an
     /// OTel Collector).
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")]
     pub otlp_metrics_endpoint: Option<http::Uri>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_GATEWAY_CPUS")]
