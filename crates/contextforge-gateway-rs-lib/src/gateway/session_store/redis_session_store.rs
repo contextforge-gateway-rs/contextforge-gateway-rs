@@ -94,4 +94,18 @@ impl UserSessionStore for RedisUserSessionStore {
             return Err(SessionStoreError::CantWriteData);
         }
     }
+
+    async fn remove_session<'a>(&self, session_key: &'a UserSession) -> Result<(), SessionStoreError> {
+        let Ok(key) = rmp_serde::encode::to_vec::<UserSession>(session_key) else {
+            return Err(SessionStoreError::DataEncoding);
+        };
+
+        let mut connection = self.connection.clone();
+        if redis::cmd("DEL").arg(key).query_async::<()>(&mut connection).await.is_ok() {
+            self.cache.lock().await.remove(session_key);
+            Ok(())
+        } else {
+            Err(SessionStoreError::CantWriteData)
+        }
+    }
 }

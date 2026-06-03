@@ -35,6 +35,30 @@ use crate::{
     },
 };
 
+pub type BackendTransports = Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>;
+
+pub fn new_backend_transports() -> BackendTransports {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone)]
+pub struct BackendTransportCleanup {
+    transports: BackendTransports,
+}
+
+impl BackendTransportCleanup {
+    pub fn new(transports: BackendTransports) -> Self {
+        Self { transports }
+    }
+
+    pub async fn remove_backends(&self, session_id: &str, backend_names: Vec<String>) {
+        let mut transports = self.transports.lock().await;
+        for backend_name in backend_names {
+            transports.remove(&BackendTransportKey::from((backend_name.as_str(), session_id)));
+        }
+    }
+}
+
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
 pub struct McpService<T>
@@ -43,8 +67,8 @@ where
 {
     #[builder(default = Arc::new(Mutex::new(HashSet::new())))]
     subscriptions: Arc<Mutex<HashSet<String>>>,
-    #[builder(default = Arc::new(Mutex::new(HashMap::new())))]
-    transports: Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>,
+    #[builder(default = new_backend_transports())]
+    transports: BackendTransports,
     #[builder(default = Arc::new(Mutex::new(LoggingLevel::Debug)))]
     log_level: Arc<Mutex<LoggingLevel>>,
     http_client: reqwest::Client,

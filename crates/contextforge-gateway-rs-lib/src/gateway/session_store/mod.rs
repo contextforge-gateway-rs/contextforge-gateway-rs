@@ -40,6 +40,10 @@ impl SessionMapping {
     pub fn get<'a>(&'a self, host: &'a str) -> Option<&'a SessionMap> {
         self.session_mapping.iter().find(|m| m.backend_name == host)
     }
+
+    pub fn backend_names(&self) -> Vec<String> {
+        self.session_mapping.iter().map(|m| m.backend_name.clone()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, thiserror::Error)]
@@ -77,4 +81,5 @@ pub trait UserSessionStore: Send + Sync {
         key: &'a UserSession,
         session_mapping: &'a SessionMapping,
     ) -> Result<(), SessionStoreError>;
+    async fn remove_session<'a>(&self, key: &'a UserSession) -> Result<(), SessionStoreError>;
 }
