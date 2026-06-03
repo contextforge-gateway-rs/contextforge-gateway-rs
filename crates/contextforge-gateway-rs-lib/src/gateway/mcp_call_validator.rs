@@ -21,10 +21,11 @@ impl<'a> AuthorizedCallValidator<'a> {
     pub fn new(call_name: &'a str, ctx: &'a RequestContext<RoleServer>) -> Self {
         Self { call_name, ctx }
     }
-    pub fn validate(self) -> Result<(&'a VirtualHost, &'a SessionId), ErrorData> {
+    pub fn validate(self) -> Result<(&'a VirtualHost, &'a SessionId, &'a ContextForgeClaims), ErrorData> {
         let maybe_parts = self.ctx.extensions.get::<Parts>();
         let maybe_session_id = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
+        let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
 
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
         info!(
@@ -64,7 +65,15 @@ impl<'a> AuthorizedCallValidator<'a> {
             });
         };
 
-        Ok((virtual_host, session_id))
+        let Some(claims) = maybe_claims else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... claims not found".into(),
+                data: None,
+            });
+        };
+
+        Ok((virtual_host, session_id, claims))
     }
 }
 
