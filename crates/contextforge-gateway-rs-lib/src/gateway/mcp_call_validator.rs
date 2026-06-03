@@ -7,7 +7,10 @@ use rmcp::{
 };
 use tracing::info;
 
-use crate::layers::{session_id::SessionId, virtual_host_id::VirtualHostId};
+use crate::{
+    common::ContextForgeClaims,
+    layers::{session_id::SessionId, virtual_host_id::VirtualHostId},
+};
 
 pub struct AuthorizedCallValidator<'a> {
     call_name: &'a str,
@@ -73,12 +76,13 @@ impl<'a> InitializeCallValidator<'a> {
     pub fn new(ctx: &'a RequestContext<RoleServer>) -> Self {
         Self { ctx }
     }
-    pub fn validate(self) -> Result<(&'a VirtualHost, &'a DownstreamSessionId), ErrorData> {
+    pub fn validate(self) -> Result<(&'a VirtualHost, &'a DownstreamSessionId, &'a ContextForgeClaims), ErrorData> {
         let maybe_parts = self.ctx.extensions.get::<Parts>();
 
         let maybe_downstream_session = self.ctx.extensions.get::<DownstreamSessionId>();
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
+        let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
         info!(
             "intialize user_config = {maybe_user_config:#?} downstream_session_id = {maybe_downstream_session:#?} virtual_host_id = {maybe_virtual_host_id:#?}"
         );
@@ -115,6 +119,14 @@ impl<'a> InitializeCallValidator<'a> {
             });
         };
 
-        Ok((virtual_host, downstream_session_id))
+        let Some(claims) = maybe_claims else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... claims not found".into(),
+                data: None,
+            });
+        };
+
+        Ok((virtual_host, downstream_session_id, claims))
     }
 }
