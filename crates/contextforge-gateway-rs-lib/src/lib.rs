@@ -19,7 +19,7 @@ mod tools;
 
 mod user_config_store;
 pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
-use gateway::{BackendTransportCleanup, McpService, new_backend_transports};
+use gateway::{BackendTransports, McpService};
 use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
 use transports::{DownstreamTls, Tcp};
@@ -70,10 +70,10 @@ impl Gateway {
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
 
         let user_session_store = LocalUserSessionStore::new();
-        let backend_transports = new_backend_transports();
+        let backend_transports = BackendTransports::default();
         let session_id_state = SessionIdState {
             user_session_store: Arc::new(user_session_store.clone()),
-            backend_transport_cleanup: BackendTransportCleanup::new(Arc::clone(&backend_transports)),
+            backend_transports: backend_transports.clone(),
         };
         let mcp_plugin_runtime = self.plugin_runtime;
 
@@ -88,7 +88,7 @@ impl Gateway {
                     Ok(McpService::builder()
                         .with_user_session_store(user_session_store.clone())
                         .with_http_client(reqwest_backend_client.clone())
-                        .with_transports(Arc::clone(&backend_transports))
+                        .with_transports(backend_transports.clone())
                         .with_plugin_runtime(mcp_plugin_runtime.clone())
                         .build())
                 },

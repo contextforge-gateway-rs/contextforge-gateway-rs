@@ -35,25 +35,17 @@ use crate::{
     },
 };
 
-pub type BackendTransports = Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>;
+#[derive(Clone, Default)]
+pub struct BackendTransports(Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>);
 
-pub fn new_backend_transports() -> BackendTransports {
-    Arc::new(Mutex::new(HashMap::new()))
-}
-
-#[derive(Clone)]
-pub struct BackendTransportCleanup {
-    transports: BackendTransports,
-}
-
-impl BackendTransportCleanup {
-    pub fn new(transports: BackendTransports) -> Self {
-        Self { transports }
+impl BackendTransports {
+    pub async fn remove_session(&self, principal: &str, session_id: &str) {
+        let mut transports = self.0.lock().await;
+        transports.retain(|key, _| key.principal != principal || key.session_id != session_id);
     }
 
-    pub async fn remove_session(&self, session_id: &str) {
-        let mut transports = self.transports.lock().await;
-        transports.retain(|key, _| key.session_id != session_id);
+    pub fn inner(&self) -> &Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>> {
+        &self.0
     }
 }
 
@@ -65,7 +57,7 @@ where
 {
     #[builder(default = Arc::new(Mutex::new(HashSet::new())))]
     subscriptions: Arc<Mutex<HashSet<String>>>,
-    #[builder(default = new_backend_transports())]
+    #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
     #[builder(default = Arc::new(Mutex::new(LoggingLevel::Debug)))]
     log_level: Arc<Mutex<LoggingLevel>>,
@@ -77,6 +69,7 @@ where
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BackendTransportKey {
+    principal: String,
     backend_name: String,
     session_id: String,
 }
@@ -102,15 +95,23 @@ pub struct BackendTransportService {
     pub(crate) service: Option<McpClientService>,
 }
 
-impl From<(&str, &str)> for BackendTransportKey {
-    fn from((backend_name, session_name): (&str, &str)) -> Self {
-        Self { backend_name: backend_name.to_owned(), session_id: session_name.to_owned() }
+impl From<(&str, &str, &str)> for BackendTransportKey {
+    fn from((backend_name, session_name, principal): (&str, &str, &str)) -> Self {
+        Self {
+            principal: principal.to_owned(),
+            backend_name: backend_name.to_owned(),
+            session_id: session_name.to_owned(),
+        }
     }
 }
 
-impl From<(&String, &SessionId)> for BackendTransportKey {
-    fn from((backend_name, session_name): (&String, &SessionId)) -> Self {
-        Self { backend_name: backend_name.to_owned(), session_id: session_name.value().to_owned() }
+impl From<(&String, &SessionId, &str)> for BackendTransportKey {
+    fn from((backend_name, session_name, principal): (&String, &SessionId, &str)) -> Self {
+        Self {
+            principal: principal.to_owned(),
+            backend_name: backend_name.to_owned(),
+            session_id: session_name.value().to_owned(),
+        }
     }
 }
 
@@ -222,10 +223,10 @@ where
             });
         }
 
-        let mut transports = self.transports.lock().await;
+        let mut transports = self.transports.inner().lock().await;
         for (name, svc) in backend_services {
             transports
-                .entry(BackendTransportKey::from((name.as_str(), downstream_session_id.value())))
+                .entry(BackendTransportKey::from((name.as_str(), downstream_session_id.value(), claims.sub.as_str())))
                 .insert_entry(svc);
         }
         drop(transports);
@@ -245,9 +246,9 @@ where
         cx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("list_tools", &cx);
-        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
 
-        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
         let list_tools_tasks = backend_transports
@@ -294,8 +295,8 @@ where
         cx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
-        let (virtual_host, session_id) = mcp_call_validator.validate()?;
-        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
         let backend_names = session_manager.get_backend_names();
 
@@ -385,9 +386,9 @@ where
         cx: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("list_resources", &cx);
-        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
 
-        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
         let list_resources_tasks = backend_transports
@@ -434,8 +435,8 @@ where
         cx: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
-        let (virtual_host, session_id) = mcp_call_validator.validate()?;
-        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
         let backend_names = session_manager.get_backend_names();
 
