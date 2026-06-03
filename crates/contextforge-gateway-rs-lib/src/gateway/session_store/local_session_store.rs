@@ -40,4 +40,9 @@ impl UserSessionStore for LocalUserSessionStore {
         self.cache.lock().await.insert(session_key.clone(), mapping.clone());
         Ok(())
     }
+
+    async fn remove_session<'a>(&self, session_key: &'a UserSession) -> Result<(), SessionStoreError> {
+        self.cache.lock().await.remove(session_key);
+        Ok(())
+    }
 }
