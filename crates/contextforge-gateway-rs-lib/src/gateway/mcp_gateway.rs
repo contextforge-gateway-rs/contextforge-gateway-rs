@@ -51,11 +51,9 @@ impl BackendTransportCleanup {
         Self { transports }
     }
 
-    pub async fn remove_backends(&self, session_id: &str, backend_names: Vec<String>) {
+    pub async fn remove_session(&self, session_id: &str) {
         let mut transports = self.transports.lock().await;
-        for backend_name in backend_names {
-            transports.remove(&BackendTransportKey::from((backend_name.as_str(), session_id)));
-        }
+        transports.retain(|key, _| key.session_id != session_id);
     }
 }
 
@@ -132,10 +130,10 @@ where
         cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
         let call_validator = InitializeCallValidator::new(&cx);
-        let (virtual_host, downstream_session_id) = call_validator.validate()?;
+        let (virtual_host, downstream_session_id, claims) = call_validator.validate()?;
         let session_mapping = if let Ok(maybe_session_mapping) = self
             .user_session_store
-            .get_session(&UserSession::new(String::new(), Arc::clone(&downstream_session_id.session_id)))
+            .get_session(&UserSession::new(claims.sub.clone(), Arc::clone(&downstream_session_id.session_id)))
             .await
         {
             maybe_session_mapping.unwrap_or_default()
@@ -208,13 +206,21 @@ where
             })
             .unzip();
 
-        let _ = self
+        if self
             .user_session_store
             .set_session(
-                &UserSession::new(String::new(), Arc::clone(&downstream_session_id.session_id)),
+                &UserSession::new(claims.sub.clone(), Arc::clone(&downstream_session_id.session_id)),
                 &session_mapping,
             )
-            .await;
+            .await
+            .is_err()
+        {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Internal problem... session store can't be written".into(),
+                data: None,
+            });
+        }
 
         let mut transports = self.transports.lock().await;
         for (name, svc) in backend_services {

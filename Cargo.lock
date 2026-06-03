@@ -590,7 +590,6 @@ dependencies = [
  "tokio-rustls",
  "tower",
  "tower-http",
- "tower-layer",
  "tracing",
  "typed-builder",
  "uuid",

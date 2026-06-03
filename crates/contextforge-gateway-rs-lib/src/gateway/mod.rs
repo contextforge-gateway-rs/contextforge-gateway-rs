@@ -3,4 +3,5 @@ pub(crate) mod mcp_gateway;
 mod session_manager;
 mod session_store;
 
-pub use mcp_gateway::{LocalUserSessionStore, McpService};
+pub use mcp_gateway::{BackendTransportCleanup, LocalUserSessionStore, McpService, new_backend_transports};
+pub use session_store::{UserSession, UserSessionStore};
