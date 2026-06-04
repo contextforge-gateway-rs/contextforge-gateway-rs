@@ -204,8 +204,7 @@ fn headers_to_metadata(
 ) -> Result<MetadataMap, Box<dyn std::error::Error + Send + Sync>> {
     let mut map = MetadataMap::new();
     for (k, v) in headers {
-        let key = MetadataKey::from_bytes(k.as_bytes())
-            .map_err(|e| format!("invalid gRPC metadata key {k:?}: {e}"))?;
+        let key = MetadataKey::from_bytes(k.as_bytes()).map_err(|e| format!("invalid gRPC metadata key {k:?}: {e}"))?;
         let val = MetadataValue::try_from(v.as_str())
             .map_err(|e| format!("invalid gRPC metadata value for key {k:?}: {e}"))?;
         map.insert(key, val);
