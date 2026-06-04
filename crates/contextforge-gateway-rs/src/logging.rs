@@ -83,7 +83,7 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
                 SpanExporter::builder()
                     .with_tonic()
                     .with_endpoint(endpoint)
-                    .with_metadata(headers_to_metadata(&headers))
+                    .with_metadata(headers_to_metadata(&headers)?)
                     .with_timeout(std::time::Duration::from_secs(3))
                     .build()?
             },
@@ -124,9 +124,8 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
 
         Ok(Guard { appender: guard, meter_provider })
     } else {
-        let meter_provider = init_meter_provider(configuration, CONTROLLER_NAME)?;
         registry.with(console_layer).with(file_layer).init();
-        Ok(Guard { appender: guard, meter_provider })
+        Ok(Guard { appender: guard, meter_provider: None })
     }
 }
 
@@ -160,7 +159,7 @@ fn init_meter_provider(
             MetricExporter::builder()
                 .with_tonic()
                 .with_endpoint(endpoint)
-                .with_metadata(headers_to_metadata(&headers))
+                .with_metadata(headers_to_metadata(&headers)?)
                 .with_timeout(std::time::Duration::from_secs(3))
                 .build()?
         },
@@ -197,21 +196,21 @@ fn init_meter_provider(
 }
 
 /// Converts a header [`HashMap`] to a tonic [`MetadataMap`] for gRPC metadata
-/// attachment. Entries whose key or value cannot be encoded as valid ASCII gRPC
-/// metadata are logged and skipped; they do not abort startup.
-fn headers_to_metadata(headers: &HashMap<String, String>) -> MetadataMap {
+/// attachment. Returns an error (and aborts startup) for any entry whose key
+/// or value cannot be encoded as valid ASCII gRPC metadata, so invalid
+/// configuration is surfaced rather than silently dropped.
+fn headers_to_metadata(
+    headers: &HashMap<String, String>,
+) -> Result<MetadataMap, Box<dyn std::error::Error + Send + Sync>> {
     let mut map = MetadataMap::new();
     for (k, v) in headers {
-        match (MetadataKey::from_bytes(k.as_bytes()), MetadataValue::try_from(v.as_str())) {
-            (Ok(key), Ok(val)) => {
-                map.insert(key, val);
-            },
-            _ => {
-                tracing::warn!("skipping gRPC metadata entry with invalid key or value: {k:?}={v:?}");
-            },
-        }
+        let key = MetadataKey::from_bytes(k.as_bytes())
+            .map_err(|e| format!("invalid gRPC metadata key {k:?}: {e}"))?;
+        let val = MetadataValue::try_from(v.as_str())
+            .map_err(|e| format!("invalid gRPC metadata value for key {k:?}: {e}"))?;
+        map.insert(key, val);
     }
-    map
+    Ok(map)
 }
 
 /// Parses a comma-separated `key=value` header string into a [`HashMap`].
