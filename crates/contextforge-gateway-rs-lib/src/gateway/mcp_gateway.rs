@@ -155,64 +155,51 @@ where
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
-                Box::pin(async move {
-                    let mut headers = HashMap::new();
-                    if let Some(host) = backend_url.host_str()
-                        && backend_url.scheme() == "https"
-                    {
-                        let host = if let Some(port) = backend_url.port() {
-                            format!("{host}:{port}")
-                        } else {
-                            host.to_owned()
-                        };
+                    Box::pin(async move {
+                        let mut headers = HashMap::new();
+                        if let Some(host) = backend_url.host_str() && backend_url.scheme() == "https"{
+                            let host = if let Some(port) = backend_url.port(){
+                                format!("{host}:{port}")
+                            }else{
+                                host.to_owned()
+                            };
 
-                        if let Ok(value) = http::HeaderValue::from_str(&host) {
-                            headers.insert(http::header::HOST, value);
-                        } else {
-                            warn!("Really can't set the host header for {:?}", backend_url.host_str());
+                            if let Ok(value) = http::HeaderValue::from_str(&host){
+                                headers.insert(http::header::HOST, value);
+                            }else{
+                                warn!("Really can't set the host header for {:?}",backend_url.host_str());
+                            }
                         }
-                    }
 
-                    let config =
-                        StreamableHttpClientTransportConfig::with_uri(backend_url.to_string()).custom_headers(headers);
-                    let transport = StreamableHttpClientTransport::with_client(client, config);
-                    let maybe_running_service = request.serve(transport).await;
-                    if let Ok(running_service) = maybe_running_service {
-                        info!(
-                            downstream_session_id = downstream_session_id.value(),
-                            backend = name,
-                            "initialized backend MCP transport"
-                        );
-                        (name, Some(running_service))
-                    } else {
-                        warn!(
-                            downstream_session_id = downstream_session_id.value(),
-                            backend = name,
-                            error = ?maybe_running_service.err(),
-                            "unable to initialize backend MCP transport"
-                        );
-                        (name, None)
-                    }
-                })
-            })
-            .collect();
+                        let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
+                            .custom_headers(headers);
+                        let transport = StreamableHttpClientTransport::with_client(client, config);
+                        let maybe_running_service = request.serve(transport).await;
+                        if let Ok(running_service) = maybe_running_service {
+                            info!("initialize: intialized for {downstream_session_id:?} {name:?}");
+                            (name, Some(running_service))
+                        } else {
+                            warn!("initialize: Unable to initialize for {downstream_session_id:?} {name:?} {maybe_running_service:?}",);
+                            (name, None)
+                        }
+                    })
+            }).collect();
 
         let initialization_results: Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)> =
             futures::future::join_all(tasks).await;
 
         let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
             .into_iter()
-            .map(|(name, running_service): (_, _)| {
-                let server_capabilities = running_service
-                    .as_ref()
-                    .and_then(|rs| rs.peer().peer_info().as_ref().map(|pi| pi.capabilities.clone()));
-                info!(
-                    downstream_session_id = downstream_session_id.value(),
-                    backend = name,
-                    initialized = running_service.is_some(),
-                    capabilities_present = server_capabilities.is_some(),
-                    "recording backend MCP transport"
-                );
+            .map(|(name, running_service):(_,_)| {
+                info!("initialize: Adding transport: session_id {downstream_session_id:#?} backend {name} {running_service:?}");
+
+                let server_capabilities =
+                    running_service.as_ref()
+                        .and_then(|rs|
+                            rs.peer()
+                                .peer_info()
+                                .as_ref()
+                                .map(|pi| pi.capabilities.clone()));
                 (
                     (name.clone(), server_capabilities.clone()),
                     (name.clone(), BackendTransportService::from((server_capabilities, running_service.map(Arc::new)))),
@@ -282,22 +269,19 @@ where
 
         let list_tools_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_tools_tasks).await;
 
-        let responses = list_tools_tasks_results
+        let responses: Vec<_> = list_tools_tasks_results
             .into_iter()
-            .filter_map(|(name, response)| match response {
-                Some(Ok(response)) => {
-                    info!(backend = name, tools = response.tools.len(), "listed backend tools");
-                    Some((name, response))
-                },
-                Some(Err(error)) => {
-                    warn!(backend = name, ?error, "backend list_tools failed");
-                    None
-                },
-                None => {
-                    warn!(backend = name, "backend transport unavailable for list_tools");
-                    None
-                },
+            .map(|(name, response)| {
+                info!("list_tools: backend {name} {response:?}");
+                (name, response)
             })
+            .collect();
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
             .collect::<Vec<_>>();
 
         let merged_list_tools = merge_tools(responses);
@@ -328,7 +312,7 @@ where
         let request_name = request.name.clone();
 
         let backend_transports = session_manager.borrow_transports().await;
-        info!(session_id = session_id.value(), transports = backend_transports.len(), "borrowed backend transports");
+        info!("Borrowed transports {session_id:?} {backend_transports:?}");
         let mut target_service = None;
         for service_holder in backend_transports {
             debug!(
@@ -425,22 +409,19 @@ where
 
         let list_tools_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_resources_tasks).await;
 
-        let responses = list_tools_tasks_results
+        let responses: Vec<_> = list_tools_tasks_results
             .into_iter()
-            .filter_map(|(name, response)| match response {
-                Some(Ok(response)) => {
-                    info!(backend = name, resources = response.resources.len(), "listed backend resources");
-                    Some((name, response))
-                },
-                Some(Err(error)) => {
-                    warn!(backend = name, ?error, "backend list_resources failed");
-                    None
-                },
-                None => {
-                    warn!(backend = name, "backend transport unavailable for list_resources");
-                    None
-                },
+            .map(|(name, response)| {
+                info!("list_resources: backend {name} {response:?}");
+                (name, response)
             })
+            .collect();
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
             .collect::<Vec<_>>();
 
         let merged_list_resources = merge_resources(responses);
@@ -470,7 +451,7 @@ where
         };
 
         let backend_transports = session_manager.borrow_transports().await;
-        info!(session_id = session_id.value(), transports = backend_transports.len(), "borrowed backend transports");
+        info!("Borrowed transports {session_id:?} {backend_transports:?}");
 
         let call_tool_tasks: Vec<_> = backend_transports
             .into_iter()
@@ -512,22 +493,19 @@ where
 
         let call_tool_tasks_results: Vec<_> = futures::future::join_all(call_tool_tasks).await;
 
-        let responses = call_tool_tasks_results
+        let responses: Vec<_> = call_tool_tasks_results
             .into_iter()
-            .filter_map(|(name, response)| match response {
-                Some(Ok(response)) => {
-                    info!(backend = name, contents = response.contents.len(), "read backend resource");
-                    Some((name, response))
-                },
-                Some(Err(error)) => {
-                    warn!(backend = name, ?error, "backend read_resource failed");
-                    None
-                },
-                None => {
-                    warn!(backend = name, "backend transport unavailable for read_resource");
-                    None
-                },
+            .map(|(name, response)| {
+                info!("read_resource: backend {name} {response:?}");
+                (name, response)
             })
+            .collect();
+
+        let responses = responses
+            .into_iter()
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
             .collect::<Vec<_>>();
 
         responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
@@ -545,7 +523,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("list_resource_templates", maybe_session, maybe_user_config);
+        info!("list_resource_templates user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
         Ok(ListResourceTemplatesResult {
             meta: None,
             resource_templates: vec![
@@ -571,7 +549,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("subscribe", maybe_session, maybe_user_config);
+        info!("subscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
 
         let mut subs = self.subscriptions.lock().await;
         subs.insert(request.uri.clone());
@@ -586,7 +564,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("unsubscribe", maybe_session, maybe_user_config);
+        info!("unsubscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
 
         let mut subs = self.subscriptions.lock().await;
         subs.remove(request.uri.as_str());
@@ -601,7 +579,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("list_prompts", maybe_session, maybe_user_config);
+        info!("list_prompts user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
 
         Ok(ListPromptsResult {
             meta: None,
@@ -634,7 +612,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("get_prompt", maybe_session, maybe_user_config);
+        info!("get_prompt user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
         match request.name.as_str() {
             "test_simple_prompt" => Ok(GetPromptResult::new(vec![PromptMessage::new_text(
                 PromptMessageRole::User,
@@ -688,7 +666,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("complete", maybe_session, maybe_user_config);
+        info!("complete user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
         let values = match &request.r#ref {
             Reference::Resource(_) => {
                 if request.argument.name == "id" {
@@ -714,7 +692,7 @@ where
         let maybe_parts = cx.extensions.get::<Parts>();
         let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        log_mcp_extension_context("set_level", maybe_session, maybe_user_config);
+        info!("set_level user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
         let mut level = self.log_level.lock().await;
         *level = request.level;
         Ok(())
@@ -789,15 +767,6 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
         })
         .sorted_by(|t, o| t.name.cmp(&o.name))
         .collect::<Vec<_>>()
-}
-
-fn log_mcp_extension_context(call: &'static str, session: Option<&SessionId>, user_config: Option<&UserConfig>) {
-    info!(
-        call,
-        session_id = session.map(|session| session.value().as_str()),
-        virtual_hosts = user_config.map(|user_config| user_config.virtual_hosts.len()),
-        "handling MCP call"
-    );
 }
 
 fn split_resource_name<'a, T: AsRef<str>, N: AsRef<str>>(
