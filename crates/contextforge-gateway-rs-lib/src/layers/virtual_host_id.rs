@@ -24,7 +24,7 @@ pub async fn virtual_host_id_layer(mut request: http::Request<axum::body::Body>,
         Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from("Problem occured retrieving the configuration"))
+            .body(Body::from("Problem occurred retrieving the configuration"))
             .expect("Expecting this to work")
     }
 }

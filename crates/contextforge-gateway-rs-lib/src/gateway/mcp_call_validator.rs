@@ -29,8 +29,11 @@ impl<'a> AuthorizedCallValidator<'a> {
 
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
         info!(
-            "{} user_config = {maybe_user_config:#?} session_id = {maybe_session_id:#?} virtual_host_id = {maybe_virtual_host_id:#?}",
-            self.call_name
+            call = self.call_name,
+            session_id = maybe_session_id.map(|session_id| session_id.value().as_str()),
+            virtual_host_id = maybe_virtual_host_id.map(|virtual_host_id| virtual_host_id.value().as_str()),
+            virtual_hosts = maybe_user_config.map(|user_config| user_config.virtual_hosts.len()),
+            "validating authorized MCP call"
         );
 
         let Some(session_id) = maybe_session_id else {
@@ -93,7 +96,10 @@ impl<'a> InitializeCallValidator<'a> {
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
         let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
         info!(
-            "intialize user_config = {maybe_user_config:#?} downstream_session_id = {maybe_downstream_session:#?} virtual_host_id = {maybe_virtual_host_id:#?}"
+            downstream_session_id = maybe_downstream_session.map(|session| session.session_id.as_ref()),
+            virtual_host_id = maybe_virtual_host_id.map(|virtual_host_id| virtual_host_id.value().as_str()),
+            virtual_hosts = maybe_user_config.map(|user_config| user_config.virtual_hosts.len()),
+            "validating MCP initialize call"
         );
 
         let Some(downstream_session_id) = maybe_downstream_session else {
