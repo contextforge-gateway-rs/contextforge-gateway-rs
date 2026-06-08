@@ -11,17 +11,28 @@ use contextforge_gateway_rs_lib::{Config, Gateway, RedisClient, RedisConfig, Use
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rustls::crypto;
 use tikv_jemallocator::Jemalloc;
+use tracing::info;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let provider = crypto::ring::default_provider();
     _ = provider.install_default();
 
     let config = Config::parse();
-    println!("contextforge-gateway-rs {config:?}");
     let _guard = logging::init_tracing_logging(&config)?;
+    info!(
+        address = ?config.address,
+        tls_address = ?config.tls_address,
+        redis_mode = ?config.redis_mode,
+        upstream_connection_mode = ?config.upstream_connection_mode,
+        runtime_plugins_enabled = config.runtime_plugins_enabled.unwrap_or(false),
+        open_telemetry_enabled = config.enable_open_telemetry.unwrap_or(false),
+        otel_metrics_enabled = config.enable_otel_metrics.unwrap_or(false),
+        single_runtime = config.single_runtime.unwrap_or(false),
+        configured_cpus = ?config.number_of_cpus,
+        "starting contextforge-gateway-rs"
+    );
 
     let runtime = runtime::Runtime::from(&config);
 
