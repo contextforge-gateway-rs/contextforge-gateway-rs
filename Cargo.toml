@@ -10,7 +10,8 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.91.1"
-license-file = "./LICENSE.md"
+license-file = "./LICENSE"
+description = "Small, fast ContextForge gateway dataplane written in Rust"
 keywords = ["mcp", "gateway", "rust", "contextforge", "a2a", "ai", "llm"]
 homepage = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
 readme = "./README.md"
@@ -18,10 +19,10 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 
 [workspace.dependencies]
-contextforge-gateway-rs = { path = "./crates/contextforge-gateway-rs" }
+contextforge-gateway-rs = { version = "0.1.0", path = "./crates/contextforge-gateway-rs" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib", features = [
     "with_tools",
-] }
+], version = "0.1.0" }
 rmcp = { version = "1.6.0", features = [
     "server",
     "client",

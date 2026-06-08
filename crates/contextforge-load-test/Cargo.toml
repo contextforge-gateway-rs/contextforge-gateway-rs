@@ -4,10 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license-file.workspace = true
+description.workspace = true
 keywords.workspace = true
 homepage.workspace = true
 readme.workspace = true
 repository.workspace = true
+publish = false
 
 
 

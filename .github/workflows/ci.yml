@@ -53,6 +53,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
       - run: cargo build --locked --workspace
 
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.1
+      - run: cargo package --locked -p contextforge-gateway-rs-lib -p contextforge-gateway-rs --no-verify
+
   bench:
     runs-on: ubuntu-latest
     steps:
