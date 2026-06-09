@@ -20,7 +20,7 @@ pub async fn user_config_store_layer(
         debug!("Getting user config for {subject:?}");
         match state.config_store.get_config(&User::new(&subject)).await {
             Ok(user_config) => {
-                info!("Got config for user {subject} {user_config:?}");
+                info!(subject, virtual_hosts = user_config.virtual_hosts.len(), "loaded user config");
                 request.extensions_mut().insert(user_config);
                 next.run(request).await
             },
@@ -28,13 +28,13 @@ pub async fn user_config_store_layer(
             Err(ConfigStoreError::NoDataForKey) => Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::CONTENT_TYPE, "text/plain")
-                .body(Body::from("Problem occured retrieving the configuration"))
+                .body(Body::from("Problem occurred retrieving the configuration"))
                 .expect("Expecting this to work"),
 
             Err(_) => Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .header(header::CONTENT_TYPE, "text/plain")
-                .body(Body::from("Problem occured retrieving the configuration"))
+                .body(Body::from("Problem occurred retrieving the configuration"))
                 .expect("Expecting this to work"),
         }
     } else {
