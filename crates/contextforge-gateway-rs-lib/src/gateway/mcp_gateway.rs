@@ -8,19 +8,21 @@ use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult
 use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
-    ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
+    ClientHandler, ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
+    handler::client::progress::ProgressDispatcher,
     model::{
-        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
-        ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
-        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
-        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
-        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
-        ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
+        AnnotateAble, CallToolRequestParams, CallToolResult, ClientRequest, CompleteRequestParams, CompleteResult,
+        CompletionInfo, ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams,
+        InitializeResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
+        LoggingLevel, LoggingMessageNotificationParam, PaginatedRequestParams, ProgressNotificationParam, Prompt,
+        PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, RawImageContent, RawResourceTemplate,
+        ReadResourceRequestParams, ReadResourceResult, Reference, Request, Resource, ServerCapabilities, ServerResult,
+        SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
-    service::{RequestContext, RunningService},
+    service::{NotificationContext, PeerRequestOptions, RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast, watch};
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
@@ -74,7 +76,39 @@ pub struct BackendTransportKey {
     session_id: String,
 }
 
-type McpClientService = Arc<RunningService<RoleClient, InitializeRequestParams>>;
+type McpClientService = Arc<RunningService<RoleClient, GatewayBackendClient>>;
+
+#[derive(Clone, Debug)]
+pub(crate) struct GatewayBackendClient {
+    initialize_request: InitializeRequestParams,
+    progress_dispatcher: ProgressDispatcher,
+    logging_messages: broadcast::Sender<LoggingMessageNotificationParam>,
+}
+
+impl GatewayBackendClient {
+    fn new(initialize_request: InitializeRequestParams) -> Self {
+        let (logging_messages, _) = broadcast::channel(16);
+        Self { initialize_request, progress_dispatcher: ProgressDispatcher::new(), logging_messages }
+    }
+}
+
+impl ClientHandler for GatewayBackendClient {
+    fn get_info(&self) -> InitializeRequestParams {
+        self.initialize_request.clone()
+    }
+
+    async fn on_progress(&self, params: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
+        self.progress_dispatcher.handle_notification(params).await;
+    }
+
+    async fn on_logging_message(
+        &self,
+        params: LoggingMessageNotificationParam,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        let _ = self.logging_messages.send(params);
+    }
+}
 
 #[derive(Debug)]
 pub struct ServiceHolder {
@@ -174,7 +208,7 @@ where
                         let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
                             .custom_headers(headers);
                         let transport = StreamableHttpClientTransport::with_client(client, config);
-                        let maybe_running_service = request.serve(transport).await;
+                        let maybe_running_service = GatewayBackendClient::new(request).serve(transport).await;
                         if let Ok(running_service) = maybe_running_service {
                             info!("initialize: intialized for {downstream_session_id:?} {name:?}");
                             (name, Some(running_service))
@@ -185,7 +219,7 @@ where
                     })
             }).collect();
 
-        let initialization_results: Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)> =
+        let initialization_results: Vec<(&String, Option<RunningService<RoleClient, GatewayBackendClient>>)> =
             futures::future::join_all(tasks).await;
 
         let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
@@ -361,7 +395,94 @@ where
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let service_name = target_service.name.clone();
-        let response = service.call_tool(routed_request).await;
+        let mut notification_forwarders = Vec::new();
+        let progress_token = cx
+            .meta
+            .get_progress_token()
+            .or_else(|| routed_request.meta.as_ref().and_then(|meta| meta.get_progress_token()));
+        let subscribed_progress_token = progress_token.clone();
+        if let Some(progress_token) = progress_token.clone() {
+            routed_request.meta.get_or_insert_with(Default::default).set_progress_token(progress_token.clone());
+            let mut progress_subscriber = service.service().progress_dispatcher.subscribe(progress_token).await;
+            let downstream_peer = cx.peer.clone();
+            notification_forwarders.push(tokio::spawn(async move {
+                while let Some(progress) = futures::StreamExt::next(&mut progress_subscriber).await {
+                    if let Err(error) = downstream_peer.notify_progress(progress).await {
+                        warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
+                        break;
+                    }
+                }
+            }));
+        }
+        let mut logging_messages = service.service().logging_messages.subscribe();
+        let (stop_logging_tx, mut stop_logging_rx) = watch::channel(false);
+        let downstream_peer = cx.peer.clone();
+        notification_forwarders.push(tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    result = logging_messages.recv() => match result {
+                        Ok(message) => {
+                            if let Err(error) = downstream_peer.notify_logging_message(message).await {
+                                warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
+                                break;
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!("call_tool: skipped {skipped} backend logging notifications while forwarding downstream");
+                        },
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
+                    changed = stop_logging_rx.changed() => {
+                        if changed.is_err() || *stop_logging_rx.borrow() {
+                            loop {
+                                match logging_messages.try_recv() {
+                                    Ok(message) => {
+                                        if let Err(error) = downstream_peer.notify_logging_message(message).await {
+                                            warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
+                                            break;
+                                        }
+                                    },
+                                    Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                                        warn!("call_tool: skipped {skipped} backend logging notifications while forwarding downstream");
+                                    },
+                                    Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => break,
+                                }
+                            }
+                            break;
+                        }
+                    },
+                }
+            }
+        }));
+        let response = if progress_token.is_some() {
+            let mut options = PeerRequestOptions::no_options();
+            options.meta = routed_request.meta.clone();
+            let handle = service
+                .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(routed_request)), options)
+                .await;
+            match handle {
+                Ok(handle) => match handle.await_response().await {
+                    Ok(ServerResult::CallToolResult(result)) => Ok(result),
+                    Ok(_) => {
+                        warn!("call_tool: backend {service_name} returned unexpected response");
+                        Err(rmcp::service::ServiceError::UnexpectedResponse)
+                    },
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            }
+        } else {
+            service.call_tool(routed_request).await
+        };
+        if let Some(progress_token) = subscribed_progress_token {
+            service.service().progress_dispatcher.unsubscribe(&progress_token).await;
+        }
+        let _ = stop_logging_tx.send(true);
+        for mut forwarder in notification_forwarders {
+            if tokio::time::timeout(std::time::Duration::from_millis(200), &mut forwarder).await.is_err() {
+                forwarder.abort();
+            }
+        }
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {

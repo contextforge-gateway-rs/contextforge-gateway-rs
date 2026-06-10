@@ -13,12 +13,13 @@ use contextforge_gateway_rs_lib::{Config, Gateway, UpstreamConnectionMode, UserC
 use futures::FutureExt;
 use http::{HeaderMap, HeaderValue};
 use rmcp::{
-    ErrorData, RoleServer, ServerHandler, ServiceExt,
+    ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, InitializeRequestParams,
-        InitializeResult, ServerCapabilities,
+        InitializeResult, LoggingLevel, LoggingMessageNotificationParam, ProgressNotificationParam, ServerCapabilities,
     },
     service::RequestContext,
+    service::Service,
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -44,6 +45,7 @@ pub(crate) struct BackendObservation {
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) initialize_calls: Arc<StdMutex<usize>>,
 }
 
 #[derive(Clone)]
@@ -57,6 +59,7 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
+        *self.state.initialize_calls.lock().expect("backend initialize calls lock poisoned") += 1;
         Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
     }
@@ -64,7 +67,7 @@ impl ServerHandler for TestBackend {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _cx: RequestContext<RoleServer>,
+        cx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         self.state
             .calls
@@ -88,6 +91,34 @@ impl ServerHandler for TestBackend {
                     .ok_or_else(|| ErrorData::invalid_params("sum requires numeric b", None))?;
                 Ok(CallToolResult::success(vec![Content::text((a + b).to_string())]))
             },
+            "progress_sum" => {
+                if let Some(progress_token) = cx.meta.get_progress_token() {
+                    for package in 1..=4 {
+                        cx.peer
+                            .notify_logging_message(LoggingMessageNotificationParam {
+                                level: LoggingLevel::Info,
+                                logger: Some("test-backend".to_owned()),
+                                data: serde_json::json!({ "package": package, "state": "started" }),
+                            })
+                            .await
+                            .map_err(|error| {
+                                ErrorData::internal_error(format!("message notification failed: {error}"), None)
+                            })?;
+                        cx.peer
+                            .notify_progress(
+                                ProgressNotificationParam::new(progress_token.clone(), package as f64)
+                                    .with_total(4.0)
+                                    .with_message(format!("package {package}/4")),
+                            )
+                            .await
+                            .map_err(|error| {
+                                ErrorData::internal_error(format!("progress notification failed: {error}"), None)
+                            })?;
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }
+                Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+            },
             _ => Err(ErrorData {
                 code: ErrorCode::METHOD_NOT_FOUND,
                 message: format!("unknown tool {}", request.name).into(),
@@ -109,6 +140,17 @@ impl RunningGateway {
         &self,
         user: &str,
     ) -> rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams> {
+        self.connect_with_handler(user, InitializeRequestParams::default()).await
+    }
+
+    pub(crate) async fn connect_with_handler<S>(
+        &self,
+        user: &str,
+        handler: S,
+    ) -> rmcp::service::RunningService<RoleClient, S>
+    where
+        S: Service<RoleClient> + Send + Sync + Clone + 'static,
+    {
         let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
         loop {
             let mut headers = HeaderMap::new();
@@ -121,7 +163,7 @@ impl RunningGateway {
                 client,
                 StreamableHttpClientTransportConfig::with_uri(self.gateway_url.clone()),
             );
-            match InitializeRequestParams::default().serve(transport).await {
+            match handler.clone().serve(transport).await {
                 Ok(service) => return service,
                 Err(error) if Instant::now() < deadline => {
                     let _ = error;
@@ -146,13 +188,22 @@ pub(crate) async fn start_gateway(
     runtime_plugins_enabled: bool,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
 ) -> RunningGateway {
-    start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime).await
+    start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, false).await
+}
+
+pub(crate) async fn start_gateway_with_json_backend_responses(
+    user: &str,
+    runtime_plugins_enabled: bool,
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+) -> RunningGateway {
+    start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, true).await
 }
 
 async fn start_gateway_with_runtime(
     user: &str,
     runtime_plugins_enabled: bool,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
+    json_backend_responses: bool,
 ) -> RunningGateway {
     let port_lock = Arc::clone(GATEWAY_PORT_LOCK.get_or_init(|| Arc::new(TokioMutex::new(()))));
     let port_guard = port_lock.lock().await;
@@ -169,7 +220,7 @@ async fn start_gateway_with_runtime(
             move || Ok(TestBackend { state: backend_state.clone() })
         },
         LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default(),
+        StreamableHttpServerConfig::default().with_json_response(json_backend_responses),
     );
     let backend_router = axum::Router::new().route_service("/mcp", backend_service);
 

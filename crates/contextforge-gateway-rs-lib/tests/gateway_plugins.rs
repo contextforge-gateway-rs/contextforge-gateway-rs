@@ -1,16 +1,49 @@
 mod support;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use cpex_core::cmf::Role;
 use cpex_core::hooks::types::cmf_hook_names;
-use rmcp::model::ErrorCode;
+use rmcp::{
+    ClientHandler,
+    model::{
+        CallToolRequestParams, ClientRequest, ErrorCode, Implementation, InitializeRequestParams,
+        LoggingMessageNotificationParam, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request,
+        ServerResult,
+    },
+    service::{NotificationContext, PeerRequestOptions, RoleClient},
+};
 use serde_json::Value;
 
 use support::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, TestPlugin, error_code,
-    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway, sum_request, text,
+    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
+    start_gateway_with_json_backend_responses, sum_request, text,
 };
+
+#[derive(Clone, Default)]
+struct RecordingClient {
+    progress: Arc<StdMutex<Vec<ProgressNotificationParam>>>,
+    messages: Arc<StdMutex<Vec<LoggingMessageNotificationParam>>>,
+}
+
+impl ClientHandler for RecordingClient {
+    fn get_info(&self) -> InitializeRequestParams {
+        InitializeRequestParams::new(Default::default(), Implementation::new("recording-test-client", "0.1.0"))
+    }
+
+    async fn on_progress(&self, params: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
+        self.progress.lock().expect("progress lock poisoned").push(params);
+    }
+
+    async fn on_logging_message(
+        &self,
+        params: LoggingMessageNotificationParam,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        self.messages.lock().expect("messages lock poisoned").push(params);
+    }
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn disabled_runtime_does_not_invoke_registered_plugin() {
@@ -68,6 +101,77 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
     assert_eq!(1, observations.post_calls);
     assert_eq!(Some("sum".to_owned()), observations.post_payload_name);
     assert_eq!(Some("3".to_owned()), observations.post_result_text);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn call_tool_forwards_backend_progress_and_message_notifications_before_completion() {
+    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let messages = Arc::clone(&client.messages);
+    let service = gateway.connect_with_handler("admin@example.com", client).await;
+    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
+    let mut options = PeerRequestOptions::no_options();
+    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
+    let handle =
+        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
+
+    let ServerResult::CallToolResult(result) = handle.await_response().await.unwrap() else {
+        panic!("expected call tool result");
+    };
+    wait_for_notification_count(&progress, 4).await;
+    wait_for_notification_count(&messages, 4).await;
+
+    assert_eq!("post:completed 4 packages", text(&result));
+    let progress = progress.lock().expect("progress lock poisoned");
+    assert_eq!(4, progress.len());
+    assert_eq!(Some("package 4/4"), progress.last().and_then(|notification| notification.message.as_deref()));
+    let messages = messages.lock().expect("messages lock poisoned");
+    assert_eq!(4, messages.len());
+}
+
+async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expected: usize) {
+    for _ in 0..50 {
+        if notifications.lock().expect("notifications lock poisoned").len() >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn repeated_call_tool_reuses_initialized_streamable_http_backend_session() {
+    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+    let first = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let second = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 3, 4)).await.unwrap();
+
+    assert_eq!("post:3", text(&first));
+    assert_eq!("post:7", text(&second));
+    assert_eq!(2, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
+    assert_eq!(1, *gateway.backend_state.initialize_calls.lock().expect("backend initialize calls lock poisoned"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn repeated_call_tool_works_with_json_streamable_http_backend_responses() {
+    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway_with_json_backend_responses("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+    let first = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let second = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 3, 4)).await.unwrap();
+
+    assert_eq!("post:3", text(&first));
+    assert_eq!("post:7", text(&second));
+    assert_eq!(2, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
+    assert_eq!(1, *gateway.backend_state.initialize_calls.lock().expect("backend initialize calls lock poisoned"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
