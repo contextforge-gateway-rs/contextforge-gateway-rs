@@ -3,12 +3,13 @@ use cpex_core::executor::PipelineResult;
 use rmcp::{
     ErrorData,
     model::{CallToolResult, ErrorCode},
+    serde::{Serialize, de::DeserializeOwned},
 };
 use tracing::warn;
 
 use crate::{
     ToolArgumentsUpdate,
-    cmf::{tool_call_arguments, tool_result_response},
+    cmf::{tool_call_arguments, tool_result_content, tool_result_response},
 };
 
 pub(crate) fn modified_message_payload(result: &PipelineResult) -> Option<&MessagePayload> {
@@ -43,6 +44,19 @@ pub(crate) fn effective_post_result(original: CallToolResult, result: &PipelineR
         Some(payload) => tool_result_response(original, payload),
         None => original,
     }
+}
+
+pub(crate) fn effective_post_json<T>(original: T, result: &PipelineResult) -> T
+where
+    T: Serialize + DeserializeOwned,
+{
+    let Some(payload) = modified_message_payload(result) else {
+        return original;
+    };
+    let Some(content) = tool_result_content(payload) else {
+        return original;
+    };
+    serde_json::from_value::<T>(content).unwrap_or(original)
 }
 
 pub(crate) fn plugin_denied_error(result: PipelineResult) -> ErrorData {

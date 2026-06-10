@@ -12,7 +12,7 @@ use cpex_core::{
     hooks::{Extensions, HookHandler, PluginResult, TypedHandlerAdapter, types::cmf_hook_names},
     plugin::{Plugin, PluginConfig},
 };
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, Content, LoggingMessageNotificationParam, ProgressNotificationParam};
 use serde_json::json;
 
 use super::tool::text;
@@ -53,6 +53,7 @@ pub(crate) enum PostBehavior {
     Allow,
     Rewrite,
     RewriteRaw,
+    RewriteStreamEvents,
     Deny,
     RequireContext,
 }
@@ -100,6 +101,11 @@ impl TestPlugin {
 
     pub(crate) fn with_raw_post_rewrite(mut self) -> Self {
         self.post_behavior = PostBehavior::RewriteRaw;
+        self
+    }
+
+    pub(crate) fn with_stream_event_rewrite(mut self) -> Self {
+        self.post_behavior = PostBehavior::RewriteStreamEvents;
         self
     }
 
@@ -192,6 +198,28 @@ impl HookHandler<CmfHook> for TestPlugin {
                         content.content = json!("raw-post");
                     }
                     PluginResult::modify_payload(modified)
+                },
+                PostBehavior::RewriteStreamEvents => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::ToolResult { content }) =
+                        modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
+                    {
+                        if let Ok(mut progress) =
+                            serde_json::from_value::<ProgressNotificationParam>(content.content.clone())
+                        {
+                            progress.message = progress.message.map(|message| format!("plugin:{message}"));
+                            content.content = serde_json::to_value(progress).expect("progress serializes");
+                            return PluginResult::modify_payload(modified);
+                        }
+                        if let Ok(mut message) =
+                            serde_json::from_value::<LoggingMessageNotificationParam>(content.content.clone())
+                        {
+                            message.data = json!({ "plugin": "message", "original": message.data });
+                            content.content = serde_json::to_value(message).expect("message serializes");
+                            return PluginResult::modify_payload(modified);
+                        }
+                    }
+                    PluginResult::allow()
                 },
                 PostBehavior::Deny => PluginResult::deny(
                     PluginViolation::new("post_denied", "post denied")

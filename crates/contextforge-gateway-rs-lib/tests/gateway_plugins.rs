@@ -133,6 +133,41 @@ async fn call_tool_forwards_backend_progress_and_message_notifications_before_co
     assert_eq!(4, messages.len());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn post_hook_can_modify_stream_progress_and_message_notifications() {
+    let plugin =
+        Arc::new(TestPlugin::new("post-stream", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_rewrite());
+    let observations = plugin.observations();
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let messages = Arc::clone(&client.messages);
+    let service = gateway.connect_with_handler("admin@example.com", client).await;
+    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
+    let mut options = PeerRequestOptions::no_options();
+    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
+    let handle =
+        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
+
+    let ServerResult::CallToolResult(result) = handle.await_response().await.unwrap() else {
+        panic!("expected call tool result");
+    };
+    wait_for_notification_count(&progress, 4).await;
+    wait_for_notification_count(&messages, 4).await;
+
+    assert_eq!("completed 4 packages", text(&result));
+    let progress = progress.lock().expect("progress lock poisoned");
+    assert_eq!(Some("plugin:package 4/4"), progress.last().and_then(|notification| notification.message.as_deref()));
+    let messages = messages.lock().expect("messages lock poisoned");
+    assert_eq!(
+        Some("message"),
+        messages.last().and_then(|notification| notification.data.get("plugin")).and_then(Value::as_str)
+    );
+    assert_eq!(9, observations.lock().expect("observations lock poisoned").post_calls);
+}
+
 async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expected: usize) {
     for _ in 0..50 {
         if notifications.lock().expect("notifications lock poisoned").len() >= expected {

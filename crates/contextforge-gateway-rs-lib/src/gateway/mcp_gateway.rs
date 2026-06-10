@@ -405,8 +405,26 @@ where
             routed_request.meta.get_or_insert_with(Default::default).set_progress_token(progress_token.clone());
             let mut progress_subscriber = service.service().progress_dispatcher.subscribe(progress_token).await;
             let downstream_peer = cx.peer.clone();
+            let plugin_runtime = self.plugin_runtime.clone();
+            let progress_tool_name = tool_name.clone();
+            let progress_post_state = post_state.clone();
             notification_forwarders.push(tokio::spawn(async move {
                 while let Some(progress) = futures::StreamExt::next(&mut progress_subscriber).await {
+                    let progress = if let Some(plugin_runtime) = &plugin_runtime {
+                        match plugin_runtime
+                            .after_progress_notification(&progress_tool_name, progress, progress_post_state.as_ref())
+                            .await
+                        {
+                            Ok(Some(progress)) => progress,
+                            Ok(None) => continue,
+                            Err(error) => {
+                                warn!("call_tool: plugin rejected backend progress notification: {error:?}");
+                                continue;
+                            },
+                        }
+                    } else {
+                        progress
+                    };
                     if let Err(error) = downstream_peer.notify_progress(progress).await {
                         warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
                         break;
@@ -417,11 +435,29 @@ where
         let mut logging_messages = service.service().logging_messages.subscribe();
         let (stop_logging_tx, mut stop_logging_rx) = watch::channel(false);
         let downstream_peer = cx.peer.clone();
+        let plugin_runtime = self.plugin_runtime.clone();
+        let logging_tool_name = tool_name.clone();
+        let logging_post_state = post_state.clone();
         notification_forwarders.push(tokio::spawn(async move {
             loop {
                 tokio::select! {
                     result = logging_messages.recv() => match result {
                         Ok(message) => {
+                            let message = if let Some(plugin_runtime) = &plugin_runtime {
+                                match plugin_runtime
+                                    .after_logging_message(&logging_tool_name, message, logging_post_state.as_ref())
+                                    .await
+                                {
+                                    Ok(Some(message)) => message,
+                                    Ok(None) => continue,
+                                    Err(error) => {
+                                        warn!("call_tool: plugin rejected backend logging notification: {error:?}");
+                                        continue;
+                                    },
+                                }
+                            } else {
+                                message
+                            };
                             if let Err(error) = downstream_peer.notify_logging_message(message).await {
                                 warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
                                 break;
@@ -437,6 +473,21 @@ where
                             loop {
                                 match logging_messages.try_recv() {
                                     Ok(message) => {
+                                        let message = if let Some(plugin_runtime) = &plugin_runtime {
+                                            match plugin_runtime
+                                                .after_logging_message(&logging_tool_name, message, logging_post_state.as_ref())
+                                                .await
+                                            {
+                                                Ok(Some(message)) => message,
+                                                Ok(None) => continue,
+                                                Err(error) => {
+                                                    warn!("call_tool: plugin rejected backend logging notification: {error:?}");
+                                                    continue;
+                                                },
+                                            }
+                                        } else {
+                                            message
+                                        };
                                         if let Err(error) = downstream_peer.notify_logging_message(message).await {
                                             warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
                                             break;
@@ -493,7 +544,7 @@ where
         })?;
         let response = match (&self.plugin_runtime, post_state) {
             (Some(plugin_runtime), Some(post_state)) => {
-                plugin_runtime.after_tool_call(&tool_name, response, Some(post_state)).await?
+                plugin_runtime.after_tool_call(&tool_name, response, Some(&post_state)).await?
             },
             _ => response,
         };

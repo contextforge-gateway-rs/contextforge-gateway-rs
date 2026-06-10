@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use cpex_core::{
     cmf::{CmfHook, MessagePayload},
@@ -12,13 +15,17 @@ use cpex_core::{
 use rmcp::{
     ErrorData,
     model::{CallToolRequestParams, CallToolResult},
+    serde::{Serialize, de::DeserializeOwned},
 };
+use tokio::sync::Mutex;
 
 use crate::{
-    cmf::{tool_call_payload, tool_result_payload},
+    cmf::{tool_call_payload, tool_json_result_payload, tool_result_payload},
     error::GatewayPluginRuntimeError,
     hooks::{RuntimeHookState, ToolPreCallResult},
-    pipeline::{effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error},
+    pipeline::{
+        effective_post_json, effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error,
+    },
 };
 
 #[derive(Default)]
@@ -32,6 +39,8 @@ struct ToolCallState {
     context_table: PluginContextTable,
     tool_call_id: String,
 }
+
+type SharedToolCallState = Mutex<ToolCallState>;
 
 static TOOL_CALL_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -148,29 +157,82 @@ impl GatewayPluginRuntime {
         }
 
         let arguments = effective_pre_args(request.arguments.as_ref(), &pre_result)?;
-        let state = ToolCallState { context_table: pre_result.context_table, tool_call_id };
-        Ok(ToolPreCallResult { arguments, state: Some(Box::new(state)) })
+        let state = Mutex::new(ToolCallState { context_table: pre_result.context_table, tool_call_id });
+        Ok(ToolPreCallResult { arguments, state: Some(Arc::new(state)) })
     }
 
-    pub(crate) async fn after_tool_call(
+    pub(crate) async fn after_tool_call_ref(
         &self,
         tool_name: &str,
         response: CallToolResult,
-        state: Option<RuntimeHookState>,
+        state: Option<&RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
         if !self.has_post_hook {
             return Ok(response);
         }
 
-        let state = state.and_then(|state| state.downcast::<ToolCallState>().ok());
-        let (context_table, tool_call_id) =
-            state.map_or_else(|| (None, next_tool_call_id()), |state| (Some(state.context_table), state.tool_call_id));
-        let post_result =
-            self.invoke_tool_post(tool_result_payload(tool_name, &response, &tool_call_id), context_table).await;
+        let state = state.and_then(|state| Arc::clone(state).downcast::<SharedToolCallState>().ok());
+        let Some(state) = state else {
+            let post_result =
+                self.invoke_tool_post(tool_result_payload(tool_name, &response, &next_tool_call_id()), None).await;
+            if post_result.is_denied() {
+                return Err(plugin_denied_error(post_result));
+            }
+            return Ok(effective_post_result(response, &post_result));
+        };
+
+        let mut state = state.lock().await;
+        let post_result = self
+            .invoke_tool_post(
+                tool_result_payload(tool_name, &response, &state.tool_call_id),
+                Some(state.context_table.clone()),
+            )
+            .await;
         if post_result.is_denied() {
             return Err(plugin_denied_error(post_result));
         }
 
+        state.context_table = post_result.context_table.clone();
         Ok(effective_post_result(response, &post_result))
+    }
+
+    pub(crate) async fn after_tool_event<T>(
+        &self,
+        tool_name: &str,
+        event: T,
+        state: Option<&RuntimeHookState>,
+    ) -> Result<Option<T>, ErrorData>
+    where
+        T: Serialize + DeserializeOwned,
+    {
+        if !self.has_post_hook {
+            return Ok(Some(event));
+        }
+
+        let content = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+        let state = state.and_then(|state| Arc::clone(state).downcast::<SharedToolCallState>().ok());
+        let Some(state) = state else {
+            let post_result = self
+                .invoke_tool_post(tool_json_result_payload(tool_name, content, false, &next_tool_call_id()), None)
+                .await;
+            if post_result.is_denied() {
+                return Ok(None);
+            }
+            return Ok(Some(effective_post_json(event, &post_result)));
+        };
+
+        let mut state = state.lock().await;
+        let post_result = self
+            .invoke_tool_post(
+                tool_json_result_payload(tool_name, content, false, &state.tool_call_id),
+                Some(state.context_table.clone()),
+            )
+            .await;
+        if post_result.is_denied() {
+            return Ok(None);
+        }
+
+        state.context_table = post_result.context_table.clone();
+        Ok(Some(effective_post_json(event, &post_result)))
     }
 }

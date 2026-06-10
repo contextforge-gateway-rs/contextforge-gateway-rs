@@ -1,10 +1,10 @@
-use std::any::Any;
+use std::{any::Any, sync::Arc};
 
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Map, Value};
 
 pub type RuntimeHookError = Box<dyn std::error::Error + Send + Sync + 'static>;
-pub type RuntimeHookState = Box<dyn Any + Send + Sync + 'static>;
+pub type RuntimeHookState = Arc<dyn Any + Send + Sync + 'static>;
 
 #[derive(Debug)]
 pub enum ToolArgumentsUpdate {
