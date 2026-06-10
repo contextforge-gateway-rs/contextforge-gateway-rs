@@ -253,7 +253,7 @@ impl GatewayPluginRuntimeHandle {
         };
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
         if runtime.has_post_hook() {
-            let state = result.state.take();
+            let state = result.state.take().or_else(|| Some(runtime.new_tool_call_state()));
             result.state = Some(Arc::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
         } else {
             result.state = None;

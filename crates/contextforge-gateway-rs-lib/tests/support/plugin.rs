@@ -34,6 +34,7 @@ pub(crate) struct Observations {
     pub(crate) pre_tool_call_id: Option<String>,
     pub(crate) post_payload_name: Option<String>,
     pub(crate) post_tool_call_id: Option<String>,
+    pub(crate) post_tool_call_ids: Vec<String>,
     pub(crate) post_result_text: Option<String>,
 }
 
@@ -161,6 +162,7 @@ impl HookHandler<CmfHook> for TestPlugin {
             if let Some(result) = payload.message.get_tool_results().first() {
                 observations.post_payload_name = Some(result.tool_name.clone());
                 observations.post_tool_call_id = Some(result.tool_call_id.clone());
+                observations.post_tool_call_ids.push(result.tool_call_id.clone());
             }
             observations.post_result_text = Some(cmf_result_text(payload));
         } else {

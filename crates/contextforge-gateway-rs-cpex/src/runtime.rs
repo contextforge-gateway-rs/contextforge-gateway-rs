@@ -53,6 +53,13 @@ impl GatewayPluginRuntime {
         self.has_post_hook
     }
 
+    pub(crate) fn new_tool_call_state(&self) -> RuntimeHookState {
+        Arc::new(Mutex::new(ToolCallState {
+            context_table: PluginContextTable::default(),
+            tool_call_id: next_tool_call_id(),
+        }))
+    }
+
     pub(crate) async fn from_config(
         config: CpexConfig,
         factories: &PluginFactoryRegistry,
@@ -146,7 +153,8 @@ impl GatewayPluginRuntime {
         backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
         if !self.has_pre_hook {
-            return Ok(ToolPreCallResult::unchanged());
+            let state = self.has_post_hook.then(|| self.new_tool_call_state());
+            return Ok(ToolPreCallResult { arguments: crate::ToolArgumentsUpdate::Unchanged, state });
         }
 
         let tool_call_id = next_tool_call_id();
@@ -172,14 +180,7 @@ impl GatewayPluginRuntime {
         }
 
         let state = state.and_then(|state| Arc::clone(state).downcast::<SharedToolCallState>().ok());
-        let Some(state) = state else {
-            let post_result =
-                self.invoke_tool_post(tool_result_payload(tool_name, &response, &next_tool_call_id()), None).await;
-            if post_result.is_denied() {
-                return Err(plugin_denied_error(post_result));
-            }
-            return Ok(effective_post_result(response, &post_result));
-        };
+        let Some(state) = state else { return Ok(response) };
 
         let mut state = state.lock().await;
         let post_result = self
@@ -211,15 +212,7 @@ impl GatewayPluginRuntime {
 
         let content = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
         let state = state.and_then(|state| Arc::clone(state).downcast::<SharedToolCallState>().ok());
-        let Some(state) = state else {
-            let post_result = self
-                .invoke_tool_post(tool_json_result_payload(tool_name, content, false, &next_tool_call_id()), None)
-                .await;
-            if post_result.is_denied() {
-                return Ok(None);
-            }
-            return Ok(Some(effective_post_json(event, &post_result)));
-        };
+        let Some(state) = state else { return Ok(Some(event)) };
 
         let mut state = state.lock().await;
         let post_result = self
