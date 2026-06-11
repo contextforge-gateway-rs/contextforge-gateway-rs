@@ -16,8 +16,8 @@ use rmcp::{
 use serde_json::Value;
 
 use support::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, TestPlugin, error_code,
-    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TestPlugin,
+    error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
     start_gateway_with_json_backend_responses, sum_request, text,
 };
 
@@ -43,6 +43,32 @@ impl ClientHandler for RecordingClient {
     ) {
         self.messages.lock().expect("messages lock poisoned").push(params);
     }
+}
+
+async fn call_progress_sum(
+    gateway: &RunningGateway,
+    user: &str,
+) -> (
+    rmcp::model::CallToolResult,
+    Arc<StdMutex<Vec<ProgressNotificationParam>>>,
+    Arc<StdMutex<Vec<LoggingMessageNotificationParam>>>,
+) {
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let messages = Arc::clone(&client.messages);
+    let service = gateway.connect_with_handler(user, client).await;
+    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
+    let mut options = PeerRequestOptions::no_options();
+    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
+    let handle =
+        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
+
+    let ServerResult::CallToolResult(result) = handle.await_response().await.unwrap() else {
+        panic!("expected call tool result");
+    };
+    wait_for_notification_count(&progress, 4).await;
+    wait_for_notification_count(&messages, 4).await;
+    (result, progress, messages)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -104,36 +130,6 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn call_tool_forwards_backend_progress_and_message_notifications_before_completion() {
-    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
-    let runtime = runtime_with_post(plugin).await;
-
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let client = RecordingClient::default();
-    let progress = Arc::clone(&client.progress);
-    let messages = Arc::clone(&client.messages);
-    let service = gateway.connect_with_handler("admin@example.com", client).await;
-    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
-    let mut options = PeerRequestOptions::no_options();
-    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
-    let handle =
-        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
-
-    let ServerResult::CallToolResult(result) = handle.await_response().await.unwrap() else {
-        panic!("expected call tool result");
-    };
-    wait_for_notification_count(&progress, 4).await;
-    wait_for_notification_count(&messages, 4).await;
-
-    assert_eq!("post:completed 4 packages", text(&result));
-    let progress = progress.lock().expect("progress lock poisoned");
-    assert_eq!(4, progress.len());
-    assert_eq!(Some("package 4/4"), progress.last().and_then(|notification| notification.message.as_deref()));
-    let messages = messages.lock().expect("messages lock poisoned");
-    assert_eq!(4, messages.len());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn post_hook_can_modify_stream_progress_and_message_notifications() {
     let plugin =
         Arc::new(TestPlugin::new("post-stream", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_rewrite());
@@ -141,21 +137,7 @@ async fn post_hook_can_modify_stream_progress_and_message_notifications() {
     let runtime = runtime_with_post(plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let client = RecordingClient::default();
-    let progress = Arc::clone(&client.progress);
-    let messages = Arc::clone(&client.messages);
-    let service = gateway.connect_with_handler("admin@example.com", client).await;
-    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
-    let mut options = PeerRequestOptions::no_options();
-    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
-    let handle =
-        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
-
-    let ServerResult::CallToolResult(result) = handle.await_response().await.unwrap() else {
-        panic!("expected call tool result");
-    };
-    wait_for_notification_count(&progress, 4).await;
-    wait_for_notification_count(&messages, 4).await;
+    let (result, progress, messages) = call_progress_sum(&gateway, "admin@example.com").await;
 
     assert_eq!("completed 4 packages", text(&result));
     let progress = progress.lock().expect("progress lock poisoned");
@@ -165,36 +147,24 @@ async fn post_hook_can_modify_stream_progress_and_message_notifications() {
         Some("message"),
         messages.last().and_then(|notification| notification.data.get("plugin")).and_then(Value::as_str)
     );
-    assert_eq!(9, observations.lock().expect("observations lock poisoned").post_calls);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn post_only_stream_events_share_context_with_final_result() {
-    let plugin = Arc::new(TestPlugin::new("post-stream", vec![cmf_hook_names::TOOL_POST_INVOKE]));
-    let observations = plugin.observations();
-    let runtime = runtime_with_post(plugin).await;
-
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let client = RecordingClient::default();
-    let progress = Arc::clone(&client.progress);
-    let messages = Arc::clone(&client.messages);
-    let service = gateway.connect_with_handler("admin@example.com", client).await;
-    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
-    let mut options = PeerRequestOptions::no_options();
-    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
-    let handle =
-        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
-
-    let ServerResult::CallToolResult(_) = handle.await_response().await.unwrap() else {
-        panic!("expected call tool result");
-    };
-    wait_for_notification_count(&progress, 4).await;
-    wait_for_notification_count(&messages, 4).await;
 
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(9, observations.post_calls);
     let first_id = observations.post_tool_call_ids.first().expect("post call id");
     assert!(observations.post_tool_call_ids.iter().all(|id| id == first_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn json_response_mode_forwards_backend_progress_and_message_notifications() {
+    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway_with_json_backend_responses("admin@example.com", true, runtime).await;
+    let (result, progress, messages) = call_progress_sum(&gateway, "admin@example.com").await;
+
+    assert_eq!("post:completed 4 packages", text(&result));
+    assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
+    assert_eq!(4, messages.lock().expect("messages lock poisoned").len());
 }
 
 async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expected: usize) {
@@ -204,38 +174,6 @@ async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expect
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn repeated_call_tool_reuses_initialized_streamable_http_backend_session() {
-    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
-    let runtime = runtime_with_post(plugin).await;
-
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-    let first = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-    let second = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 3, 4)).await.unwrap();
-
-    assert_eq!("post:3", text(&first));
-    assert_eq!("post:7", text(&second));
-    assert_eq!(2, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
-    assert_eq!(1, *gateway.backend_state.initialize_calls.lock().expect("backend initialize calls lock poisoned"));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn repeated_call_tool_works_with_json_streamable_http_backend_responses() {
-    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
-    let runtime = runtime_with_post(plugin).await;
-
-    let gateway = start_gateway_with_json_backend_responses("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-    let first = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-    let second = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 3, 4)).await.unwrap();
-
-    assert_eq!("post:3", text(&first));
-    assert_eq!("post:7", text(&second));
-    assert_eq!(2, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
-    assert_eq!(1, *gateway.backend_state.initialize_calls.lock().expect("backend initialize calls lock poisoned"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

@@ -185,6 +185,9 @@ impl HookHandler<CmfHook> for TestPlugin {
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
+                        if serde_json::from_value::<CallToolResult>(content.content.clone()).is_err() {
+                            return PluginResult::allow();
+                        }
                         content.content = serde_json::to_value(CallToolResult::success(vec![Content::text(format!(
                             "post:{result_text}"
                         ))]))
@@ -197,6 +200,9 @@ impl HookHandler<CmfHook> for TestPlugin {
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
+                        if serde_json::from_value::<CallToolResult>(content.content.clone()).is_err() {
+                            return PluginResult::allow();
+                        }
                         content.content = json!("raw-post");
                     }
                     PluginResult::modify_payload(modified)

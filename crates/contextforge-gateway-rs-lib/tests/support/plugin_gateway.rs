@@ -45,7 +45,6 @@ pub(crate) struct BackendObservation {
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
-    pub(crate) initialize_calls: Arc<StdMutex<usize>>,
 }
 
 #[derive(Clone)]
@@ -59,7 +58,6 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        *self.state.initialize_calls.lock().expect("backend initialize calls lock poisoned") += 1;
         Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
     }

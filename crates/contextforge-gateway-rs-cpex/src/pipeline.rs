@@ -46,17 +46,25 @@ pub(crate) fn effective_post_result(original: CallToolResult, result: &PipelineR
     }
 }
 
-pub(crate) fn effective_post_json<T>(original: T, result: &PipelineResult) -> T
+pub(crate) fn effective_post_json<T>(original: T, result: &PipelineResult) -> Result<T, ErrorData>
 where
     T: Serialize + DeserializeOwned,
 {
     let Some(payload) = modified_message_payload(result) else {
-        return original;
+        return Ok(original);
     };
     let Some(content) = tool_result_content(payload) else {
-        return original;
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Plugin modified stream event payload without a tool result".into(),
+            data: None,
+        });
     };
-    serde_json::from_value::<T>(content).unwrap_or(original)
+    serde_json::from_value::<T>(content).map_err(|error| ErrorData {
+        code: ErrorCode::INVALID_PARAMS,
+        message: format!("Plugin modified stream event payload with invalid JSON: {error}").into(),
+        data: None,
+    })
 }
 
 pub(crate) fn plugin_denied_error(result: PipelineResult) -> ErrorData {

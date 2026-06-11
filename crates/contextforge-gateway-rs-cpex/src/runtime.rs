@@ -226,6 +226,6 @@ impl GatewayPluginRuntime {
         }
 
         state.context_table = post_result.context_table.clone();
-        Ok(Some(effective_post_json(event, &post_result)))
+        Ok(Some(effective_post_json(event, &post_result)?))
     }
 }

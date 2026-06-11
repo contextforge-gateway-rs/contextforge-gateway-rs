@@ -4,7 +4,7 @@ use std::{
 };
 
 use contextforge_gateway_rs_apis::user_store::UserConfig;
-use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
+use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, RuntimeHookState, ToolPreCallResult};
 use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
@@ -107,6 +107,24 @@ impl ClientHandler for GatewayBackendClient {
         _context: NotificationContext<RoleClient>,
     ) {
         let _ = self.logging_messages.send(params);
+    }
+}
+
+async fn apply_logging_post_hook(
+    plugin_runtime: &Option<GatewayPluginRuntimeHandle>,
+    tool_name: &str,
+    message: LoggingMessageNotificationParam,
+    post_state: Option<&RuntimeHookState>,
+) -> Option<LoggingMessageNotificationParam> {
+    let Some(plugin_runtime) = plugin_runtime else {
+        return Some(message);
+    };
+    match plugin_runtime.after_logging_message(tool_name, message, post_state).await {
+        Ok(message) => message,
+        Err(error) => {
+            warn!("call_tool: plugin rejected backend logging notification: {error:?}");
+            None
+        },
     }
 }
 
@@ -443,21 +461,12 @@ where
                 tokio::select! {
                     result = logging_messages.recv() => match result {
                         Ok(message) => {
-                            let message = if let Some(plugin_runtime) = &plugin_runtime {
-                                match plugin_runtime
-                                    .after_logging_message(&logging_tool_name, message, logging_post_state.as_ref())
-                                    .await
-                                {
-                                    Ok(Some(message)) => message,
-                                    Ok(None) => continue,
-                                    Err(error) => {
-                                        warn!("call_tool: plugin rejected backend logging notification: {error:?}");
-                                        continue;
-                                    },
-                                }
-                            } else {
-                                message
-                            };
+                            let Some(message) = apply_logging_post_hook(
+                                &plugin_runtime,
+                                &logging_tool_name,
+                                message,
+                                logging_post_state.as_ref(),
+                            ).await else { continue };
                             if let Err(error) = downstream_peer.notify_logging_message(message).await {
                                 warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
                                 break;
@@ -473,21 +482,12 @@ where
                             loop {
                                 match logging_messages.try_recv() {
                                     Ok(message) => {
-                                        let message = if let Some(plugin_runtime) = &plugin_runtime {
-                                            match plugin_runtime
-                                                .after_logging_message(&logging_tool_name, message, logging_post_state.as_ref())
-                                                .await
-                                            {
-                                                Ok(Some(message)) => message,
-                                                Ok(None) => continue,
-                                                Err(error) => {
-                                                    warn!("call_tool: plugin rejected backend logging notification: {error:?}");
-                                                    continue;
-                                                },
-                                            }
-                                        } else {
-                                            message
-                                        };
+                                        let Some(message) = apply_logging_post_hook(
+                                            &plugin_runtime,
+                                            &logging_tool_name,
+                                            message,
+                                            logging_post_state.as_ref(),
+                                        ).await else { continue };
                                         if let Err(error) = downstream_peer.notify_logging_message(message).await {
                                             warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
                                             break;
