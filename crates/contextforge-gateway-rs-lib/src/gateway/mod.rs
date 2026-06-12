@@ -1,3 +1,4 @@
+mod backend_client;
 mod mcp_call_validator;
 pub(crate) mod mcp_gateway;
 mod session_manager;
