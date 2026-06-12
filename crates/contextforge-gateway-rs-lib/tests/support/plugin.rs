@@ -215,14 +215,12 @@ impl HookHandler<CmfHook> for TestPlugin {
                     let mut modified = payload.clone();
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
-                    {
-                        if let Ok(mut progress) =
+                        && let Ok(mut progress) =
                             serde_json::from_value::<ProgressNotificationParam>(content.content.clone())
-                        {
-                            progress.message = progress.message.map(|message| format!("plugin:{message}"));
-                            content.content = serde_json::to_value(progress).expect("progress serializes");
-                            return PluginResult::modify_payload(modified);
-                        }
+                    {
+                        progress.message = progress.message.map(|message| format!("plugin:{message}"));
+                        content.content = serde_json::to_value(progress).expect("progress serializes");
+                        return PluginResult::modify_payload(modified);
                     }
                     PluginResult::allow()
                 },

@@ -50,12 +50,11 @@ pub(crate) struct InFlightToolCallGuard {
 
 impl Drop for InFlightToolCallGuard {
     fn drop(&mut self) {
-        if let Ok(mut calls) = self.calls.lock() {
-            if let Some(token) = &self.call.progress_token
-                && calls.by_progress_token.get(token).is_some_and(|call| Arc::ptr_eq(call, &self.call))
-            {
-                calls.by_progress_token.remove(token);
-            }
+        if let Ok(mut calls) = self.calls.lock()
+            && let Some(token) = &self.call.progress_token
+            && calls.by_progress_token.get(token).is_some_and(|call| Arc::ptr_eq(call, &self.call))
+        {
+            calls.by_progress_token.remove(token);
         }
     }
 }
