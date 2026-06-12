@@ -143,14 +143,17 @@ fn sse_data_values(body: &str) -> Vec<Value> {
 
 fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64) {
     let messages = sse_data_values(body);
-    let progress_count = messages
+    let progress = messages
         .iter()
-        .filter(|message| {
-            message.get("method").and_then(Value::as_str) == Some("notifications/progress")
-                && message.pointer("/params/progressToken").and_then(Value::as_i64) == Some(progress_token)
-        })
-        .count();
-    assert_eq!(4, progress_count, "unexpected progress events in body: {body}");
+        .filter(|message| message.get("method").and_then(Value::as_str) == Some("notifications/progress"))
+        .collect::<Vec<_>>();
+    assert_eq!(4, progress.len(), "unexpected progress events in body: {body}");
+    assert!(
+        progress
+            .iter()
+            .all(|message| message.pointer("/params/progressToken").and_then(Value::as_i64) == Some(progress_token)),
+        "progress events with foreign tokens in body: {body}"
+    );
     let result = messages
         .iter()
         .find(|message| message.get("id").and_then(Value::as_i64) == Some(response_id))
@@ -295,20 +298,31 @@ async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn raw_streamable_http_rewrites_backend_generated_progress_tokens() {
+async fn backend_generated_progress_tokens_are_dropped() {
     let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let client = reqwest::Client::new();
-    let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let service = gateway.connect_with_handler("admin@example.com", client).await;
 
-    let tool_name = format!("{}-progress_counter_tokens", gateway.backend_name);
-    let first =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 2, 10));
-    let second =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 3, 20));
-    let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
+    let request = CallToolRequestParams::new(format!("{}-progress_counter_tokens", gateway.backend_name));
+    let mut options = PeerRequestOptions::no_options();
+    options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::Number(10))));
+    let handle = service
+        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options)
+        .await
+        .expect("progress_counter_tokens request is sent");
 
-    assert_raw_progress_stream(&first_body, 2, 10);
-    assert_raw_progress_stream(&second_body, 3, 20);
+    let ServerResult::CallToolResult(result) =
+        handle.await_response().await.expect("progress_counter_tokens call succeeds")
+    else {
+        panic!("expected call tool result");
+    };
+    assert_eq!("completed 4 packages", text(&result));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        progress.lock().expect("progress lock poisoned").is_empty(),
+        "backend-generated progress tokens must not be forwarded"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

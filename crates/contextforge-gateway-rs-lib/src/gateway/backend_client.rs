@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex as StdMutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex as StdMutex},
+};
 
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, RuntimeHookState};
 use rmcp::{
@@ -10,7 +13,6 @@ use rmcp::{
     serde::{Serialize, de::DeserializeOwned},
     service::{NotificationContext, PeerRequestOptions, ServiceError},
 };
-use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
@@ -23,11 +25,17 @@ pub(crate) struct GatewayBackendClient {
     initialize_request: InitializeRequestParams,
     downstream: Peer<RoleServer>,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
-    in_flight_calls: Arc<StdMutex<Vec<Arc<InFlightToolCall>>>>,
-    /// Serializes tool calls on this backend session: backends may mint their
-    /// own progress tokens, so notifications are only attributable to a call
-    /// when at most one is in flight.
-    call_lock: Arc<TokioMutex<()>>,
+    in_flight_calls: Arc<StdMutex<InFlightCalls>>,
+}
+
+/// Tool calls currently in flight on this backend session. Progress
+/// notifications are routed strictly by the downstream progress token, as MCP
+/// requires backends to echo the token the client sent; logging notifications
+/// carry no token and are attributed to the most recently started call.
+#[derive(Default)]
+struct InFlightCalls {
+    ordered: Vec<Arc<InFlightToolCall>>,
+    by_progress_token: HashMap<ProgressToken, Arc<InFlightToolCall>>,
 }
 
 struct InFlightToolCall {
@@ -39,15 +47,19 @@ struct InFlightToolCall {
 /// Keeps a tool call registered with the backend client; dropping the guard
 /// stops notification forwarding for the call.
 pub(crate) struct InFlightToolCallGuard {
-    calls: Arc<StdMutex<Vec<Arc<InFlightToolCall>>>>,
+    calls: Arc<StdMutex<InFlightCalls>>,
     call: Arc<InFlightToolCall>,
-    _call_lock: OwnedMutexGuard<()>,
 }
 
 impl Drop for InFlightToolCallGuard {
     fn drop(&mut self) {
         if let Ok(mut calls) = self.calls.lock() {
-            calls.retain(|call| !Arc::ptr_eq(call, &self.call));
+            calls.ordered.retain(|call| !Arc::ptr_eq(call, &self.call));
+            if let Some(token) = &self.call.progress_token
+                && calls.by_progress_token.get(token).is_some_and(|call| Arc::ptr_eq(call, &self.call))
+            {
+                calls.by_progress_token.remove(token);
+            }
         }
     }
 }
@@ -58,29 +70,32 @@ impl GatewayBackendClient {
         downstream: Peer<RoleServer>,
         plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     ) -> Self {
-        Self {
-            initialize_request,
-            downstream,
-            plugin_runtime,
-            in_flight_calls: Arc::default(),
-            call_lock: Arc::default(),
-        }
+        Self { initialize_request, downstream, plugin_runtime, in_flight_calls: Arc::default() }
     }
 
-    pub(crate) async fn track_tool_call(
+    pub(crate) fn track_tool_call(
         &self,
         tool_name: String,
         progress_token: Option<ProgressToken>,
         post_state: Option<RuntimeHookState>,
     ) -> InFlightToolCallGuard {
-        let call_lock = Arc::clone(&self.call_lock).lock_owned().await;
         let call = Arc::new(InFlightToolCall { progress_token, tool_name, post_state });
-        self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").push(Arc::clone(&call));
-        InFlightToolCallGuard { calls: Arc::clone(&self.in_flight_calls), call, _call_lock: call_lock }
+        let mut calls = self.in_flight_calls.lock().expect("in-flight tool call lock poisoned");
+        calls.ordered.push(Arc::clone(&call));
+        if let Some(token) = &call.progress_token {
+            calls.by_progress_token.entry(token.clone()).or_insert_with(|| Arc::clone(&call));
+        }
+        drop(calls);
+        InFlightToolCallGuard { calls: Arc::clone(&self.in_flight_calls), call }
+    }
+
+    fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
+        let calls = self.in_flight_calls.lock().expect("in-flight tool call lock poisoned");
+        calls.by_progress_token.get(progress_token).cloned()
     }
 
     fn latest_call(&self) -> Option<Arc<InFlightToolCall>> {
-        self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").last().cloned()
+        self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").ordered.last().cloned()
     }
 
     async fn stream_event_post_hook<T>(&self, call: &InFlightToolCall, event: T) -> Option<T>
@@ -113,19 +128,16 @@ impl ClientHandler for GatewayBackendClient {
         self.initialize_request.clone()
     }
 
-    async fn on_progress(&self, mut progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
-        // Tool calls are serialized per backend session, so backend progress
-        // always belongs to the single in-flight call, whatever token the
-        // backend used.
-        let Some(call) = self.latest_call() else {
-            debug!("call_tool: dropping backend progress notification without an in-flight tool call");
+    async fn on_progress(&self, progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
+        // MCP requires backends to send progress only for tokens the caller
+        // supplied, so notifications with unknown tokens are dropped.
+        let Some(call) = self.progress_call(&progress.progress_token) else {
+            debug!(
+                "call_tool: dropping backend progress notification with unknown token {:?}",
+                progress.progress_token
+            );
             return;
         };
-        let Some(progress_token) = call.progress_token.clone() else {
-            debug!("call_tool: dropping backend progress notification without a downstream progress token");
-            return;
-        };
-        progress.progress_token = progress_token;
         let Some(progress) = self.stream_event_post_hook(&call, progress).await else {
             return;
         };
@@ -134,6 +146,7 @@ impl ClientHandler for GatewayBackendClient {
         }
     }
 
+    #[expect(deprecated, reason = "logging forwarding is kept until the SEP-2577 removal lands in MCP")]
     async fn on_logging_message(
         &self,
         message: LoggingMessageNotificationParam,

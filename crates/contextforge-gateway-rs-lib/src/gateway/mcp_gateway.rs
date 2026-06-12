@@ -367,7 +367,7 @@ where
         let service_name = target_service.name.clone();
         let progress_token = cx.meta.get_progress_token();
         let _call_guard =
-            service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone()).await;
+            service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone());
         let response = call_backend_tool(service.peer(), routed_request, progress_token, cx.ct.clone()).await;
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
@@ -737,6 +737,7 @@ const TEST_IMAGE_DATA: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 // Small base64-encoded WAV (silence)
 
+#[expect(deprecated, reason = "logging capability is kept until the SEP-2577 removal lands in MCP")]
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
     ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().enable_logging().build()
 }

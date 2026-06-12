@@ -63,6 +63,7 @@ impl ServerHandler for TestBackend {
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
     }
 
+    #[expect(deprecated, reason = "logging notifications are exercised until the SEP-2577 removal lands in MCP")]
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
