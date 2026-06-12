@@ -12,7 +12,7 @@ use cpex_core::{
     hooks::{Extensions, HookHandler, PluginResult, TypedHandlerAdapter, types::cmf_hook_names},
     plugin::{Plugin, PluginConfig},
 };
-use rmcp::model::{CallToolResult, Content, LoggingMessageNotificationParam, ProgressNotificationParam};
+use rmcp::model::{CallToolResult, Content, ProgressNotificationParam};
 use serde_json::{Value, json};
 
 use super::tool::text;
@@ -223,13 +223,6 @@ impl HookHandler<CmfHook> for TestPlugin {
                             content.content = serde_json::to_value(progress).expect("progress serializes");
                             return PluginResult::modify_payload(modified);
                         }
-                        if let Ok(mut message) =
-                            serde_json::from_value::<LoggingMessageNotificationParam>(content.content.clone())
-                        {
-                            message.data = json!({ "plugin": "message", "original": message.data });
-                            content.content = serde_json::to_value(message).expect("message serializes");
-                            return PluginResult::modify_payload(modified);
-                        }
                     }
                     PluginResult::allow()
                 },
@@ -292,9 +285,8 @@ impl HookHandler<CmfHook> for TestPlugin {
     }
 }
 
-/// Stream events (progress and logging notifications) run through the same
-/// post hook as tool results; result-rewriting behaviors must leave them
-/// untouched.
+/// Stream events run through the same post hook as tool results;
+/// result-rewriting behaviors must leave them untouched.
 fn is_tool_result_content(content: &Value) -> bool {
     serde_json::from_value::<CallToolResult>(content.clone()).is_ok()
 }

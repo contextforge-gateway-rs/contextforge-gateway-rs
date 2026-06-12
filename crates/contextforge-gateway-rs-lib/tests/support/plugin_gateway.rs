@@ -16,8 +16,7 @@ use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, InitializeRequestParams,
-        InitializeResult, LoggingLevel, LoggingMessageNotificationParam, NumberOrString, ProgressNotificationParam,
-        ProgressToken, ServerCapabilities,
+        InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken, ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -63,7 +62,6 @@ impl ServerHandler for TestBackend {
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
     }
 
-    #[expect(deprecated, reason = "logging notifications are exercised until the SEP-2577 removal lands in MCP")]
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
@@ -94,16 +92,6 @@ impl ServerHandler for TestBackend {
             "progress_sum" => {
                 if let Some(progress_token) = cx.meta.get_progress_token() {
                     for package in 1..=4 {
-                        cx.peer
-                            .notify_logging_message(LoggingMessageNotificationParam {
-                                level: LoggingLevel::Info,
-                                logger: Some("test-backend".to_owned()),
-                                data: serde_json::json!({ "package": package, "state": "started" }),
-                            })
-                            .await
-                            .map_err(|error| {
-                                ErrorData::internal_error(format!("message notification failed: {error}"), None)
-                            })?;
                         cx.peer
                             .notify_progress(
                                 ProgressNotificationParam::new(progress_token.clone(), f64::from(package))

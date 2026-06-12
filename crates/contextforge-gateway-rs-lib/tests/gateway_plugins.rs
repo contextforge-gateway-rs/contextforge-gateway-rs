@@ -9,8 +9,7 @@ use rmcp::{
     ClientHandler,
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
-        InitializeRequestParams, LoggingMessageNotificationParam, Meta, NumberOrString, ProgressNotificationParam,
-        ProgressToken, Request, ServerResult,
+        InitializeRequestParams, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RoleClient},
 };
@@ -27,7 +26,6 @@ type Recorded<T> = Arc<StdMutex<Vec<T>>>;
 #[derive(Clone, Default)]
 struct RecordingClient {
     progress: Recorded<ProgressNotificationParam>,
-    messages: Recorded<LoggingMessageNotificationParam>,
 }
 
 impl ClientHandler for RecordingClient {
@@ -41,33 +39,23 @@ impl ClientHandler for RecordingClient {
     async fn on_progress(&self, params: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
         self.progress.lock().expect("progress lock poisoned").push(params);
     }
-
-    async fn on_logging_message(
-        &self,
-        params: LoggingMessageNotificationParam,
-        _context: NotificationContext<RoleClient>,
-    ) {
-        self.messages.lock().expect("messages lock poisoned").push(params);
-    }
 }
 
 async fn call_progress_sum(
     gateway: &RunningGateway,
     user: &str,
-) -> (CallToolResult, Recorded<ProgressNotificationParam>, Recorded<LoggingMessageNotificationParam>) {
-    let (result, progress, messages) = send_progress_sum(gateway, user).await;
+) -> (CallToolResult, Recorded<ProgressNotificationParam>) {
+    let (result, progress) = send_progress_sum(gateway, user).await;
     wait_for_event_count(&progress, 4).await;
-    wait_for_event_count(&messages, 4).await;
-    (result, progress, messages)
+    (result, progress)
 }
 
 async fn send_progress_sum(
     gateway: &RunningGateway,
     user: &str,
-) -> (CallToolResult, Recorded<ProgressNotificationParam>, Recorded<LoggingMessageNotificationParam>) {
+) -> (CallToolResult, Recorded<ProgressNotificationParam>) {
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
-    let messages = Arc::clone(&client.messages);
     let service = gateway.connect_with_handler(user, client).await;
     let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
     let mut options = PeerRequestOptions::no_options();
@@ -81,7 +69,7 @@ async fn send_progress_sum(
     else {
         panic!("expected call tool result");
     };
-    (result, progress, messages)
+    (result, progress)
 }
 
 async fn wait_for_event_count<T>(events: &StdMutex<Vec<T>>, expected: usize) {
@@ -232,7 +220,6 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
     let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
-    let messages = Arc::clone(&client.messages);
     let service = gateway.connect_with_handler("admin@example.com", client).await;
     let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
 
@@ -266,7 +253,6 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
     assert_eq!("completed 4 packages", text(&second));
 
     wait_for_event_count(&progress, 8).await;
-    wait_for_event_count(&messages, 8).await;
     let progress = progress.lock().expect("progress lock poisoned");
     let first_count = progress
         .iter()
@@ -384,41 +370,35 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn post_hook_can_modify_stream_progress_and_message_notifications() {
+async fn post_hook_can_modify_stream_progress_notifications() {
     let plugin =
         Arc::new(TestPlugin::new("post-stream", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_rewrite());
     let observations = plugin.observations();
     let runtime = runtime_with_post(plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let (result, progress, messages) = call_progress_sum(&gateway, "admin@example.com").await;
+    let (result, progress) = call_progress_sum(&gateway, "admin@example.com").await;
 
     assert_eq!("completed 4 packages", text(&result));
     let progress = progress.lock().expect("progress lock poisoned");
     assert_eq!(Some("plugin:package 4/4"), progress.last().and_then(|notification| notification.message.as_deref()));
-    let messages = messages.lock().expect("messages lock poisoned");
-    assert_eq!(
-        Some("message"),
-        messages.last().and_then(|notification| notification.data.get("plugin")).and_then(Value::as_str)
-    );
 
     let observations = observations.lock().expect("observations lock poisoned");
-    assert_eq!(9, observations.post_calls);
+    assert_eq!(5, observations.post_calls);
     let first_id = observations.post_tool_call_ids.first().expect("post call id");
     assert!(observations.post_tool_call_ids.iter().all(|id| id == first_id));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn json_response_mode_forwards_backend_progress_and_message_notifications() {
+async fn json_response_mode_forwards_backend_progress_notifications() {
     let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
     let runtime = runtime_with_post(plugin).await;
 
     let gateway = start_gateway_with_json_backend_responses("admin@example.com", true, runtime).await;
-    let (result, progress, messages) = call_progress_sum(&gateway, "admin@example.com").await;
+    let (result, progress) = call_progress_sum(&gateway, "admin@example.com").await;
 
     assert_eq!("post:completed 4 packages", text(&result));
     assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
-    assert_eq!(4, messages.lock().expect("messages lock poisoned").len());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -429,19 +409,18 @@ async fn post_hook_deny_drops_stream_notifications_without_failing_call() {
     let runtime = runtime_with_post(plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let (result, progress, messages) = send_progress_sum(&gateway, "admin@example.com").await;
+    let (result, progress) = send_progress_sum(&gateway, "admin@example.com").await;
 
     assert_eq!("completed 4 packages", text(&result));
     for _ in 0..50 {
-        if observations.lock().expect("observations lock poisoned").post_calls >= 9 {
+        if observations.lock().expect("observations lock poisoned").post_calls >= 5 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     let observations = observations.lock().expect("observations lock poisoned");
-    assert_eq!(9, observations.post_calls);
+    assert_eq!(5, observations.post_calls);
     assert!(progress.lock().expect("progress lock poisoned").is_empty());
-    assert!(messages.lock().expect("messages lock poisoned").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
