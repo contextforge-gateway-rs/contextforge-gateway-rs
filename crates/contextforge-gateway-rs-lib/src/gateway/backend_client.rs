@@ -10,6 +10,7 @@ use rmcp::{
     serde::{Serialize, de::DeserializeOwned},
     service::{NotificationContext, PeerRequestOptions, ServiceError},
 };
+use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
@@ -23,6 +24,10 @@ pub(crate) struct GatewayBackendClient {
     downstream: Peer<RoleServer>,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     in_flight_calls: Arc<StdMutex<Vec<Arc<InFlightToolCall>>>>,
+    /// Serializes tool calls on this backend session: backends may mint their
+    /// own progress tokens, so notifications are only attributable to a call
+    /// when at most one is in flight.
+    call_lock: Arc<TokioMutex<()>>,
 }
 
 struct InFlightToolCall {
@@ -36,6 +41,7 @@ struct InFlightToolCall {
 pub(crate) struct InFlightToolCallGuard {
     calls: Arc<StdMutex<Vec<Arc<InFlightToolCall>>>>,
     call: Arc<InFlightToolCall>,
+    _call_lock: OwnedMutexGuard<()>,
 }
 
 impl Drop for InFlightToolCallGuard {
@@ -52,22 +58,32 @@ impl GatewayBackendClient {
         downstream: Peer<RoleServer>,
         plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     ) -> Self {
-        Self { initialize_request, downstream, plugin_runtime, in_flight_calls: Arc::default() }
+        Self {
+            initialize_request,
+            downstream,
+            plugin_runtime,
+            in_flight_calls: Arc::default(),
+            call_lock: Arc::default(),
+        }
     }
 
-    pub(crate) fn track_tool_call(
+    pub(crate) async fn track_tool_call(
         &self,
         tool_name: String,
         progress_token: Option<ProgressToken>,
         post_state: Option<RuntimeHookState>,
     ) -> InFlightToolCallGuard {
+        let call_lock = Arc::clone(&self.call_lock).lock_owned().await;
         let call = Arc::new(InFlightToolCall { progress_token, tool_name, post_state });
         self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").push(Arc::clone(&call));
-        InFlightToolCallGuard { calls: Arc::clone(&self.in_flight_calls), call }
+        InFlightToolCallGuard { calls: Arc::clone(&self.in_flight_calls), call, _call_lock: call_lock }
     }
 
     fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
         let calls = self.in_flight_calls.lock().expect("in-flight tool call lock poisoned");
+        if calls.len() == 1 {
+            return calls.last().cloned();
+        }
         calls.iter().find(|call| call.progress_token.as_ref() == Some(progress_token)).cloned()
     }
 
@@ -105,7 +121,7 @@ impl ClientHandler for GatewayBackendClient {
         self.initialize_request.clone()
     }
 
-    async fn on_progress(&self, progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
+    async fn on_progress(&self, mut progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
         let Some(call) = self.progress_call(&progress.progress_token) else {
             debug!(
                 "call_tool: dropping backend progress notification with unknown token {:?}",
@@ -113,6 +129,11 @@ impl ClientHandler for GatewayBackendClient {
             );
             return;
         };
+        let Some(progress_token) = call.progress_token.clone() else {
+            debug!("call_tool: dropping backend progress notification without a downstream progress token");
+            return;
+        };
+        progress.progress_token = progress_token;
         let Some(progress) = self.stream_event_post_hook(&call, progress).await else {
             return;
         };

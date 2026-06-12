@@ -19,7 +19,7 @@ use serde_json::Value;
 use support::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TestPlugin,
     error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
-    start_gateway_with_json_backend_responses, sum_request, text,
+    start_gateway_with_json_backend_responses, sum_request, text, token,
 };
 
 type Recorded<T> = Arc<StdMutex<Vec<T>>>;
@@ -92,6 +92,265 @@ async fn wait_for_event_count<T>(events: &StdMutex<Vec<T>>, expected: usize) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     panic!("timed out waiting for {expected} recorded events");
+}
+
+fn raw_mcp_request(
+    client: &reqwest::Client,
+    gateway: &RunningGateway,
+    user: &str,
+    session_id: Option<&str>,
+    body: &Value,
+) -> reqwest::RequestBuilder {
+    let mut request = client
+        .post(gateway.gateway_url())
+        .bearer_auth(token(user))
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(http::header::ACCEPT, "application/json, text/event-stream")
+        .json(body);
+    if let Some(session_id) = session_id {
+        request = request.header("Mcp-Session-Id", session_id).header("MCP-Protocol-Version", "2025-11-25");
+    }
+    request
+}
+
+fn sse_data_values(body: &str) -> Vec<Value> {
+    let values = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(str::trim)
+        .filter(|data| !data.is_empty())
+        .map(|data| serde_json::from_str(data).expect("SSE data is JSON"))
+        .collect::<Vec<_>>();
+    if !values.is_empty() {
+        return values;
+    }
+    let body = body.trim();
+    if body.is_empty() { Vec::new() } else { vec![serde_json::from_str(body).expect("JSON response body")] }
+}
+
+fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64) {
+    let messages = sse_data_values(body);
+    let progress_count = messages
+        .iter()
+        .filter(|message| {
+            message.get("method").and_then(Value::as_str) == Some("notifications/progress")
+                && message.pointer("/params/progressToken").and_then(Value::as_i64) == Some(progress_token)
+        })
+        .count();
+    assert_eq!(4, progress_count, "unexpected progress events in body: {body}");
+    let result = messages
+        .iter()
+        .find(|message| message.get("id").and_then(Value::as_i64) == Some(response_id))
+        .unwrap_or_else(|| panic!("missing response id {response_id} in body: {body}"));
+    assert_eq!(Some("completed 4 packages"), result.pointer("/result/content/0/text").and_then(Value::as_str));
+}
+
+async fn start_raw_mcp_session(client: &reqwest::Client, gateway: &RunningGateway, user: &str) -> String {
+    let initialize = raw_mcp_request(
+        client,
+        gateway,
+        user,
+        None,
+        &serde_json::json!({
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "raw-test-client", "version": "0.1.0" }
+            },
+            "jsonrpc": "2.0",
+            "id": 0
+        }),
+    )
+    .send()
+    .await
+    .expect("initialize request is sent");
+    assert!(initialize.status().is_success(), "initialize failed: {initialize:?}");
+    let session_id = initialize
+        .headers()
+        .get("mcp-session-id")
+        .expect("initialize response has MCP session id")
+        .to_str()
+        .expect("MCP session id is valid")
+        .to_owned();
+    let _initialize_body = initialize.text().await.expect("initialize body is read");
+
+    let initialized = raw_mcp_request(
+        client,
+        gateway,
+        user,
+        Some(&session_id),
+        &serde_json::json!({ "method": "notifications/initialized", "jsonrpc": "2.0" }),
+    )
+    .send()
+    .await
+    .expect("initialized notification is sent");
+    assert!(initialized.status().is_success(), "initialized notification failed: {initialized:?}");
+    let _initialized_body = initialized.text().await.expect("initialized body is read");
+
+    session_id
+}
+
+async fn read_concurrent_raw_progress_streams(
+    first: reqwest::RequestBuilder,
+    second: reqwest::RequestBuilder,
+) -> (String, String) {
+    let (first, second) =
+        tokio::time::timeout(std::time::Duration::from_secs(3), async { tokio::join!(first.send(), second.send()) })
+            .await
+            .expect("both raw progress requests receive response headers");
+    let first = first.expect("first raw progress request succeeds");
+    let second = second.expect("second raw progress request succeeds");
+    assert!(first.status().is_success(), "first raw progress request failed: {first:?}");
+    assert!(second.status().is_success(), "second raw progress request failed: {second:?}");
+
+    let (first_body, second_body) =
+        tokio::time::timeout(std::time::Duration::from_secs(3), async { tokio::join!(first.text(), second.text()) })
+            .await
+            .expect("both raw progress streams complete");
+    (first_body.expect("first raw progress body is read"), second_body.expect("second raw progress body is read"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_progress_calls_forward_each_token_without_plugins() {
+    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let messages = Arc::clone(&client.messages);
+    let service = gateway.connect_with_handler("admin@example.com", client).await;
+    let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
+
+    let mut first_options = PeerRequestOptions::no_options();
+    first_options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::Number(1))));
+    let first = service
+        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request.clone())), first_options)
+        .await
+        .expect("first progress_sum request is sent");
+
+    let mut second_options = PeerRequestOptions::no_options();
+    second_options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::Number(2))));
+    let second = service
+        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), second_options)
+        .await
+        .expect("second progress_sum request is sent");
+
+    let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        tokio::join!(first.await_response(), second.await_response())
+    })
+    .await
+    .expect("both concurrent progress_sum calls complete");
+
+    let ServerResult::CallToolResult(first) = first.expect("first progress_sum call succeeds") else {
+        panic!("expected first call tool result");
+    };
+    let ServerResult::CallToolResult(second) = second.expect("second progress_sum call succeeds") else {
+        panic!("expected second call tool result");
+    };
+    assert_eq!("completed 4 packages", text(&first));
+    assert_eq!("completed 4 packages", text(&second));
+
+    wait_for_event_count(&progress, 8).await;
+    wait_for_event_count(&messages, 8).await;
+    let progress = progress.lock().expect("progress lock poisoned");
+    let first_count = progress
+        .iter()
+        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(1)))
+        .count();
+    let second_count = progress
+        .iter()
+        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(2)))
+        .count();
+    assert_eq!(4, first_count);
+    assert_eq!(4, second_count);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins() {
+    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = reqwest::Client::new();
+    let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
+
+    let tool_name = format!("{}-progress_sum", gateway.backend_name);
+    let first = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &serde_json::json!({
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": {},
+                "_meta": { "progressToken": 1 }
+            },
+            "jsonrpc": "2.0",
+            "id": 2
+        }),
+    );
+    let second = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &serde_json::json!({
+            "method": "tools/call",
+            "params": {
+                "name": format!("{}-progress_sum", gateway.backend_name),
+                "arguments": {},
+                "_meta": { "progressToken": 2 }
+            },
+            "jsonrpc": "2.0",
+            "id": 3
+        }),
+    );
+    let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
+
+    assert_raw_progress_stream(&first_body, 2, 1);
+    assert_raw_progress_stream(&second_body, 3, 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn raw_streamable_http_rewrites_backend_generated_progress_tokens() {
+    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = reqwest::Client::new();
+    let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
+
+    let first = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &serde_json::json!({
+            "method": "tools/call",
+            "params": {
+                "name": format!("{}-progress_counter_tokens", gateway.backend_name),
+                "arguments": {},
+                "_meta": { "progressToken": 10 }
+            },
+            "jsonrpc": "2.0",
+            "id": 2
+        }),
+    );
+    let second = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &serde_json::json!({
+            "method": "tools/call",
+            "params": {
+                "name": format!("{}-progress_counter_tokens", gateway.backend_name),
+                "arguments": {},
+                "_meta": { "progressToken": 20 }
+            },
+            "jsonrpc": "2.0",
+            "id": 3
+        }),
+    );
+    let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
+
+    assert_raw_progress_stream(&first_body, 2, 10);
+    assert_raw_progress_stream(&second_body, 3, 20);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

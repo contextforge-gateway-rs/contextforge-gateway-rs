@@ -16,7 +16,8 @@ use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, InitializeRequestParams,
-        InitializeResult, LoggingLevel, LoggingMessageNotificationParam, ProgressNotificationParam, ServerCapabilities,
+        InitializeResult, LoggingLevel, LoggingMessageNotificationParam, NumberOrString, ProgressNotificationParam,
+        ProgressToken, ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -117,6 +118,25 @@ impl ServerHandler for TestBackend {
                 }
                 Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
             },
+            "progress_counter_tokens" => {
+                for package in 1..=4i32 {
+                    cx.peer
+                        .notify_progress(
+                            ProgressNotificationParam::new(
+                                ProgressToken(NumberOrString::Number(i64::from(package))),
+                                f64::from(package),
+                            )
+                            .with_total(4.0)
+                            .with_message(format!("package {package}/4")),
+                        )
+                        .await
+                        .map_err(|error| {
+                            ErrorData::internal_error(format!("progress notification failed: {error}"), None)
+                        })?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+            },
             "wait_for_cancellation" => {
                 cx.ct.cancelled().await;
                 self.state
@@ -143,6 +163,10 @@ pub(crate) struct RunningGateway {
 }
 
 impl RunningGateway {
+    pub(crate) fn gateway_url(&self) -> &str {
+        &self.gateway_url
+    }
+
     pub(crate) async fn connect(
         &self,
         user: &str,
