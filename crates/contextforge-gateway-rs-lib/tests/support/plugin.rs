@@ -54,6 +54,7 @@ pub(crate) enum PostBehavior {
     Rewrite,
     RewriteRaw,
     RewriteStreamEvents,
+    DenyStreamEvents,
     Deny,
     RequireContext,
 }
@@ -106,6 +107,11 @@ impl TestPlugin {
 
     pub(crate) fn with_stream_event_rewrite(mut self) -> Self {
         self.post_behavior = PostBehavior::RewriteStreamEvents;
+        self
+    }
+
+    pub(crate) fn with_stream_event_deny(mut self) -> Self {
+        self.post_behavior = PostBehavior::DenyStreamEvents;
         self
     }
 
@@ -226,6 +232,18 @@ impl HookHandler<CmfHook> for TestPlugin {
                         }
                     }
                     PluginResult::allow()
+                },
+                PostBehavior::DenyStreamEvents => {
+                    let is_stream_event = payload
+                        .message
+                        .get_tool_results()
+                        .first()
+                        .is_some_and(|result| !is_tool_result_content(&result.content));
+                    if is_stream_event {
+                        PluginResult::deny(PluginViolation::new("stream_denied", "stream denied"))
+                    } else {
+                        PluginResult::allow()
+                    }
                 },
                 PostBehavior::Deny => PluginResult::deny(
                     PluginViolation::new("post_denied", "post denied")

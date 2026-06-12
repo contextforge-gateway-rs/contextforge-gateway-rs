@@ -55,6 +55,16 @@ async fn call_progress_sum(
     gateway: &RunningGateway,
     user: &str,
 ) -> (CallToolResult, Recorded<ProgressNotificationParam>, Recorded<LoggingMessageNotificationParam>) {
+    let (result, progress, messages) = send_progress_sum(gateway, user).await;
+    wait_for_event_count(&progress, 4).await;
+    wait_for_event_count(&messages, 4).await;
+    (result, progress, messages)
+}
+
+async fn send_progress_sum(
+    gateway: &RunningGateway,
+    user: &str,
+) -> (CallToolResult, Recorded<ProgressNotificationParam>, Recorded<LoggingMessageNotificationParam>) {
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
     let messages = Arc::clone(&client.messages);
@@ -71,8 +81,6 @@ async fn call_progress_sum(
     else {
         panic!("expected call tool result");
     };
-    wait_for_event_count(&progress, 4).await;
-    wait_for_event_count(&messages, 4).await;
     (result, progress, messages)
 }
 
@@ -180,6 +188,29 @@ async fn json_response_mode_forwards_backend_progress_and_message_notifications(
     assert_eq!("post:completed 4 packages", text(&result));
     assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
     assert_eq!(4, messages.lock().expect("messages lock poisoned").len());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn post_hook_deny_drops_stream_notifications_without_failing_call() {
+    let plugin =
+        Arc::new(TestPlugin::new("post-stream-deny", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_deny());
+    let observations = plugin.observations();
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let (result, progress, messages) = send_progress_sum(&gateway, "admin@example.com").await;
+
+    assert_eq!("completed 4 packages", text(&result));
+    for _ in 0..50 {
+        if observations.lock().expect("observations lock poisoned").post_calls >= 9 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(9, observations.post_calls);
+    assert!(progress.lock().expect("progress lock poisoned").is_empty());
+    assert!(messages.lock().expect("messages lock poisoned").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
