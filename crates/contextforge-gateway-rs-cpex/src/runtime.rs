@@ -173,13 +173,13 @@ impl GatewayPluginRuntime {
         &self,
         tool_name: &str,
         response: CallToolResult,
-        state: Option<&RuntimeHookState>,
+        state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
         if !self.has_post_hook {
             return Ok(response);
         }
 
-        let state = state.and_then(|state| Arc::clone(state).downcast::<SharedToolCallState>().ok());
+        let state = state.and_then(|state| state.downcast::<SharedToolCallState>().ok());
         let Some(state) = state else { return Ok(response) };
 
         let mut state = state.lock().await;
@@ -201,7 +201,7 @@ impl GatewayPluginRuntime {
         &self,
         tool_name: &str,
         event: T,
-        state: Option<&RuntimeHookState>,
+        state: Option<RuntimeHookState>,
     ) -> Result<Option<T>, ErrorData>
     where
         T: Serialize + DeserializeOwned,
@@ -210,10 +210,10 @@ impl GatewayPluginRuntime {
             return Ok(Some(event));
         }
 
-        let content = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-        let state = state.and_then(|state| Arc::clone(state).downcast::<SharedToolCallState>().ok());
+        let state = state.and_then(|state| state.downcast::<SharedToolCallState>().ok());
         let Some(state) = state else { return Ok(Some(event)) };
 
+        let content = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
         let mut state = state.lock().await;
         let post_result = self
             .invoke_tool_post(

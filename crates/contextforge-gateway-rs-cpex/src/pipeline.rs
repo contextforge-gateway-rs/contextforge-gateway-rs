@@ -3,7 +3,7 @@ use cpex_core::executor::PipelineResult;
 use rmcp::{
     ErrorData,
     model::{CallToolResult, ErrorCode},
-    serde::{Serialize, de::DeserializeOwned},
+    serde::de::DeserializeOwned,
 };
 use tracing::warn;
 
@@ -48,7 +48,7 @@ pub(crate) fn effective_post_result(original: CallToolResult, result: &PipelineR
 
 pub(crate) fn effective_post_json<T>(original: T, result: &PipelineResult) -> Result<T, ErrorData>
 where
-    T: Serialize + DeserializeOwned,
+    T: DeserializeOwned,
 {
     let Some(payload) = modified_message_payload(result) else {
         return Ok(original);

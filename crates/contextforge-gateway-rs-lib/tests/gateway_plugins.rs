@@ -7,9 +7,9 @@ use cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
     model::{
-        CallToolRequestParams, ClientCapabilities, ClientRequest, ErrorCode, Implementation, InitializeRequestParams,
-        LoggingMessageNotificationParam, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request,
-        ServerResult,
+        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
+        InitializeRequestParams, LoggingMessageNotificationParam, Meta, NumberOrString, ProgressNotificationParam,
+        ProgressToken, Request, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RoleClient},
 };
@@ -21,10 +21,12 @@ use support::{
     start_gateway_with_json_backend_responses, sum_request, text,
 };
 
+type Recorded<T> = Arc<StdMutex<Vec<T>>>;
+
 #[derive(Clone, Default)]
 struct RecordingClient {
-    progress: Arc<StdMutex<Vec<ProgressNotificationParam>>>,
-    messages: Arc<StdMutex<Vec<LoggingMessageNotificationParam>>>,
+    progress: Recorded<ProgressNotificationParam>,
+    messages: Recorded<LoggingMessageNotificationParam>,
 }
 
 impl ClientHandler for RecordingClient {
@@ -51,11 +53,7 @@ impl ClientHandler for RecordingClient {
 async fn call_progress_sum(
     gateway: &RunningGateway,
     user: &str,
-) -> (
-    rmcp::model::CallToolResult,
-    Arc<StdMutex<Vec<ProgressNotificationParam>>>,
-    Arc<StdMutex<Vec<LoggingMessageNotificationParam>>>,
-) {
+) -> (CallToolResult, Recorded<ProgressNotificationParam>, Recorded<LoggingMessageNotificationParam>) {
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
     let messages = Arc::clone(&client.messages);
@@ -75,6 +73,16 @@ async fn call_progress_sum(
     wait_for_notification_count(&progress, 4).await;
     wait_for_notification_count(&messages, 4).await;
     (result, progress, messages)
+}
+
+async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expected: usize) {
+    for _ in 0..50 {
+        if notifications.lock().expect("notifications lock poisoned").len() >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("timed out waiting for {expected} forwarded notifications");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -171,15 +179,6 @@ async fn json_response_mode_forwards_backend_progress_and_message_notifications(
     assert_eq!("post:completed 4 packages", text(&result));
     assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
     assert_eq!(4, messages.lock().expect("messages lock poisoned").len());
-}
-
-async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expected: usize) {
-    for _ in 0..50 {
-        if notifications.lock().expect("notifications lock poisoned").len() >= expected {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

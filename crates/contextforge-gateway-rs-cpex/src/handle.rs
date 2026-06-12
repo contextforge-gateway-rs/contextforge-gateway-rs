@@ -190,7 +190,7 @@ impl CpexRuntimeRegistry {
         response: CallToolResult,
         state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.handle().after_tool_call(tool_name, response, state.as_ref()).await
+        self.handle().after_tool_call(tool_name, response, state).await
     }
 }
 
@@ -264,10 +264,10 @@ impl GatewayPluginRuntimeHandle {
         &self,
         tool_name: &str,
         response: CallToolResult,
-        state: Option<&RuntimeHookState>,
+        state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
-        match state.and_then(|state| Arc::clone(state).downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state.as_ref()).await,
+        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state.clone()).await,
             None => Ok(response),
         }
     }
@@ -278,13 +278,13 @@ impl GatewayPluginRuntimeHandle {
         &self,
         tool_name: &str,
         event: T,
-        state: Option<&RuntimeHookState>,
+        state: Option<RuntimeHookState>,
     ) -> Result<Option<T>, ErrorData>
     where
         T: Serialize + DeserializeOwned,
     {
-        match state.and_then(|state| Arc::clone(state).downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_event(tool_name, event, state.state.as_ref()).await,
+        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+            Some(state) => state.runtime.after_tool_event(tool_name, event, state.state.clone()).await,
             None => Ok(Some(event)),
         }
     }

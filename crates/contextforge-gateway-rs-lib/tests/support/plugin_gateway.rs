@@ -18,8 +18,7 @@ use rmcp::{
         CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, InitializeRequestParams,
         InitializeResult, LoggingLevel, LoggingMessageNotificationParam, ProgressNotificationParam, ServerCapabilities,
     },
-    service::RequestContext,
-    service::Service,
+    service::{RequestContext, Service},
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,

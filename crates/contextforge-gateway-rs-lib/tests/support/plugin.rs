@@ -13,7 +13,7 @@ use cpex_core::{
     plugin::{Plugin, PluginConfig},
 };
 use rmcp::model::{CallToolResult, Content, LoggingMessageNotificationParam, ProgressNotificationParam};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::tool::text;
 
@@ -33,7 +33,6 @@ pub(crate) struct Observations {
     pub(crate) pre_payload_role: Option<Role>,
     pub(crate) pre_tool_call_id: Option<String>,
     pub(crate) post_payload_name: Option<String>,
-    pub(crate) post_tool_call_id: Option<String>,
     pub(crate) post_tool_call_ids: Vec<String>,
     pub(crate) post_result_text: Option<String>,
 }
@@ -161,7 +160,6 @@ impl HookHandler<CmfHook> for TestPlugin {
             observations.post_calls += 1;
             if let Some(result) = payload.message.get_tool_results().first() {
                 observations.post_payload_name = Some(result.tool_name.clone());
-                observations.post_tool_call_id = Some(result.tool_call_id.clone());
                 observations.post_tool_call_ids.push(result.tool_call_id.clone());
             }
             observations.post_result_text = Some(cmf_result_text(payload));
@@ -185,7 +183,7 @@ impl HookHandler<CmfHook> for TestPlugin {
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
-                        if serde_json::from_value::<CallToolResult>(content.content.clone()).is_err() {
+                        if !is_tool_result_content(&content.content) {
                             return PluginResult::allow();
                         }
                         content.content = serde_json::to_value(CallToolResult::success(vec![Content::text(format!(
@@ -200,7 +198,7 @@ impl HookHandler<CmfHook> for TestPlugin {
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
-                        if serde_json::from_value::<CallToolResult>(content.content.clone()).is_err() {
+                        if !is_tool_result_content(&content.content) {
                             return PluginResult::allow();
                         }
                         content.content = json!("raw-post");
@@ -274,6 +272,13 @@ impl HookHandler<CmfHook> for TestPlugin {
             }
         }
     }
+}
+
+/// Stream events (progress and logging notifications) run through the same
+/// post hook as tool results; result-rewriting behaviors must leave them
+/// untouched.
+fn is_tool_result_content(content: &Value) -> bool {
+    serde_json::from_value::<CallToolResult>(content.clone()).is_ok()
 }
 
 fn cmf_result_text(payload: &MessagePayload) -> String {

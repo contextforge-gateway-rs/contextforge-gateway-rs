@@ -148,7 +148,7 @@ impl GatewayBackendClient {
         let Some(plugin_runtime) = &self.plugin_runtime else {
             return Some(event);
         };
-        match plugin_runtime.after_stream_event(&call.tool_name, event, call.post_state.as_ref()).await {
+        match plugin_runtime.after_stream_event(&call.tool_name, event, call.post_state.clone()).await {
             Ok(event) => event,
             Err(error) => {
                 warn!("call_tool: plugin rejected backend notification: {error:?}");
@@ -527,7 +527,7 @@ where
         })?;
         let response = match (&self.plugin_runtime, post_state) {
             (Some(plugin_runtime), Some(post_state)) => {
-                plugin_runtime.after_tool_call(&tool_name, response, Some(&post_state)).await?
+                plugin_runtime.after_tool_call(&tool_name, response, Some(post_state)).await?
             },
             _ => response,
         };
