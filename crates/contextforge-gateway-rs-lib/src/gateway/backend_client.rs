@@ -79,14 +79,6 @@ impl GatewayBackendClient {
         InFlightToolCallGuard { calls: Arc::clone(&self.in_flight_calls), call, _call_lock: call_lock }
     }
 
-    fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
-        let calls = self.in_flight_calls.lock().expect("in-flight tool call lock poisoned");
-        if calls.len() == 1 {
-            return calls.last().cloned();
-        }
-        calls.iter().find(|call| call.progress_token.as_ref() == Some(progress_token)).cloned()
-    }
-
     fn latest_call(&self) -> Option<Arc<InFlightToolCall>> {
         self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").last().cloned()
     }
@@ -122,11 +114,11 @@ impl ClientHandler for GatewayBackendClient {
     }
 
     async fn on_progress(&self, mut progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
-        let Some(call) = self.progress_call(&progress.progress_token) else {
-            debug!(
-                "call_tool: dropping backend progress notification with unknown token {:?}",
-                progress.progress_token
-            );
+        // Tool calls are serialized per backend session, so backend progress
+        // always belongs to the single in-flight call, whatever token the
+        // backend used.
+        let Some(call) = self.latest_call() else {
+            debug!("call_tool: dropping backend progress notification without an in-flight tool call");
             return;
         };
         let Some(progress_token) = call.progress_token.clone() else {

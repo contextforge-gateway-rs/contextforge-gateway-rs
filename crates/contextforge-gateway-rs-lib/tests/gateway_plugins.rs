@@ -113,6 +113,19 @@ fn raw_mcp_request(
     request
 }
 
+fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: i64) -> Value {
+    serde_json::json!({
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": {},
+            "_meta": { "progressToken": progress_token }
+        },
+        "jsonrpc": "2.0",
+        "id": request_id
+    })
+}
+
 fn sse_data_values(body: &str) -> Vec<Value> {
     let values = body
         .lines()
@@ -271,38 +284,10 @@ async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins(
     let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
 
     let tool_name = format!("{}-progress_sum", gateway.backend_name);
-    let first = raw_mcp_request(
-        &client,
-        &gateway,
-        "admin@example.com",
-        Some(&session_id),
-        &serde_json::json!({
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": {},
-                "_meta": { "progressToken": 1 }
-            },
-            "jsonrpc": "2.0",
-            "id": 2
-        }),
-    );
-    let second = raw_mcp_request(
-        &client,
-        &gateway,
-        "admin@example.com",
-        Some(&session_id),
-        &serde_json::json!({
-            "method": "tools/call",
-            "params": {
-                "name": format!("{}-progress_sum", gateway.backend_name),
-                "arguments": {},
-                "_meta": { "progressToken": 2 }
-            },
-            "jsonrpc": "2.0",
-            "id": 3
-        }),
-    );
+    let first =
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 2, 1));
+    let second =
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 3, 2));
     let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
 
     assert_raw_progress_stream(&first_body, 2, 1);
@@ -315,38 +300,11 @@ async fn raw_streamable_http_rewrites_backend_generated_progress_tokens() {
     let client = reqwest::Client::new();
     let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
 
-    let first = raw_mcp_request(
-        &client,
-        &gateway,
-        "admin@example.com",
-        Some(&session_id),
-        &serde_json::json!({
-            "method": "tools/call",
-            "params": {
-                "name": format!("{}-progress_counter_tokens", gateway.backend_name),
-                "arguments": {},
-                "_meta": { "progressToken": 10 }
-            },
-            "jsonrpc": "2.0",
-            "id": 2
-        }),
-    );
-    let second = raw_mcp_request(
-        &client,
-        &gateway,
-        "admin@example.com",
-        Some(&session_id),
-        &serde_json::json!({
-            "method": "tools/call",
-            "params": {
-                "name": format!("{}-progress_counter_tokens", gateway.backend_name),
-                "arguments": {},
-                "_meta": { "progressToken": 20 }
-            },
-            "jsonrpc": "2.0",
-            "id": 3
-        }),
-    );
+    let tool_name = format!("{}-progress_counter_tokens", gateway.backend_name);
+    let first =
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 2, 10));
+    let second =
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 3, 20));
     let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
 
     assert_raw_progress_stream(&first_body, 2, 10);
