@@ -24,6 +24,7 @@ use rmcp::{
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
@@ -192,12 +193,15 @@ impl ClientHandler for GatewayBackendClient {
         message: LoggingMessageNotificationParam,
         _context: NotificationContext<RoleClient>,
     ) {
-        let message = match self.latest_call() {
-            Some(call) => match self.stream_event_post_hook(&call, message).await {
-                Some(message) => message,
-                None => return,
-            },
-            None => message,
+        // MCP does not correlate logging messages with requests, so they are
+        // attributed to the most recent in-flight tool call. Messages with no
+        // in-flight call are dropped so nothing bypasses the post hooks.
+        let Some(call) = self.latest_call() else {
+            debug!("call_tool: dropping backend logging notification without an in-flight tool call");
+            return;
+        };
+        let Some(message) = self.stream_event_post_hook(&call, message).await else {
+            return;
         };
         if let Err(error) = self.downstream.notify_logging_message(message).await {
             warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
@@ -205,20 +209,35 @@ impl ClientHandler for GatewayBackendClient {
     }
 }
 
-/// `Peer::call_tool` stamps an auto-generated progress token over the request
-/// meta, so calls that must keep the downstream progress token are sent with
-/// the token in the request options, which take precedence.
-async fn call_tool_with_progress_token(
+/// Calls the tool on the backend, keeping the downstream progress token on
+/// the request (`Peer::call_tool` would stamp an auto-generated token over it
+/// at serialization) and relaying a downstream cancellation to the backend.
+async fn call_backend_tool(
     peer: &Peer<RoleClient>,
     request: CallToolRequestParams,
-    progress_token: ProgressToken,
+    progress_token: Option<ProgressToken>,
+    cancellation: CancellationToken,
 ) -> Result<CallToolResult, ServiceError> {
-    let mut meta = Meta::new();
-    meta.set_progress_token(progress_token);
     let mut options = PeerRequestOptions::no_options();
-    options.meta = Some(meta);
-    let handle = peer.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await?;
-    match handle.await_response().await? {
+    if let Some(progress_token) = progress_token {
+        let mut meta = Meta::new();
+        meta.set_progress_token(progress_token);
+        options.meta = Some(meta);
+    }
+    let mut handle =
+        peer.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await?;
+    let response = tokio::select! {
+        response = &mut handle.rx => Some(response),
+        () = cancellation.cancelled() => None,
+    };
+    let Some(response) = response else {
+        let reason = "tool call cancelled by the downstream client".to_owned();
+        if let Err(error) = handle.cancel(Some(reason.clone())).await {
+            warn!("call_tool: unable to relay cancellation to the backend: {error:?}");
+        }
+        return Err(ServiceError::Cancelled { reason: Some(reason) });
+    };
+    match response.map_err(|_| ServiceError::TransportClosed)?? {
         ServerResult::CallToolResult(result) => Ok(result),
         _ => Err(ServiceError::UnexpectedResponse),
     }
@@ -513,10 +532,7 @@ where
         let progress_token = cx.meta.get_progress_token();
         let _call_guard =
             service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone());
-        let response = match progress_token {
-            Some(progress_token) => call_tool_with_progress_token(service.peer(), routed_request, progress_token).await,
-            None => service.call_tool(routed_request).await,
-        };
+        let response = call_backend_tool(service.peer(), routed_request, progress_token, cx.ct.clone()).await;
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {

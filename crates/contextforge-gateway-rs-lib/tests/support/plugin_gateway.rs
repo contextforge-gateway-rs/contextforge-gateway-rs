@@ -44,6 +44,7 @@ pub(crate) struct BackendObservation {
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
 }
 
 #[derive(Clone)]
@@ -115,6 +116,15 @@ impl ServerHandler for TestBackend {
                     }
                 }
                 Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+            },
+            "wait_for_cancellation" => {
+                cx.ct.cancelled().await;
+                self.state
+                    .cancellations
+                    .lock()
+                    .expect("backend cancellations lock poisoned")
+                    .push(request.name.to_string());
+                Ok(CallToolResult::success(vec![Content::text("cancelled")]))
             },
             _ => Err(ErrorData {
                 code: ErrorCode::METHOD_NOT_FOUND,

@@ -2,6 +2,7 @@ mod support;
 
 use std::sync::{Arc, Mutex as StdMutex};
 
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use cpex_core::cmf::Role;
 use cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
@@ -70,19 +71,19 @@ async fn call_progress_sum(
     else {
         panic!("expected call tool result");
     };
-    wait_for_notification_count(&progress, 4).await;
-    wait_for_notification_count(&messages, 4).await;
+    wait_for_event_count(&progress, 4).await;
+    wait_for_event_count(&messages, 4).await;
     (result, progress, messages)
 }
 
-async fn wait_for_notification_count<T>(notifications: &StdMutex<Vec<T>>, expected: usize) {
+async fn wait_for_event_count<T>(events: &StdMutex<Vec<T>>, expected: usize) {
     for _ in 0..50 {
-        if notifications.lock().expect("notifications lock poisoned").len() >= expected {
+        if events.lock().expect("events lock poisoned").len() >= expected {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    panic!("timed out waiting for {expected} forwarded notifications");
+    panic!("timed out waiting for {expected} recorded events");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -179,6 +180,25 @@ async fn json_response_mode_forwards_backend_progress_and_message_notifications(
     assert_eq!("post:completed 4 packages", text(&result));
     assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
     assert_eq!(4, messages.lock().expect("messages lock poisoned").len());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn downstream_cancellation_is_relayed_to_backend() {
+    let gateway = start_gateway("admin@example.com", true, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = gateway.connect("admin@example.com").await;
+
+    let request = CallToolRequestParams::new(format!("{}-wait_for_cancellation", gateway.backend_name));
+    let handle = service
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(Request::new(request)),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .expect("wait_for_cancellation request is sent");
+    wait_for_event_count(&gateway.backend_state.calls, 1).await;
+
+    handle.cancel(Some("client gave up".to_owned())).await.expect("cancellation is sent");
+    wait_for_event_count(&gateway.backend_state.cancellations, 1).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
