@@ -40,6 +40,7 @@ rustls-pki-types = { version = "1.14.1", features = ["std","alloc"] }
 tokio-rustls = "0.26.4"
 typed-builder.workspace = true
 secret-string = "0.0.2"
+sse-stream = { version = "0.2" }
 
 
 [features]

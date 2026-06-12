@@ -8,17 +8,21 @@ use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult
 use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
-    ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
+    ErrorData, Peer, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
         ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
-        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
-        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
-        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
-        ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel, Meta,
+        NumberOrString, PaginatedRequestParams, ProgressToken, Prompt, PromptArgument, PromptMessage,
+        PromptMessageContent, PromptMessageRole, RawImageContent, RawResourceTemplate, ReadResourceRequestParams,
+        ReadResourceResult, Reference, Resource, ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams,
+        Tool, UnsubscribeRequestParams,
     },
     service::{RequestContext, RunningService},
-    transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
+    transport::{
+        StreamableHttpClientTransport,
+        streamable_http_client::{StreamableHttpClient, StreamableHttpClientTransportConfig},
+    },
 };
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -49,11 +53,16 @@ impl BackendTransports {
     }
 }
 
+pub trait SetPeer {
+    fn set_peer(&mut self, peer: Peer<RoleServer>);
+}
+
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
-pub struct McpService<T>
+pub struct McpService<T, C>
 where
     T: UserSessionStore,
+    C: StreamableHttpClient + SetPeer,
 {
     #[builder(default = Arc::new(Mutex::new(HashSet::new())))]
     subscriptions: Arc<Mutex<HashSet<String>>>,
@@ -61,7 +70,7 @@ where
     transports: BackendTransports,
     #[builder(default = Arc::new(Mutex::new(LoggingLevel::Debug)))]
     log_level: Arc<Mutex<LoggingLevel>>,
-    http_client: reqwest::Client,
+    http_client: C,
     user_session_store: T,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
@@ -121,9 +130,10 @@ impl From<(Option<ServerCapabilities>, Option<McpClientService>)> for BackendTra
     }
 }
 
-impl<T> ServerHandler for McpService<T>
+impl<T, C> ServerHandler for McpService<T, C>
 where
     T: UserSessionStore + Send + Sync + 'static,
+    C: StreamableHttpClient + SetPeer + Clone + Send + Sync,
 {
     async fn initialize(
         &self,
@@ -150,7 +160,8 @@ where
             .backends
             .iter()
             .map(|(name, backend)| {
-                let client = self.http_client.clone();
+                let mut client = self.http_client.clone();
+                client.set_peer(cx.peer.clone());
                 let request = request.clone();
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
@@ -300,6 +311,8 @@ where
 
         let backend_names = session_manager.get_backend_names();
 
+        let progress_token = cx.meta.get_key_value("progressToken").map(|(_, v)| v);
+
         let Some(BackendToolPair { backend_name, tool_name }) = split_tool_name(&request.name, &backend_names) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
@@ -358,6 +371,27 @@ where
         };
         let post_state = pre_result.state;
         let mut routed_request = request;
+        let org_progress_token = progress_token.cloned();
+        info!("Progress token {org_progress_token:?}");
+        if let Some(token) = progress_token.cloned()
+            && let Ok(progress_token) = serde_json::from_value::<NumberOrString>(token)
+        {
+            let meta = if let Some(mut meta) = routed_request.meta {
+                meta.set_progress_token(ProgressToken(progress_token));
+                meta
+            } else {
+                let mut meta = Meta::new();
+                meta.set_progress_token(ProgressToken(progress_token));
+                meta
+            };
+            routed_request.meta = Some(meta);
+        } else {
+            let mut meta = Meta::new();
+            meta.set_progress_token(ProgressToken(NumberOrString::String(Arc::from("temp_progress_token"))));
+            routed_request.meta = Some(meta);
+            warn!("Invalid progress token {org_progress_token:?}");
+        }
+
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let service_name = target_service.name.clone();

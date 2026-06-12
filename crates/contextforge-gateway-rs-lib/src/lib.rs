@@ -36,7 +36,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 use crate::{
     common::{ContextForgeGatewayAppState, JwtTokenDecoders},
-    gateway::LocalUserSessionStore,
+    gateway::{LocalUserSessionStore, ProgressAwareClient},
     layers::{
         claims_id::claims_layer,
         session_id::{SessionIdState, session_id_layer},
@@ -82,21 +82,24 @@ impl Gateway {
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 
         let reqwest_backend_client = reqwest::Client::try_from(config)?;
-
+        let progress_aware_client = ProgressAwareClient::new(reqwest_backend_client);
         // Create streamable HTTP service
-        let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
-            StreamableHttpService::new(
-                move || {
-                    Ok(McpService::builder()
-                        .with_user_session_store(user_session_store.clone())
-                        .with_http_client(reqwest_backend_client.clone())
-                        .with_transports(backend_transports.clone())
-                        .with_plugin_runtime(mcp_plugin_runtime.clone())
-                        .build())
-                },
-                session_manager,
-                streamable_config,
-            );
+        let mcp_service: StreamableHttpService<
+            //McpService<LocalUserSessionStore, reqwest::Client>,
+            McpService<LocalUserSessionStore, ProgressAwareClient>,
+            LocalSessionManager,
+        > = StreamableHttpService::new(
+            move || {
+                Ok(McpService::builder()
+                    .with_user_session_store(user_session_store.clone())
+                    .with_http_client(progress_aware_client.clone())
+                    .with_transports(backend_transports.clone())
+                    .with_plugin_runtime(mcp_plugin_runtime.clone())
+                    .build())
+            },
+            session_manager,
+            streamable_config,
+        );
 
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
