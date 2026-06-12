@@ -12,10 +12,10 @@ use rmcp::{
     model::{
         AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
         ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
-        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
-        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
-        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
-        ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, RawImageContent,
+        RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource, ServerCapabilities,
+        SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
@@ -59,8 +59,6 @@ where
     subscriptions: Arc<Mutex<HashSet<String>>>,
     #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
-    #[builder(default = Arc::new(Mutex::new(LoggingLevel::Debug)))]
-    log_level: Arc<Mutex<LoggingLevel>>,
     http_client: reqwest::Client,
     user_session_store: T,
     #[builder(default)]
@@ -687,16 +685,6 @@ where
         };
         Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| ErrorData::internal_error(e, None))?))
     }
-
-    async fn set_level(&self, request: SetLevelRequestParams, cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("set_level user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
-        let mut level = self.log_level.lock().await;
-        *level = request.level;
-        Ok(())
-    }
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
@@ -731,7 +719,7 @@ const TEST_IMAGE_DATA: &str =
 // Small base64-encoded WAV (silence)
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
-    ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().enable_logging().build()
+    ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().build()
 }
 
 fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
