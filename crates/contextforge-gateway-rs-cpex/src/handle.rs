@@ -13,9 +13,8 @@ use cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{
-        CallToolRequestParams, CallToolResult, ErrorCode, LoggingMessageNotificationParam, ProgressNotificationParam,
-    },
+    model::{CallToolRequestParams, CallToolResult, ErrorCode},
+    serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::task::JoinHandle;
 
@@ -253,7 +252,7 @@ impl GatewayPluginRuntimeHandle {
         };
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
         if runtime.has_post_hook() {
-            let state = result.state.take().or_else(|| Some(runtime.new_tool_call_state()));
+            let state = result.state.take();
             result.state = Some(Arc::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
         } else {
             result.state = None;
@@ -268,32 +267,25 @@ impl GatewayPluginRuntimeHandle {
         state: Option<&RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
         match state.and_then(|state| Arc::clone(state).downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_call_ref(tool_name, response, state.state.as_ref()).await,
+            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state.as_ref()).await,
             None => Ok(response),
         }
     }
 
-    pub async fn after_progress_notification(
+    /// Runs the tool post hooks over a streamed tool event (progress or logging
+    /// notification). Returns `None` when a plugin denies the event.
+    pub async fn after_stream_event<T>(
         &self,
         tool_name: &str,
-        progress: ProgressNotificationParam,
+        event: T,
         state: Option<&RuntimeHookState>,
-    ) -> Result<Option<ProgressNotificationParam>, ErrorData> {
+    ) -> Result<Option<T>, ErrorData>
+    where
+        T: Serialize + DeserializeOwned,
+    {
         match state.and_then(|state| Arc::clone(state).downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_event(tool_name, progress, state.state.as_ref()).await,
-            None => Ok(Some(progress)),
-        }
-    }
-
-    pub async fn after_logging_message(
-        &self,
-        tool_name: &str,
-        message: LoggingMessageNotificationParam,
-        state: Option<&RuntimeHookState>,
-    ) -> Result<Option<LoggingMessageNotificationParam>, ErrorData> {
-        match state.and_then(|state| Arc::clone(state).downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_event(tool_name, message, state.state.as_ref()).await,
-            None => Ok(Some(message)),
+            Some(state) => state.runtime.after_tool_event(tool_name, event, state.state.as_ref()).await,
+            None => Ok(Some(event)),
         }
     }
 }

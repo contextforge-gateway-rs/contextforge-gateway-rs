@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
 };
 
 use contextforge_gateway_rs_apis::user_store::UserConfig;
@@ -8,21 +8,22 @@ use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, RuntimeHookState,
 use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
-    ClientHandler, ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
-    handler::client::progress::ProgressDispatcher,
+    ClientHandler, ErrorData, Peer, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         AnnotateAble, CallToolRequestParams, CallToolResult, ClientRequest, CompleteRequestParams, CompleteResult,
         CompletionInfo, ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams,
         InitializeResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
-        LoggingLevel, LoggingMessageNotificationParam, PaginatedRequestParams, ProgressNotificationParam, Prompt,
-        PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, RawImageContent, RawResourceTemplate,
-        ReadResourceRequestParams, ReadResourceResult, Reference, Request, Resource, ServerCapabilities, ServerResult,
-        SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
+        LoggingLevel, LoggingMessageNotificationParam, Meta, PaginatedRequestParams, ProgressNotificationParam,
+        ProgressToken, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole, RawImageContent,
+        RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Request, Resource,
+        ServerCapabilities, ServerResult, SetLevelRequestParams, SubscribeRequestParams, Tool,
+        UnsubscribeRequestParams,
     },
-    service::{NotificationContext, PeerRequestOptions, RequestContext, RunningService},
+    serde::{Serialize, de::DeserializeOwned},
+    service::{NotificationContext, PeerRequestOptions, RequestContext, RunningService, ServiceError},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-use tokio::sync::{Mutex, broadcast, watch};
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
@@ -78,17 +79,90 @@ pub struct BackendTransportKey {
 
 type McpClientService = Arc<RunningService<RoleClient, GatewayBackendClient>>;
 
-#[derive(Clone, Debug)]
+/// Client handler for a backend MCP connection. Progress and logging
+/// notifications streamed by the backend are run through the tool post hooks
+/// of the in-flight tool call they belong to and forwarded to the downstream
+/// peer of the gateway session.
+#[derive(Clone)]
 pub(crate) struct GatewayBackendClient {
     initialize_request: InitializeRequestParams,
-    progress_dispatcher: ProgressDispatcher,
-    logging_messages: broadcast::Sender<LoggingMessageNotificationParam>,
+    downstream: Peer<RoleServer>,
+    plugin_runtime: Option<GatewayPluginRuntimeHandle>,
+    in_flight_calls: Arc<StdMutex<Vec<Arc<InFlightToolCall>>>>,
+}
+
+struct InFlightToolCall {
+    progress_token: Option<ProgressToken>,
+    tool_name: String,
+    post_state: Option<RuntimeHookState>,
+}
+
+/// Keeps a tool call registered with the backend client; dropping the guard
+/// stops notification forwarding for the call.
+struct InFlightToolCallGuard {
+    calls: Arc<StdMutex<Vec<Arc<InFlightToolCall>>>>,
+    call: Arc<InFlightToolCall>,
+}
+
+impl Drop for InFlightToolCallGuard {
+    fn drop(&mut self) {
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.retain(|call| !Arc::ptr_eq(call, &self.call));
+        }
+    }
 }
 
 impl GatewayBackendClient {
-    fn new(initialize_request: InitializeRequestParams) -> Self {
-        let (logging_messages, _) = broadcast::channel(16);
-        Self { initialize_request, progress_dispatcher: ProgressDispatcher::new(), logging_messages }
+    fn new(
+        initialize_request: InitializeRequestParams,
+        downstream: Peer<RoleServer>,
+        plugin_runtime: Option<GatewayPluginRuntimeHandle>,
+    ) -> Self {
+        Self { initialize_request, downstream, plugin_runtime, in_flight_calls: Arc::default() }
+    }
+
+    fn track_tool_call(
+        &self,
+        tool_name: String,
+        progress_token: Option<ProgressToken>,
+        post_state: Option<RuntimeHookState>,
+    ) -> InFlightToolCallGuard {
+        let call = Arc::new(InFlightToolCall { progress_token, tool_name, post_state });
+        self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").push(Arc::clone(&call));
+        InFlightToolCallGuard { calls: Arc::clone(&self.in_flight_calls), call }
+    }
+
+    fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
+        let calls = self.in_flight_calls.lock().expect("in-flight tool call lock poisoned");
+        calls.iter().find(|call| call.progress_token.as_ref() == Some(progress_token)).cloned()
+    }
+
+    fn latest_call(&self) -> Option<Arc<InFlightToolCall>> {
+        self.in_flight_calls.lock().expect("in-flight tool call lock poisoned").last().cloned()
+    }
+
+    async fn stream_event_post_hook<T>(&self, call: &InFlightToolCall, event: T) -> Option<T>
+    where
+        T: Serialize + DeserializeOwned,
+    {
+        let Some(plugin_runtime) = &self.plugin_runtime else {
+            return Some(event);
+        };
+        match plugin_runtime.after_stream_event(&call.tool_name, event, call.post_state.as_ref()).await {
+            Ok(event) => event,
+            Err(error) => {
+                warn!("call_tool: plugin rejected backend notification: {error:?}");
+                None
+            },
+        }
+    }
+}
+
+impl std::fmt::Debug for GatewayBackendClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GatewayBackendClient")
+            .field("initialize_request", &self.initialize_request)
+            .finish_non_exhaustive()
     }
 }
 
@@ -97,34 +171,56 @@ impl ClientHandler for GatewayBackendClient {
         self.initialize_request.clone()
     }
 
-    async fn on_progress(&self, params: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
-        self.progress_dispatcher.handle_notification(params).await;
+    async fn on_progress(&self, progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
+        let Some(call) = self.progress_call(&progress.progress_token) else {
+            debug!(
+                "call_tool: dropping backend progress notification with unknown token {:?}",
+                progress.progress_token
+            );
+            return;
+        };
+        let Some(progress) = self.stream_event_post_hook(&call, progress).await else {
+            return;
+        };
+        if let Err(error) = self.downstream.notify_progress(progress).await {
+            warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
+        }
     }
 
     async fn on_logging_message(
         &self,
-        params: LoggingMessageNotificationParam,
+        message: LoggingMessageNotificationParam,
         _context: NotificationContext<RoleClient>,
     ) {
-        let _ = self.logging_messages.send(params);
+        let message = match self.latest_call() {
+            Some(call) => match self.stream_event_post_hook(&call, message).await {
+                Some(message) => message,
+                None => return,
+            },
+            None => message,
+        };
+        if let Err(error) = self.downstream.notify_logging_message(message).await {
+            warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
+        }
     }
 }
 
-async fn apply_logging_post_hook(
-    plugin_runtime: &Option<GatewayPluginRuntimeHandle>,
-    tool_name: &str,
-    message: LoggingMessageNotificationParam,
-    post_state: Option<&RuntimeHookState>,
-) -> Option<LoggingMessageNotificationParam> {
-    let Some(plugin_runtime) = plugin_runtime else {
-        return Some(message);
-    };
-    match plugin_runtime.after_logging_message(tool_name, message, post_state).await {
-        Ok(message) => message,
-        Err(error) => {
-            warn!("call_tool: plugin rejected backend logging notification: {error:?}");
-            None
-        },
+/// `Peer::call_tool` stamps an auto-generated progress token over the request
+/// meta, so calls that must keep the downstream progress token are sent with
+/// the token in the request options, which take precedence.
+async fn call_tool_with_progress_token(
+    peer: &Peer<RoleClient>,
+    request: CallToolRequestParams,
+    progress_token: ProgressToken,
+) -> Result<CallToolResult, ServiceError> {
+    let mut meta = Meta::new();
+    meta.set_progress_token(progress_token);
+    let mut options = PeerRequestOptions::no_options();
+    options.meta = Some(meta);
+    let handle = peer.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await?;
+    match handle.await_response().await? {
+        ServerResult::CallToolResult(result) => Ok(result),
+        _ => Err(ServiceError::UnexpectedResponse),
     }
 }
 
@@ -203,7 +299,8 @@ where
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
-                let request = request.clone();
+                let backend_client =
+                    GatewayBackendClient::new(request.clone(), cx.peer.clone(), self.plugin_runtime.clone());
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
@@ -226,7 +323,7 @@ where
                         let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
                             .custom_headers(headers);
                         let transport = StreamableHttpClientTransport::with_client(client, config);
-                        let maybe_running_service = GatewayBackendClient::new(request).serve(transport).await;
+                        let maybe_running_service = backend_client.serve(transport).await;
                         if let Ok(running_service) = maybe_running_service {
                             info!("initialize: intialized for {downstream_session_id:?} {name:?}");
                             (name, Some(running_service))
@@ -413,127 +510,13 @@ where
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let service_name = target_service.name.clone();
-        let mut notification_forwarders = Vec::new();
-        let progress_token = cx
-            .meta
-            .get_progress_token()
-            .or_else(|| routed_request.meta.as_ref().and_then(|meta| meta.get_progress_token()));
-        let subscribed_progress_token = progress_token.clone();
-        if let Some(progress_token) = progress_token.clone() {
-            routed_request.meta.get_or_insert_with(Default::default).set_progress_token(progress_token.clone());
-            let mut progress_subscriber = service.service().progress_dispatcher.subscribe(progress_token).await;
-            let downstream_peer = cx.peer.clone();
-            let plugin_runtime = self.plugin_runtime.clone();
-            let progress_tool_name = tool_name.clone();
-            let progress_post_state = post_state.clone();
-            notification_forwarders.push(tokio::spawn(async move {
-                while let Some(progress) = futures::StreamExt::next(&mut progress_subscriber).await {
-                    let progress = if let Some(plugin_runtime) = &plugin_runtime {
-                        match plugin_runtime
-                            .after_progress_notification(&progress_tool_name, progress, progress_post_state.as_ref())
-                            .await
-                        {
-                            Ok(Some(progress)) => progress,
-                            Ok(None) => continue,
-                            Err(error) => {
-                                warn!("call_tool: plugin rejected backend progress notification: {error:?}");
-                                continue;
-                            },
-                        }
-                    } else {
-                        progress
-                    };
-                    if let Err(error) = downstream_peer.notify_progress(progress).await {
-                        warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
-                        break;
-                    }
-                }
-            }));
-        }
-        let mut logging_messages = service.service().logging_messages.subscribe();
-        let (stop_logging_tx, mut stop_logging_rx) = watch::channel(false);
-        let downstream_peer = cx.peer.clone();
-        let plugin_runtime = self.plugin_runtime.clone();
-        let logging_tool_name = tool_name.clone();
-        let logging_post_state = post_state.clone();
-        notification_forwarders.push(tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    result = logging_messages.recv() => match result {
-                        Ok(message) => {
-                            let Some(message) = apply_logging_post_hook(
-                                &plugin_runtime,
-                                &logging_tool_name,
-                                message,
-                                logging_post_state.as_ref(),
-                            ).await else { continue };
-                            if let Err(error) = downstream_peer.notify_logging_message(message).await {
-                                warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
-                                break;
-                            }
-                        },
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            warn!("call_tool: skipped {skipped} backend logging notifications while forwarding downstream");
-                        },
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                    changed = stop_logging_rx.changed() => {
-                        if changed.is_err() || *stop_logging_rx.borrow() {
-                            loop {
-                                match logging_messages.try_recv() {
-                                    Ok(message) => {
-                                        let Some(message) = apply_logging_post_hook(
-                                            &plugin_runtime,
-                                            &logging_tool_name,
-                                            message,
-                                            logging_post_state.as_ref(),
-                                        ).await else { continue };
-                                        if let Err(error) = downstream_peer.notify_logging_message(message).await {
-                                            warn!("call_tool: unable to forward backend logging notification downstream: {error:?}");
-                                            break;
-                                        }
-                                    },
-                                    Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
-                                        warn!("call_tool: skipped {skipped} backend logging notifications while forwarding downstream");
-                                    },
-                                    Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => break,
-                                }
-                            }
-                            break;
-                        }
-                    },
-                }
-            }
-        }));
-        let response = if progress_token.is_some() {
-            let mut options = PeerRequestOptions::no_options();
-            options.meta = routed_request.meta.clone();
-            let handle = service
-                .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(routed_request)), options)
-                .await;
-            match handle {
-                Ok(handle) => match handle.await_response().await {
-                    Ok(ServerResult::CallToolResult(result)) => Ok(result),
-                    Ok(_) => {
-                        warn!("call_tool: backend {service_name} returned unexpected response");
-                        Err(rmcp::service::ServiceError::UnexpectedResponse)
-                    },
-                    Err(error) => Err(error),
-                },
-                Err(error) => Err(error),
-            }
-        } else {
-            service.call_tool(routed_request).await
+        let progress_token = cx.meta.get_progress_token();
+        let _call_guard =
+            service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone());
+        let response = match progress_token {
+            Some(progress_token) => call_tool_with_progress_token(service.peer(), routed_request, progress_token).await,
+            None => service.call_tool(routed_request).await,
         };
-        if let Some(progress_token) = subscribed_progress_token {
-            service.service().progress_dispatcher.unsubscribe(&progress_token).await;
-        }
-        let _ = stop_logging_tx.send(true);
-        for mut forwarder in notification_forwarders {
-            if tokio::time::timeout(std::time::Duration::from_millis(200), &mut forwarder).await.is_err() {
-                forwarder.abort();
-            }
-        }
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {

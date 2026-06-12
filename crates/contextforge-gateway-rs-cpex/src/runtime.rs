@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use crate::{
     cmf::{tool_call_payload, tool_json_result_payload, tool_result_payload},
     error::GatewayPluginRuntimeError,
-    hooks::{RuntimeHookState, ToolPreCallResult},
+    hooks::{RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
     pipeline::{
         effective_post_json, effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error,
     },
@@ -48,16 +48,16 @@ fn next_tool_call_id() -> String {
     format!("gateway-tool-call-{}", TOOL_CALL_ID.fetch_add(1, Ordering::Relaxed))
 }
 
+fn new_tool_call_state() -> RuntimeHookState {
+    Arc::new(Mutex::new(ToolCallState {
+        context_table: PluginContextTable::default(),
+        tool_call_id: next_tool_call_id(),
+    }))
+}
+
 impl GatewayPluginRuntime {
     pub(crate) fn has_post_hook(&self) -> bool {
         self.has_post_hook
-    }
-
-    pub(crate) fn new_tool_call_state(&self) -> RuntimeHookState {
-        Arc::new(Mutex::new(ToolCallState {
-            context_table: PluginContextTable::default(),
-            tool_call_id: next_tool_call_id(),
-        }))
     }
 
     pub(crate) async fn from_config(
@@ -153,8 +153,8 @@ impl GatewayPluginRuntime {
         backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
         if !self.has_pre_hook {
-            let state = self.has_post_hook.then(|| self.new_tool_call_state());
-            return Ok(ToolPreCallResult { arguments: crate::ToolArgumentsUpdate::Unchanged, state });
+            let state = self.has_post_hook.then(new_tool_call_state);
+            return Ok(ToolPreCallResult { arguments: ToolArgumentsUpdate::Unchanged, state });
         }
 
         let tool_call_id = next_tool_call_id();
@@ -169,7 +169,7 @@ impl GatewayPluginRuntime {
         Ok(ToolPreCallResult { arguments, state: Some(Arc::new(state)) })
     }
 
-    pub(crate) async fn after_tool_call_ref(
+    pub(crate) async fn after_tool_call(
         &self,
         tool_name: &str,
         response: CallToolResult,

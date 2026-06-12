@@ -104,7 +104,7 @@ impl ServerHandler for TestBackend {
                             })?;
                         cx.peer
                             .notify_progress(
-                                ProgressNotificationParam::new(progress_token.clone(), package as f64)
+                                ProgressNotificationParam::new(progress_token.clone(), f64::from(package))
                                     .with_total(4.0)
                                     .with_message(format!("package {package}/4")),
                             )

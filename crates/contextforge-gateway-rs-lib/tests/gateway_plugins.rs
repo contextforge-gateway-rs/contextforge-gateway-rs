@@ -7,7 +7,7 @@ use cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
     model::{
-        CallToolRequestParams, ClientRequest, ErrorCode, Implementation, InitializeRequestParams,
+        CallToolRequestParams, ClientCapabilities, ClientRequest, ErrorCode, Implementation, InitializeRequestParams,
         LoggingMessageNotificationParam, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request,
         ServerResult,
     },
@@ -29,7 +29,10 @@ struct RecordingClient {
 
 impl ClientHandler for RecordingClient {
     fn get_info(&self) -> InitializeRequestParams {
-        InitializeRequestParams::new(Default::default(), Implementation::new("recording-test-client", "0.1.0"))
+        InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("recording-test-client", "0.1.0"),
+        )
     }
 
     async fn on_progress(&self, params: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
@@ -60,10 +63,13 @@ async fn call_progress_sum(
     let request = CallToolRequestParams::new(format!("{}-progress_sum", gateway.backend_name));
     let mut options = PeerRequestOptions::no_options();
     options.meta = Some(Meta::with_progress_token(ProgressToken(NumberOrString::String("package-progress".into()))));
-    let handle =
-        service.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await.unwrap();
+    let handle = service
+        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options)
+        .await
+        .expect("progress_sum request is sent");
 
-    let ServerResult::CallToolResult(result) = handle.await_response().await.unwrap() else {
+    let ServerResult::CallToolResult(result) = handle.await_response().await.expect("progress_sum call succeeds")
+    else {
         panic!("expected call tool result");
     };
     wait_for_notification_count(&progress, 4).await;
