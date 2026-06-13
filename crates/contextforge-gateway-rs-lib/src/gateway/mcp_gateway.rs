@@ -366,7 +366,7 @@ where
         let progress_token = cx.meta.get_progress_token();
         let _call_guard =
             service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone());
-        let response = call_backend_tool(service.peer(), routed_request, progress_token).await;
+        let response = call_backend_tool(service.peer(), routed_request, progress_token, cx.ct.clone()).await;
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {
