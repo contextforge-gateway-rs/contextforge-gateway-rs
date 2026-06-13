@@ -13,12 +13,12 @@ use contextforge_gateway_rs_lib::{Config, Gateway, UpstreamConnectionMode, UserC
 use futures::FutureExt;
 use http::{HeaderMap, HeaderValue};
 use rmcp::{
-    ErrorData, RoleServer, ServerHandler, ServiceExt,
+    ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, InitializeRequestParams,
-        InitializeResult, ServerCapabilities,
+        InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken, ServerCapabilities,
     },
-    service::RequestContext,
+    service::{RequestContext, Service},
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -64,7 +64,7 @@ impl ServerHandler for TestBackend {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _cx: RequestContext<RoleServer>,
+        cx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         self.state
             .calls
@@ -88,6 +88,43 @@ impl ServerHandler for TestBackend {
                     .ok_or_else(|| ErrorData::invalid_params("sum requires numeric b", None))?;
                 Ok(CallToolResult::success(vec![Content::text((a + b).to_string())]))
             },
+            "progress_sum" => {
+                if let Some(progress_token) = cx.meta.get_progress_token() {
+                    for package in 1..=4 {
+                        cx.peer
+                            .notify_progress(
+                                ProgressNotificationParam::new(progress_token.clone(), f64::from(package))
+                                    .with_total(4.0)
+                                    .with_message(format!("package {package}/4")),
+                            )
+                            .await
+                            .map_err(|error| {
+                                ErrorData::internal_error(format!("progress notification failed: {error}"), None)
+                            })?;
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }
+                Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+            },
+            "progress_counter_tokens" => {
+                for package in 1..=4i32 {
+                    cx.peer
+                        .notify_progress(
+                            ProgressNotificationParam::new(
+                                ProgressToken(NumberOrString::Number(i64::from(package))),
+                                f64::from(package),
+                            )
+                            .with_total(4.0)
+                            .with_message(format!("package {package}/4")),
+                        )
+                        .await
+                        .map_err(|error| {
+                            ErrorData::internal_error(format!("progress notification failed: {error}"), None)
+                        })?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+            },
             _ => Err(ErrorData {
                 code: ErrorCode::METHOD_NOT_FOUND,
                 message: format!("unknown tool {}", request.name).into(),
@@ -105,10 +142,25 @@ pub(crate) struct RunningGateway {
 }
 
 impl RunningGateway {
+    pub(crate) fn gateway_url(&self) -> &str {
+        &self.gateway_url
+    }
+
     pub(crate) async fn connect(
         &self,
         user: &str,
     ) -> rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams> {
+        self.connect_with_handler(user, InitializeRequestParams::default()).await
+    }
+
+    pub(crate) async fn connect_with_handler<S>(
+        &self,
+        user: &str,
+        handler: S,
+    ) -> rmcp::service::RunningService<RoleClient, S>
+    where
+        S: Service<RoleClient> + Send + Sync + Clone + 'static,
+    {
         let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
         loop {
             let mut headers = HeaderMap::new();
@@ -121,7 +173,7 @@ impl RunningGateway {
                 client,
                 StreamableHttpClientTransportConfig::with_uri(self.gateway_url.clone()),
             );
-            match InitializeRequestParams::default().serve(transport).await {
+            match handler.clone().serve(transport).await {
                 Ok(service) => return service,
                 Err(error) if Instant::now() < deadline => {
                     let _ = error;
@@ -146,13 +198,22 @@ pub(crate) async fn start_gateway(
     runtime_plugins_enabled: bool,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
 ) -> RunningGateway {
-    start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime).await
+    start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, false).await
+}
+
+pub(crate) async fn start_gateway_with_json_backend_responses(
+    user: &str,
+    runtime_plugins_enabled: bool,
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+) -> RunningGateway {
+    start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, true).await
 }
 
 async fn start_gateway_with_runtime(
     user: &str,
     runtime_plugins_enabled: bool,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
+    json_backend_responses: bool,
 ) -> RunningGateway {
     let port_lock = Arc::clone(GATEWAY_PORT_LOCK.get_or_init(|| Arc::new(TokioMutex::new(()))));
     let port_guard = port_lock.lock().await;
@@ -169,7 +230,7 @@ async fn start_gateway_with_runtime(
             move || Ok(TestBackend { state: backend_state.clone() })
         },
         LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default(),
+        StreamableHttpServerConfig::default().with_json_response(json_backend_responses),
     );
     let backend_router = axum::Router::new().route_service("/mcp", backend_service);
 

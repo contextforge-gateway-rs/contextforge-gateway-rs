@@ -12,8 +12,8 @@ use cpex_core::{
     hooks::{Extensions, HookHandler, PluginResult, TypedHandlerAdapter, types::cmf_hook_names},
     plugin::{Plugin, PluginConfig},
 };
-use rmcp::model::{CallToolResult, Content};
-use serde_json::json;
+use rmcp::model::{CallToolResult, Content, ProgressNotificationParam};
+use serde_json::{Value, json};
 
 use super::tool::text;
 
@@ -33,7 +33,7 @@ pub(crate) struct Observations {
     pub(crate) pre_payload_role: Option<Role>,
     pub(crate) pre_tool_call_id: Option<String>,
     pub(crate) post_payload_name: Option<String>,
-    pub(crate) post_tool_call_id: Option<String>,
+    pub(crate) post_tool_call_ids: Vec<String>,
     pub(crate) post_result_text: Option<String>,
 }
 
@@ -53,6 +53,8 @@ pub(crate) enum PostBehavior {
     Allow,
     Rewrite,
     RewriteRaw,
+    RewriteStreamEvents,
+    DenyStreamEvents,
     Deny,
     RequireContext,
 }
@@ -100,6 +102,16 @@ impl TestPlugin {
 
     pub(crate) fn with_raw_post_rewrite(mut self) -> Self {
         self.post_behavior = PostBehavior::RewriteRaw;
+        self
+    }
+
+    pub(crate) fn with_stream_event_rewrite(mut self) -> Self {
+        self.post_behavior = PostBehavior::RewriteStreamEvents;
+        self
+    }
+
+    pub(crate) fn with_stream_event_deny(mut self) -> Self {
+        self.post_behavior = PostBehavior::DenyStreamEvents;
         self
     }
 
@@ -154,7 +166,7 @@ impl HookHandler<CmfHook> for TestPlugin {
             observations.post_calls += 1;
             if let Some(result) = payload.message.get_tool_results().first() {
                 observations.post_payload_name = Some(result.tool_name.clone());
-                observations.post_tool_call_id = Some(result.tool_call_id.clone());
+                observations.post_tool_call_ids.push(result.tool_call_id.clone());
             }
             observations.post_result_text = Some(cmf_result_text(payload));
         } else {
@@ -177,6 +189,9 @@ impl HookHandler<CmfHook> for TestPlugin {
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
+                        if !is_tool_result_content(&content.content) {
+                            return PluginResult::allow();
+                        }
                         content.content = serde_json::to_value(CallToolResult::success(vec![Content::text(format!(
                             "post:{result_text}"
                         ))]))
@@ -189,9 +204,37 @@ impl HookHandler<CmfHook> for TestPlugin {
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
+                        if !is_tool_result_content(&content.content) {
+                            return PluginResult::allow();
+                        }
                         content.content = json!("raw-post");
                     }
                     PluginResult::modify_payload(modified)
+                },
+                PostBehavior::RewriteStreamEvents => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::ToolResult { content }) =
+                        modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
+                        && let Ok(mut progress) =
+                            serde_json::from_value::<ProgressNotificationParam>(content.content.clone())
+                    {
+                        progress.message = progress.message.map(|message| format!("plugin:{message}"));
+                        content.content = serde_json::to_value(progress).expect("progress serializes");
+                        return PluginResult::modify_payload(modified);
+                    }
+                    PluginResult::allow()
+                },
+                PostBehavior::DenyStreamEvents => {
+                    let is_stream_event = payload
+                        .message
+                        .get_tool_results()
+                        .first()
+                        .is_some_and(|result| !is_tool_result_content(&result.content));
+                    if is_stream_event {
+                        PluginResult::deny(PluginViolation::new("stream_denied", "stream denied"))
+                    } else {
+                        PluginResult::allow()
+                    }
                 },
                 PostBehavior::Deny => PluginResult::deny(
                     PluginViolation::new("post_denied", "post denied")
@@ -238,6 +281,12 @@ impl HookHandler<CmfHook> for TestPlugin {
             }
         }
     }
+}
+
+/// Progress notifications run through the same post hook as tool results;
+/// result-rewriting behaviors must leave them untouched.
+fn is_tool_result_content(content: &Value) -> bool {
+    serde_json::from_value::<CallToolResult>(content.clone()).is_ok()
 }
 
 fn cmf_result_text(payload: &MessagePayload) -> String {
