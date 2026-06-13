@@ -24,7 +24,10 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
-use super::mcp_call_validator::AuthorizedCallValidator;
+use super::{
+    backend_client::{GatewayBackendClient, call_backend_tool},
+    mcp_call_validator::AuthorizedCallValidator,
+};
 pub use crate::gateway::session_store::LocalUserSessionStore;
 use crate::{
     SessionId,
@@ -72,7 +75,7 @@ pub struct BackendTransportKey {
     session_id: String,
 }
 
-type McpClientService = Arc<RunningService<RoleClient, InitializeRequestParams>>;
+type McpClientService = Arc<RunningService<RoleClient, GatewayBackendClient>>;
 
 #[derive(Debug)]
 pub struct ServiceHolder {
@@ -149,7 +152,8 @@ where
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
-                let request = request.clone();
+                let backend_client =
+                    GatewayBackendClient::new(request.clone(), cx.peer.clone(), self.plugin_runtime.clone());
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
@@ -172,7 +176,7 @@ where
                         let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
                             .custom_headers(headers);
                         let transport = StreamableHttpClientTransport::with_client(client, config);
-                        let maybe_running_service = request.serve(transport).await;
+                        let maybe_running_service = backend_client.serve(transport).await;
                         if let Ok(running_service) = maybe_running_service {
                             info!("initialize: intialized for {downstream_session_id:?} {name:?}");
                             (name, Some(running_service))
@@ -183,7 +187,7 @@ where
                     })
             }).collect();
 
-        let initialization_results: Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)> =
+        let initialization_results: Vec<(&String, Option<RunningService<RoleClient, GatewayBackendClient>>)> =
             futures::future::join_all(tasks).await;
 
         let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
@@ -359,7 +363,10 @@ where
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let service_name = target_service.name.clone();
-        let response = service.call_tool(routed_request).await;
+        let progress_token = cx.meta.get_progress_token();
+        let _call_guard =
+            service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone());
+        let response = call_backend_tool(service.peer(), routed_request, progress_token).await;
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {

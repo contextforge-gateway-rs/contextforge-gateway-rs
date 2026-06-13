@@ -1,16 +1,310 @@
 mod support;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use cpex_core::cmf::Role;
 use cpex_core::hooks::types::cmf_hook_names;
-use rmcp::model::ErrorCode;
+use rmcp::{
+    ClientHandler,
+    model::{
+        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
+        InitializeRequestParams, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request, ServerResult,
+    },
+    service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
+};
 use serde_json::Value;
 
 use support::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, TestPlugin, error_code,
-    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway, sum_request, text,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TestPlugin,
+    error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
+    start_gateway_with_json_backend_responses, sum_request, text, token,
 };
+
+type Recorded<T> = Arc<StdMutex<Vec<T>>>;
+
+#[derive(Clone, Default)]
+struct RecordingClient {
+    progress: Recorded<ProgressNotificationParam>,
+}
+
+impl ClientHandler for RecordingClient {
+    fn get_info(&self) -> InitializeRequestParams {
+        InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("recording-test-client", "0.1.0"),
+        )
+    }
+
+    async fn on_progress(&self, params: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
+        self.progress.lock().expect("progress lock poisoned").push(params);
+    }
+}
+
+async fn call_progress_sum(
+    gateway: &RunningGateway,
+    user: &str,
+) -> (CallToolResult, Recorded<ProgressNotificationParam>) {
+    let (result, progress) = send_progress_sum(gateway, user).await;
+    wait_for_event_count(&progress, 4).await;
+    (result, progress)
+}
+
+async fn send_progress_sum(
+    gateway: &RunningGateway,
+    user: &str,
+) -> (CallToolResult, Recorded<ProgressNotificationParam>) {
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let service = gateway.connect_with_handler(user, client).await;
+    let token = ProgressToken(NumberOrString::String("package-progress".into()));
+    let handle = send_progress_call(&service, &format!("{}-progress_sum", gateway.backend_name), token).await;
+
+    let ServerResult::CallToolResult(result) = handle.await_response().await.expect("progress_sum call succeeds")
+    else {
+        panic!("expected call tool result");
+    };
+    (result, progress)
+}
+
+/// Sends a `tools/call` carrying `progress_token` and returns the in-flight
+/// request handle without awaiting it.
+async fn send_progress_call(
+    service: &RunningService<RoleClient, RecordingClient>,
+    tool_name: &str,
+    progress_token: ProgressToken,
+) -> RequestHandle<RoleClient> {
+    let request = CallToolRequestParams::new(tool_name.to_owned());
+    let mut options = PeerRequestOptions::no_options();
+    options.meta = Some(Meta::with_progress_token(progress_token));
+    service
+        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options)
+        .await
+        .expect("progress request is sent")
+}
+
+async fn wait_for_event_count<T>(events: &StdMutex<Vec<T>>, expected: usize) {
+    for _ in 0..50 {
+        if events.lock().expect("events lock poisoned").len() >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("timed out waiting for {expected} recorded events");
+}
+
+fn raw_mcp_request(
+    client: &reqwest::Client,
+    gateway: &RunningGateway,
+    user: &str,
+    session_id: Option<&str>,
+    body: &Value,
+) -> reqwest::RequestBuilder {
+    let mut request = client
+        .post(gateway.gateway_url())
+        .bearer_auth(token(user))
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(http::header::ACCEPT, "application/json, text/event-stream")
+        .json(body);
+    if let Some(session_id) = session_id {
+        request = request.header("Mcp-Session-Id", session_id).header("MCP-Protocol-Version", "2025-11-25");
+    }
+    request
+}
+
+fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: i64) -> Value {
+    serde_json::json!({
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": {},
+            "_meta": { "progressToken": progress_token }
+        },
+        "jsonrpc": "2.0",
+        "id": request_id
+    })
+}
+
+fn sse_data_values(body: &str) -> Vec<Value> {
+    let values = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(str::trim)
+        .filter(|data| !data.is_empty())
+        .map(|data| serde_json::from_str(data).expect("SSE data is JSON"))
+        .collect::<Vec<_>>();
+    if !values.is_empty() {
+        return values;
+    }
+    let body = body.trim();
+    if body.is_empty() { Vec::new() } else { vec![serde_json::from_str(body).expect("JSON response body")] }
+}
+
+fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64) {
+    let messages = sse_data_values(body);
+    let progress = messages
+        .iter()
+        .filter(|message| message.get("method").and_then(Value::as_str) == Some("notifications/progress"))
+        .collect::<Vec<_>>();
+    assert_eq!(4, progress.len(), "unexpected progress events in body: {body}");
+    assert!(
+        progress
+            .iter()
+            .all(|message| message.pointer("/params/progressToken").and_then(Value::as_i64) == Some(progress_token)),
+        "progress events with foreign tokens in body: {body}"
+    );
+    let result = messages
+        .iter()
+        .find(|message| message.get("id").and_then(Value::as_i64) == Some(response_id))
+        .unwrap_or_else(|| panic!("missing response id {response_id} in body: {body}"));
+    assert_eq!(Some("completed 4 packages"), result.pointer("/result/content/0/text").and_then(Value::as_str));
+}
+
+async fn start_raw_mcp_session(client: &reqwest::Client, gateway: &RunningGateway, user: &str) -> String {
+    let initialize = raw_mcp_request(
+        client,
+        gateway,
+        user,
+        None,
+        &serde_json::json!({
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "raw-test-client", "version": "0.1.0" }
+            },
+            "jsonrpc": "2.0",
+            "id": 0
+        }),
+    )
+    .send()
+    .await
+    .expect("initialize request is sent");
+    assert!(initialize.status().is_success(), "initialize failed: {initialize:?}");
+    let session_id = initialize
+        .headers()
+        .get("mcp-session-id")
+        .expect("initialize response has MCP session id")
+        .to_str()
+        .expect("MCP session id is valid")
+        .to_owned();
+    let _initialize_body = initialize.text().await.expect("initialize body is read");
+
+    let initialized = raw_mcp_request(
+        client,
+        gateway,
+        user,
+        Some(&session_id),
+        &serde_json::json!({ "method": "notifications/initialized", "jsonrpc": "2.0" }),
+    )
+    .send()
+    .await
+    .expect("initialized notification is sent");
+    assert!(initialized.status().is_success(), "initialized notification failed: {initialized:?}");
+    let _initialized_body = initialized.text().await.expect("initialized body is read");
+
+    session_id
+}
+
+async fn read_concurrent_raw_progress_streams(
+    first: reqwest::RequestBuilder,
+    second: reqwest::RequestBuilder,
+) -> (String, String) {
+    let (first, second) =
+        tokio::time::timeout(std::time::Duration::from_secs(3), async { tokio::join!(first.send(), second.send()) })
+            .await
+            .expect("both raw progress requests receive response headers");
+    let first = first.expect("first raw progress request succeeds");
+    let second = second.expect("second raw progress request succeeds");
+    assert!(first.status().is_success(), "first raw progress request failed: {first:?}");
+    assert!(second.status().is_success(), "second raw progress request failed: {second:?}");
+
+    let (first_body, second_body) =
+        tokio::time::timeout(std::time::Duration::from_secs(3), async { tokio::join!(first.text(), second.text()) })
+            .await
+            .expect("both raw progress streams complete");
+    (first_body.expect("first raw progress body is read"), second_body.expect("second raw progress body is read"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_progress_calls_forward_each_token_without_plugins() {
+    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let service = gateway.connect_with_handler("admin@example.com", client).await;
+    let tool_name = format!("{}-progress_sum", gateway.backend_name);
+
+    let first = send_progress_call(&service, &tool_name, ProgressToken(NumberOrString::Number(1))).await;
+    let second = send_progress_call(&service, &tool_name, ProgressToken(NumberOrString::Number(2))).await;
+
+    let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        tokio::join!(first.await_response(), second.await_response())
+    })
+    .await
+    .expect("both concurrent progress_sum calls complete");
+
+    let ServerResult::CallToolResult(first) = first.expect("first progress_sum call succeeds") else {
+        panic!("expected first call tool result");
+    };
+    let ServerResult::CallToolResult(second) = second.expect("second progress_sum call succeeds") else {
+        panic!("expected second call tool result");
+    };
+    assert_eq!("completed 4 packages", text(&first));
+    assert_eq!("completed 4 packages", text(&second));
+
+    wait_for_event_count(&progress, 8).await;
+    let progress = progress.lock().expect("progress lock poisoned");
+    let first_count = progress
+        .iter()
+        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(1)))
+        .count();
+    let second_count = progress
+        .iter()
+        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(2)))
+        .count();
+    assert_eq!(4, first_count);
+    assert_eq!(4, second_count);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins() {
+    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = reqwest::Client::new();
+    let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
+
+    let tool_name = format!("{}-progress_sum", gateway.backend_name);
+    let first =
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 2, 1));
+    let second =
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 3, 2));
+    let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
+
+    assert_raw_progress_stream(&first_body, 2, 1);
+    assert_raw_progress_stream(&second_body, 3, 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn backend_generated_progress_tokens_are_dropped() {
+    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let service = gateway.connect_with_handler("admin@example.com", client).await;
+
+    let tool_name = format!("{}-progress_counter_tokens", gateway.backend_name);
+    let handle = send_progress_call(&service, &tool_name, ProgressToken(NumberOrString::Number(10))).await;
+
+    let ServerResult::CallToolResult(result) =
+        handle.await_response().await.expect("progress_counter_tokens call succeeds")
+    else {
+        panic!("expected call tool result");
+    };
+    assert_eq!("completed 4 packages", text(&result));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        progress.lock().expect("progress lock poisoned").is_empty(),
+        "backend-generated progress tokens must not be forwarded"
+    );
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn disabled_runtime_does_not_invoke_registered_plugin() {
@@ -68,6 +362,62 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
     assert_eq!(1, observations.post_calls);
     assert_eq!(Some("sum".to_owned()), observations.post_payload_name);
     assert_eq!(Some("3".to_owned()), observations.post_result_text);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn post_hook_can_modify_stream_progress_notifications() {
+    let plugin =
+        Arc::new(TestPlugin::new("post-stream", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_rewrite());
+    let observations = plugin.observations();
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let (result, progress) = call_progress_sum(&gateway, "admin@example.com").await;
+
+    assert_eq!("completed 4 packages", text(&result));
+    let progress = progress.lock().expect("progress lock poisoned");
+    assert_eq!(Some("plugin:package 4/4"), progress.last().and_then(|notification| notification.message.as_deref()));
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    // four progress notifications plus the final tool result
+    assert_eq!(5, observations.post_calls);
+    let first_id = observations.post_tool_call_ids.first().expect("post call id");
+    assert!(observations.post_tool_call_ids.iter().all(|id| id == first_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn json_response_mode_forwards_backend_progress_notifications() {
+    let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway_with_json_backend_responses("admin@example.com", true, runtime).await;
+    let (result, progress) = call_progress_sum(&gateway, "admin@example.com").await;
+
+    assert_eq!("post:completed 4 packages", text(&result));
+    assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn post_hook_deny_drops_progress_notifications_without_failing_call() {
+    let plugin =
+        Arc::new(TestPlugin::new("post-stream-deny", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_deny());
+    let observations = plugin.observations();
+    let runtime = runtime_with_post(plugin).await;
+
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let (result, progress) = send_progress_sum(&gateway, "admin@example.com").await;
+
+    assert_eq!("completed 4 packages", text(&result));
+    // four denied progress notifications plus the final tool result
+    for _ in 0..50 {
+        if observations.lock().expect("observations lock poisoned").post_calls >= 5 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(5, observations.post_calls);
+    assert!(progress.lock().expect("progress lock poisoned").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
