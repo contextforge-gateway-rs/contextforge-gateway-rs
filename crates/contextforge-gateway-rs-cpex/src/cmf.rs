@@ -26,6 +26,20 @@ pub(crate) fn tool_call_payload(
 }
 
 pub(crate) fn tool_result_payload(tool_name: &str, response: &CallToolResult, tool_call_id: &str) -> MessagePayload {
+    tool_json_result_payload(
+        tool_name,
+        serde_json::to_value(response).unwrap_or(Value::Null),
+        response.is_error.unwrap_or(false),
+        tool_call_id,
+    )
+}
+
+pub(crate) fn tool_json_result_payload(
+    tool_name: &str,
+    content: Value,
+    is_error: bool,
+    tool_call_id: &str,
+) -> MessagePayload {
     MessagePayload {
         message: Message {
             schema_version: "2.0".to_owned(),
@@ -34,13 +48,17 @@ pub(crate) fn tool_result_payload(tool_name: &str, response: &CallToolResult, to
                 content: ToolResult {
                     tool_call_id: tool_call_id.to_owned(),
                     tool_name: tool_name.to_owned(),
-                    content: serde_json::to_value(response).unwrap_or(Value::Null),
-                    is_error: response.is_error.unwrap_or(false),
+                    content,
+                    is_error,
                 },
             }],
             channel: None,
         },
     }
+}
+
+pub(crate) fn tool_result_content(payload: &MessagePayload) -> Option<Value> {
+    payload.message.get_tool_results().first().map(|tool_result| tool_result.content.clone())
 }
 
 pub(crate) fn tool_call_arguments(payload: &MessagePayload) -> Option<Map<String, Value>> {

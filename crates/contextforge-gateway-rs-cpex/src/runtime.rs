@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use cpex_core::{
     cmf::{CmfHook, MessagePayload},
@@ -11,14 +14,17 @@ use cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult},
+    model::{CallToolRequestParams, CallToolResult, ProgressNotificationParam},
 };
+use tokio::sync::Mutex;
 
 use crate::{
-    cmf::{tool_call_payload, tool_result_payload},
+    cmf::{tool_call_payload, tool_json_result_payload, tool_result_payload},
     error::GatewayPluginRuntimeError,
-    hooks::{RuntimeHookState, ToolPreCallResult},
-    pipeline::{effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error},
+    hooks::{RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
+    pipeline::{
+        effective_post_progress, effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error,
+    },
 };
 
 #[derive(Default)]
@@ -33,10 +39,19 @@ struct ToolCallState {
     tool_call_id: String,
 }
 
+type SharedToolCallState = Mutex<ToolCallState>;
+
 static TOOL_CALL_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_tool_call_id() -> String {
     format!("gateway-tool-call-{}", TOOL_CALL_ID.fetch_add(1, Ordering::Relaxed))
+}
+
+fn new_tool_call_state() -> RuntimeHookState {
+    Arc::new(Mutex::new(ToolCallState {
+        context_table: PluginContextTable::default(),
+        tool_call_id: next_tool_call_id(),
+    }))
 }
 
 impl GatewayPluginRuntime {
@@ -130,6 +145,24 @@ impl GatewayPluginRuntime {
         result
     }
 
+    /// Runs the tool post pipeline for one event of an in-flight call: the
+    /// payload is built from the call's `tool_call_id`, the call's context table
+    /// seeds the pipeline, and the resulting context table is carried back so
+    /// later events in the same call observe it.
+    async fn run_tool_post(
+        &self,
+        state: &SharedToolCallState,
+        build_payload: impl FnOnce(&str) -> MessagePayload,
+    ) -> PipelineResult {
+        let mut state = state.lock().await;
+        let payload = build_payload(&state.tool_call_id);
+        let post_result = self.invoke_tool_post(payload, Some(state.context_table.clone())).await;
+        if !post_result.is_denied() {
+            state.context_table = post_result.context_table.clone();
+        }
+        post_result
+    }
+
     pub(crate) async fn before_tool_call(
         &self,
         request: &CallToolRequestParams,
@@ -137,7 +170,8 @@ impl GatewayPluginRuntime {
         backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
         if !self.has_pre_hook {
-            return Ok(ToolPreCallResult::unchanged());
+            let state = self.has_post_hook.then(new_tool_call_state);
+            return Ok(ToolPreCallResult { arguments: ToolArgumentsUpdate::Unchanged, state });
         }
 
         let tool_call_id = next_tool_call_id();
@@ -148,8 +182,8 @@ impl GatewayPluginRuntime {
         }
 
         let arguments = effective_pre_args(request.arguments.as_ref(), &pre_result)?;
-        let state = ToolCallState { context_table: pre_result.context_table, tool_call_id };
-        Ok(ToolPreCallResult { arguments, state: Some(Box::new(state)) })
+        let state = Mutex::new(ToolCallState { context_table: pre_result.context_table, tool_call_id });
+        Ok(ToolPreCallResult { arguments, state: Some(Arc::new(state)) })
     }
 
     pub(crate) async fn after_tool_call(
@@ -162,15 +196,37 @@ impl GatewayPluginRuntime {
             return Ok(response);
         }
 
-        let state = state.and_then(|state| state.downcast::<ToolCallState>().ok());
-        let (context_table, tool_call_id) =
-            state.map_or_else(|| (None, next_tool_call_id()), |state| (Some(state.context_table), state.tool_call_id));
-        let post_result =
-            self.invoke_tool_post(tool_result_payload(tool_name, &response, &tool_call_id), context_table).await;
+        let Some(state) = state.and_then(|state| state.downcast::<SharedToolCallState>().ok()) else {
+            return Ok(response);
+        };
+
+        let post_result = self.run_tool_post(&state, |id| tool_result_payload(tool_name, &response, id)).await;
         if post_result.is_denied() {
             return Err(plugin_denied_error(post_result));
         }
-
         Ok(effective_post_result(response, &post_result))
+    }
+
+    pub(crate) async fn after_progress_notification(
+        &self,
+        tool_name: &str,
+        progress: ProgressNotificationParam,
+        state: Option<RuntimeHookState>,
+    ) -> Result<Option<ProgressNotificationParam>, ErrorData> {
+        if !self.has_post_hook {
+            return Ok(Some(progress));
+        }
+
+        let Some(state) = state.and_then(|state| state.downcast::<SharedToolCallState>().ok()) else {
+            return Ok(Some(progress));
+        };
+
+        let content = serde_json::to_value(&progress).unwrap_or(serde_json::Value::Null);
+        let post_result =
+            self.run_tool_post(&state, |id| tool_json_result_payload(tool_name, content, false, id)).await;
+        if post_result.is_denied() {
+            return Ok(None);
+        }
+        Ok(Some(effective_post_progress(progress, &post_result)?))
     }
 }
