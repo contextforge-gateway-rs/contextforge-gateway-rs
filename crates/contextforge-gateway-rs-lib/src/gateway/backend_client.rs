@@ -12,6 +12,7 @@ use rmcp::{
     },
     service::{NotificationContext, PeerRequestOptions, ServiceError},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 /// Client handler for a backend MCP connection. Progress notifications streamed
@@ -136,13 +137,14 @@ impl ClientHandler for GatewayBackendClient {
     }
 }
 
-/// Calls the tool on the backend, keeping the downstream progress token on the
-/// request (`Peer::call_tool` would stamp an auto-generated token over it at
-/// serialization).
+/// Calls the tool on the backend, keeping the downstream progress token on
+/// the request (`Peer::call_tool` would stamp an auto-generated token over it
+/// at serialization) and relaying a downstream cancellation to the backend.
 pub(crate) async fn call_backend_tool(
     peer: &Peer<RoleClient>,
     request: CallToolRequestParams,
     progress_token: Option<ProgressToken>,
+    cancellation: CancellationToken,
 ) -> Result<CallToolResult, ServiceError> {
     let mut options = PeerRequestOptions::no_options();
     if let Some(progress_token) = progress_token {
@@ -150,8 +152,20 @@ pub(crate) async fn call_backend_tool(
         meta.set_progress_token(progress_token);
         options.meta = Some(meta);
     }
-    let handle = peer.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await?;
-    match handle.await_response().await? {
+    let mut handle =
+        peer.send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options).await?;
+    let response = tokio::select! {
+        response = &mut handle.rx => Some(response),
+        () = cancellation.cancelled() => None,
+    };
+    let Some(response) = response else {
+        let reason = "tool call cancelled by the downstream client".to_owned();
+        if let Err(error) = handle.cancel(Some(reason.clone())).await {
+            warn!("call_tool: unable to relay cancellation to the backend: {error:?}");
+        }
+        return Err(ServiceError::Cancelled { reason: Some(reason) });
+    };
+    match response.map_err(|_| ServiceError::TransportClosed)?? {
         ServerResult::CallToolResult(result) => Ok(result),
         _ => Err(ServiceError::UnexpectedResponse),
     }
