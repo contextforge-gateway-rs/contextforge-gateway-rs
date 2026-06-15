@@ -13,7 +13,8 @@ use cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, ErrorCode, ProgressNotificationParam},
+    model::{CallToolRequestParams, CallToolResult, ErrorCode},
+    serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::task::JoinHandle;
 
@@ -271,17 +272,20 @@ impl GatewayPluginRuntimeHandle {
         }
     }
 
-    /// Runs the tool post hooks over a streamed progress notification. Returns
-    /// `None` when a plugin denies the notification.
-    pub async fn after_progress_notification(
+    /// Runs the tool post hooks over a streamed tool event (progress or logging
+    /// notification). Returns `None` when a plugin denies the event.
+    pub async fn after_stream_event<T>(
         &self,
         tool_name: &str,
-        progress: ProgressNotificationParam,
+        event: T,
         state: Option<RuntimeHookState>,
-    ) -> Result<Option<ProgressNotificationParam>, ErrorData> {
+    ) -> Result<Option<T>, ErrorData>
+    where
+        T: Serialize + DeserializeOwned,
+    {
         match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_progress_notification(tool_name, progress, state.state.clone()).await,
-            None => Ok(Some(progress)),
+            Some(state) => state.runtime.after_tool_event(tool_name, event, state.state.clone()).await,
+            None => Ok(Some(event)),
         }
     }
 }
@@ -853,8 +857,7 @@ mod tests {
         let observations = plugin.observations();
         let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
 
-        let event =
-            runtime.handle().after_progress_notification("sum", progress_event(), None).await.expect("event passes");
+        let event = runtime.handle().after_stream_event("sum", progress_event(), None).await.expect("event passes");
 
         assert_eq!(Some("step 1/2"), event.expect("event is kept").message.as_deref());
         assert_eq!(0, observations.lock().expect("observations lock poisoned").post_calls);
@@ -868,11 +871,8 @@ mod tests {
         let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
 
         let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre state is created");
-        let event = runtime
-            .handle()
-            .after_progress_notification("sum", progress_event(), pre.state)
-            .await
-            .expect("event passes");
+        let event =
+            runtime.handle().after_stream_event("sum", progress_event(), pre.state).await.expect("event passes");
 
         assert_eq!(Some("plugin:step 1/2"), event.expect("event is kept").message.as_deref());
         assert_eq!(1, observations.lock().expect("observations lock poisoned").post_calls);
@@ -886,7 +886,7 @@ mod tests {
         let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre state is created");
         let event = runtime
             .handle()
-            .after_progress_notification("sum", progress_event(), pre.state)
+            .after_stream_event("sum", progress_event(), pre.state)
             .await
             .expect("deny drops the event");
 
@@ -902,7 +902,7 @@ mod tests {
         let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre state is created");
         let error = runtime
             .handle()
-            .after_progress_notification("sum", progress_event(), pre.state)
+            .after_stream_event("sum", progress_event(), pre.state)
             .await
             .expect_err("invalid rewrite is rejected");
 
