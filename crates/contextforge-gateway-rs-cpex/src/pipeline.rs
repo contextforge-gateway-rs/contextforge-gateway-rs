@@ -2,7 +2,8 @@ use cpex_core::cmf::MessagePayload;
 use cpex_core::executor::PipelineResult;
 use rmcp::{
     ErrorData,
-    model::{CallToolResult, ErrorCode, ProgressNotificationParam},
+    model::{CallToolResult, ErrorCode},
+    serde::de::DeserializeOwned,
 };
 use tracing::warn;
 
@@ -45,23 +46,23 @@ pub(crate) fn effective_post_result(original: CallToolResult, result: &PipelineR
     }
 }
 
-pub(crate) fn effective_post_progress(
-    original: ProgressNotificationParam,
-    result: &PipelineResult,
-) -> Result<ProgressNotificationParam, ErrorData> {
+pub(crate) fn effective_post_json<T>(original: T, result: &PipelineResult) -> Result<T, ErrorData>
+where
+    T: DeserializeOwned,
+{
     let Some(payload) = modified_message_payload(result) else {
         return Ok(original);
     };
     let Some(content) = tool_result_content(payload) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
-            message: "Plugin modified progress notification payload without a tool result".into(),
+            message: "Plugin modified stream event payload without a tool result".into(),
             data: None,
         });
     };
-    serde_json::from_value(content).map_err(|error| ErrorData {
+    serde_json::from_value::<T>(content).map_err(|error| ErrorData {
         code: ErrorCode::INVALID_PARAMS,
-        message: format!("Plugin modified progress notification payload with invalid JSON: {error}").into(),
+        message: format!("Plugin modified stream event payload with invalid JSON: {error}").into(),
         data: None,
     })
 }

@@ -152,8 +152,7 @@ where
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
-                let backend_client =
-                    GatewayBackendClient::new(request.clone(), cx.peer.clone(), self.plugin_runtime.clone());
+                let backend_client = GatewayBackendClient::new(request.clone(), self.plugin_runtime.clone());
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
@@ -364,9 +363,13 @@ where
 
         let service_name = target_service.name.clone();
         let progress_token = cx.meta.get_progress_token();
-        let _call_guard =
-            service.service().track_tool_call(tool_name.clone(), progress_token.clone(), post_state.clone());
-        let response = call_backend_tool(service.peer(), routed_request, progress_token, cx.ct.clone()).await;
+        service
+            .service()
+            .track_tool_call(tool_name.clone(), cx.peer.clone(), progress_token.clone(), post_state.clone())
+            .await;
+        let response = call_backend_tool(service.peer(), routed_request, progress_token.clone(), cx.ct.clone()).await;
+        service.service().stop_tracking_tool_call(progress_token.clone()).await;
+
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {
