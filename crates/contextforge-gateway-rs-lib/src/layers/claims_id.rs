@@ -74,17 +74,14 @@ pub async fn claims_layer(
 #[cfg(test)]
 mod test {
 
-    use std::{
-        fs,
-        sync::{Arc, Once},
-    };
+    use std::sync::{Arc, Once};
 
     use async_trait::async_trait;
     use axum::{Router, body::Body, middleware, response::Response, routing::get};
     use chrono::Duration;
     use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
     use http::{HeaderMap, Request, StatusCode};
-    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, encode};
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, encode};
     use tower::ServiceExt;
     use uuid::Uuid;
 
@@ -97,12 +94,43 @@ mod test {
     };
 
     static CRYPTO: Once = Once::new();
+    const HMAC_SECRET: &[u8] = b"my-test-key-but-now-longer-than-32-bytes";
 
-    fn get_token_for_claims(claims: &ContextForgeClaims) -> String {
-        let key = EncodingKey::from_rsa_pem(&fs::read("../../assets/jwt.key").expect("Expecting this to work"))
-            .expect("Expecting this to work");
-        let mut header = Header::new(Algorithm::RS256);
-        header.kid = Some("test".to_owned());
+    fn now_epoch_seconds() -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs()
+    }
+
+    fn active_test_claims() -> ContextForgeClaims {
+        let now = now_epoch_seconds();
+        let user_id = "admin@example.com".to_owned();
+
+        ContextForgeClaims {
+            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
+            sub: user_id.clone(),
+            aud: CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned(),
+            exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
+            iat: Some(now),
+            jti: Uuid::new_v4().to_string(),
+            token_use: "api".to_owned(),
+            teams: Some(vec!["team_awesome".to_owned()]),
+            user: common::User::builder()
+                .email(user_id)
+                .auth_provider("api_token".to_owned())
+                .full_name("API Token User".to_owned())
+                .is_admin(true)
+                .build(),
+            scopes: Scopes::builder()
+                .server_id(Some("my_id".to_owned()))
+                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
+                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
+                .time_restrictions(None)
+                .build(),
+        }
+    }
+
+    fn get_hmac_token_for_claims(claims: &ContextForgeClaims) -> String {
+        let key = EncodingKey::from_secret(HMAC_SECRET);
+        let header = Header::new(Algorithm::HS256);
 
         encode::<ContextForgeClaims>(&header, claims, &key).expect("Expecting this to work")
     }
@@ -130,14 +158,9 @@ mod test {
             Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
         }
 
-        let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBleGFtcGxlLmNvbSIsImp0aSI6Ijc1ZWYwZTZjLTZkZWMtNGExNy1hNzU3LWFlYmYzZjk1N2Q1NSIsInRva2VuX3VzZSI6ImFwaSIsImlhdCI6MTc3ODg2NTE2OCwiaXNzIjoibWNwZ2F0ZXdheSIsImF1ZCI6Im1jcGdhdGV3YXktYXBpIiwidXNlciI6eyJlbWFpbCI6ImFkbWluQGV4YW1wbGUuY29tIiwiZnVsbF9uYW1lIjoiQVBJIFRva2VuIFVzZXIiLCJpc19hZG1pbiI6dHJ1ZSwiYXV0aF9wcm92aWRlciI6ImFwaV90b2tlbiJ9LCJ0ZWFtcyI6bnVsbCwic2NvcGVzIjp7InNlcnZlcl9pZCI6bnVsbCwicGVybWlzc2lvbnMiOltdLCJpcF9yZXN0cmljdGlvbnMiOltdLCJ0aW1lX3Jlc3RyaWN0aW9ucyI6e319LCJleHAiOjE3ODE0NTcxNjh9.9d2-iLOHL2dJRFTSbOxHzuD6zLxupqK0ZkCG-3GZABU";
+        let token = get_hmac_token_for_claims(&active_test_claims());
 
-        let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-        validation.set_audience(&[CONTEXT_FORGE_GATEWAY_AUDIENCE]);
-        validation.set_issuer(&[CONTEXT_FORGE_GATEWAY_ISSUER]);
-        validation.validate_exp = false;
-
-        let decoding_key = DecodingKey::from_secret("my-test-key-but-now-longer-than-32-bytes".as_bytes());
+        let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
         let state = ContextForgeGatewayAppState {
             jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
@@ -168,42 +191,11 @@ mod test {
             Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
         }
 
-        let start = std::time::SystemTime::now();
-        let now = start.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
-
-        let user_id = "blah@blah.com".to_owned();
-        let mut claims = ContextForgeClaims {
-            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
-            sub: user_id.clone(),
-            aud: CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned(),
-            exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
-            iat: Some(now),
-            jti: Uuid::new_v4().to_string(),
-            token_use: "api".to_owned(),
-            teams: Some(vec!["team_awesome".to_owned()]),
-            user: common::User::builder()
-                .email(user_id)
-                .auth_provider("api_token".to_owned())
-                .full_name("API Token User".to_owned())
-                .is_admin(true)
-                .build(),
-            scopes: Scopes::builder()
-                .server_id(Some("my_id".to_owned()))
-                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
-                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
-                .time_restrictions(None)
-                .build(),
-        };
-
+        let mut claims = active_test_claims();
         claims.exp = 0;
-        let token = get_token_for_claims(&claims);
+        let token = get_hmac_token_for_claims(&claims);
 
-        let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
-        validation.set_audience(&[CONTEXT_FORGE_GATEWAY_AUDIENCE]);
-        validation.set_issuer(&[CONTEXT_FORGE_GATEWAY_ISSUER]);
-        validation.validate_exp = true;
-
-        let decoding_key = DecodingKey::from_secret("my-test-key-but-now-longer-than-32-bytes".as_bytes());
+        let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
         let state = ContextForgeGatewayAppState {
             jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
