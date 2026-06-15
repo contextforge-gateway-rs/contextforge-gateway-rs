@@ -13,7 +13,7 @@ use cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, ErrorCode},
+    model::{CallToolRequestParams, CallToolResult, ErrorCode, ProgressNotificationParam},
 };
 use tokio::task::JoinHandle;
 
@@ -252,7 +252,7 @@ impl GatewayPluginRuntimeHandle {
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
         if runtime.has_post_hook() {
             let state = result.state.take();
-            result.state = Some(Box::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
+            result.state = Some(Arc::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
         } else {
             result.state = None;
         }
@@ -266,8 +266,22 @@ impl GatewayPluginRuntimeHandle {
         state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
         match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state).await,
+            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state.clone()).await,
             None => Ok(response),
+        }
+    }
+
+    /// Runs the tool post hooks over a streamed progress notification. Returns
+    /// `None` when a plugin denies the notification.
+    pub async fn after_progress_notification(
+        &self,
+        tool_name: &str,
+        progress: ProgressNotificationParam,
+        state: Option<RuntimeHookState>,
+    ) -> Result<Option<ProgressNotificationParam>, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+            Some(state) => state.runtime.after_progress_notification(tool_name, progress, state.state.clone()).await,
+            None => Ok(Some(progress)),
         }
     }
 }
@@ -300,7 +314,9 @@ mod tests {
         plugin::{Plugin, PluginConfig},
         registry::AnyHookHandler,
     };
-    use rmcp::model::{CallToolRequestParams, CallToolResult, Content};
+    use rmcp::model::{
+        CallToolRequestParams, CallToolResult, Content, NumberOrString, ProgressNotificationParam, ProgressToken,
+    };
     use serde_json::{Value, json};
     use tokio::sync::Mutex as TokioMutex;
 
@@ -376,6 +392,9 @@ mod tests {
         #[default]
         Allow,
         Rewrite,
+        RewriteStreamEvent,
+        RewriteInvalid,
+        Deny,
         RequireContext,
     }
 
@@ -412,6 +431,21 @@ mod tests {
 
         fn with_post_rewrite(mut self) -> Self {
             self.post_behavior = PostBehavior::Rewrite;
+            self
+        }
+
+        fn with_stream_event_rewrite(mut self) -> Self {
+            self.post_behavior = PostBehavior::RewriteStreamEvent;
+            self
+        }
+
+        fn with_invalid_stream_rewrite(mut self) -> Self {
+            self.post_behavior = PostBehavior::RewriteInvalid;
+            self
+        }
+
+        fn with_post_deny(mut self) -> Self {
+            self.post_behavior = PostBehavior::Deny;
             self
         }
 
@@ -462,6 +496,34 @@ mod tests {
                 match self.post_behavior {
                     PostBehavior::Allow => PluginResult::allow(),
                     PostBehavior::Rewrite => PluginResult::modify_payload(payload.clone()),
+                    PostBehavior::RewriteStreamEvent => {
+                        let mut modified = payload.clone();
+                        if let Some(ContentPart::ToolResult { content }) = modified
+                            .message
+                            .content
+                            .iter_mut()
+                            .find(|part| matches!(part, ContentPart::ToolResult { .. }))
+                            && let Ok(mut progress) =
+                                serde_json::from_value::<ProgressNotificationParam>(content.content.clone())
+                        {
+                            progress.message = progress.message.map(|message| format!("plugin:{message}"));
+                            content.content = serde_json::to_value(progress).expect("progress serializes");
+                        }
+                        PluginResult::modify_payload(modified)
+                    },
+                    PostBehavior::RewriteInvalid => {
+                        let mut modified = payload.clone();
+                        if let Some(ContentPart::ToolResult { content }) = modified
+                            .message
+                            .content
+                            .iter_mut()
+                            .find(|part| matches!(part, ContentPart::ToolResult { .. }))
+                        {
+                            content.content = json!("not-a-stream-event");
+                        }
+                        PluginResult::modify_payload(modified)
+                    },
+                    PostBehavior::Deny => PluginResult::deny(PluginViolation::new("post_denied", "post denied")),
                     PostBehavior::RequireContext => {
                         if ctx.get_global("pre_seen") == Some(&json!(true)) {
                             PluginResult::allow()
@@ -548,6 +610,11 @@ mod tests {
     fn sum_request(a: i64, b: i64) -> CallToolRequestParams {
         CallToolRequestParams::new("sum")
             .with_arguments(serde_json::Map::from_iter([("a".to_owned(), json!(a)), ("b".to_owned(), json!(b))]))
+    }
+
+    fn progress_event() -> ProgressNotificationParam {
+        ProgressNotificationParam::new(ProgressToken(NumberOrString::String("stream-token".into())), 1.0)
+            .with_message("step 1/2")
     }
 
     fn config_document(cpex: Value) -> RuntimePluginConfigDocument {
@@ -777,6 +844,69 @@ mod tests {
         runtime.after_tool_call("sum", response, pre.state).await.expect("post hook skips");
 
         assert_eq!(0, observations.lock().expect("observations lock poisoned").post_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn stream_event_without_state_skips_post_hook() {
+        let plugin =
+            Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_rewrite());
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let event =
+            runtime.handle().after_progress_notification("sum", progress_event(), None).await.expect("event passes");
+
+        assert_eq!(Some("step 1/2"), event.expect("event is kept").message.as_deref());
+        assert_eq!(0, observations.lock().expect("observations lock poisoned").post_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn stream_event_is_rewritten_by_post_hook() {
+        let plugin =
+            Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_stream_event_rewrite());
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre state is created");
+        let event = runtime
+            .handle()
+            .after_progress_notification("sum", progress_event(), pre.state)
+            .await
+            .expect("event passes");
+
+        assert_eq!(Some("plugin:step 1/2"), event.expect("event is kept").message.as_deref());
+        assert_eq!(1, observations.lock().expect("observations lock poisoned").post_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn denied_stream_event_is_dropped() {
+        let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_deny());
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre state is created");
+        let event = runtime
+            .handle()
+            .after_progress_notification("sum", progress_event(), pre.state)
+            .await
+            .expect("deny drops the event");
+
+        assert!(event.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn invalid_stream_event_rewrite_is_rejected() {
+        let plugin =
+            Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_invalid_stream_rewrite());
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre state is created");
+        let error = runtime
+            .handle()
+            .after_progress_notification("sum", progress_event(), pre.state)
+            .await
+            .expect_err("invalid rewrite is rejected");
+
+        assert_eq!(ErrorCode::INVALID_PARAMS, error.code);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
