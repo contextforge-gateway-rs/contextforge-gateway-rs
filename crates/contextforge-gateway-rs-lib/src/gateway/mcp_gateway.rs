@@ -285,47 +285,8 @@ where
         };
         let backend_name = backend_name.to_owned();
         let tool_name = tool_name.to_owned();
-        let request_name = request.name.clone();
 
-        let backend_transports = session_manager.borrow_transports().await;
-        info!("Borrowed transports {session_id:?} {backend_transports:?}");
-        let mut target_service = None;
-        for service_holder in backend_transports {
-            debug!(
-                "call_tool: Finding backend for {} {service_holder:?} {backend_name} tool_name = {tool_name}",
-                &request_name,
-            );
-            if service_holder.name == backend_name {
-                if target_service.is_some() {
-                    warn!("call_tool: More than one tool matching for tool name {}", request_name);
-                    session_manager.cleanup_backends("call_tool: invalid session.. duplicate tools detected").await;
-                    return Err(ErrorData {
-                        code: ErrorCode::INVALID_REQUEST,
-                        message: "Routing problem... multiple matching tools".into(),
-                        data: None,
-                    });
-                }
-                target_service = Some(service_holder);
-            }
-        }
-
-        let Some(mut target_service) = target_service else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            });
-        };
-        let Some(service) = target_service.running_service.take() else {
-            warn!(
-                "call_tool: trying to call a tool for which we have no backend {target_service:?} {backend_name} tool_name = {tool_name}"
-            );
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            });
-        };
+        let (service_name, service) = resolve_backend(&session_manager, "call_tool", &backend_name).await?;
 
         let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
             plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
@@ -336,7 +297,6 @@ where
         let mut routed_request = request;
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
-        let service_name = target_service.name.clone();
         let progress_token = cx.meta.get_progress_token();
         service
             .service()
@@ -406,70 +366,22 @@ where
                 data: None,
             });
         };
+        let resource_uri = resource_uri.to_owned();
 
-        let backend_transports = session_manager.borrow_transports().await;
-        info!("Borrowed transports {session_id:?} {backend_transports:?}");
+        let (service_name, service) = resolve_backend(&session_manager, "read_resource", backend_name).await?;
 
-        let call_tool_tasks: Vec<_> = backend_transports
-            .into_iter()
-            .map(|service_holder| {
-                debug!(
-                    "read_resource: Finding backend for {} {service_holder:?} {backend_name} read_resource = {resource_uri}",
-                    &request.uri,
-
-                );
-                (service_holder.name == backend_name).then(|| {
-                    let mut request = request.clone();
-                    request.uri = String::from(resource_uri);
-                        async move {
-                            if let Some(service) = service_holder.running_service {
-                                //let service = service.read().await;
-                                let response = service.read_resource(request).await;
-
-                                (service_holder.name, Some(response))
-                            } else {
-                                warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} resource_name = {resource_uri}");
-                                (service_holder.name, None)
-                            }
-                        }
-                })
-            }).collect();
-
-        let call_tool_tasks = call_tool_tasks.into_iter().flatten().collect::<Vec<_>>();
-        if call_tool_tasks.len() > 1 {
-            warn!("read_resource: More than one tool matching for tool name {}", request.uri);
-
-            session_manager.cleanup_backends("read_resource: invalid session.. duplicate resources detected").await;
-
-            return Err(ErrorData {
-                code: ErrorCode::INVALID_REQUEST,
-                message: "Routing problem... multiple matching resources".into(),
+        let mut routed_request = request;
+        routed_request.uri = resource_uri;
+        let response = service.read_resource(routed_request).await.map_err(|error| {
+            warn!("read_resource: backend {service_name} {error:?}");
+            ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
                 data: None,
-            });
-        }
-
-        let call_tool_tasks_results: Vec<_> = futures::future::join_all(call_tool_tasks).await;
-
-        let responses: Vec<_> = call_tool_tasks_results
-            .into_iter()
-            .map(|(name, response)| {
-                info!("read_resource: backend {name} {response:?}");
-                (name, response)
-            })
-            .collect();
-
-        let responses = responses
-            .into_iter()
-            .filter_map(
-                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
-            )
-            .collect::<Vec<_>>();
-
-        responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Routing problem... got no responses from backends".into(),
-            data: None,
-        })
+            }
+        })?;
+        info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
+        Ok(response)
     }
 
     async fn list_resource_templates(
@@ -573,36 +485,8 @@ where
         };
         let backend_name = backend_name.to_owned();
         let prompt_name = prompt_name.to_owned();
-        let request_name = request.name.clone();
 
-        let backend_transports = session_manager.borrow_transports().await;
-        info!("Borrowed transports {session_id:?} {backend_transports:?}");
-
-        let target_service = backend_transports.into_iter().find(|service_holder| {
-            debug!(
-                "get_prompt: Finding backend for {request_name} {service_holder:?} {backend_name} prompt_name = {prompt_name}",
-            );
-            service_holder.name == backend_name
-        });
-        let Some(target_service) = target_service else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            });
-        };
-
-        let ServiceHolder { name: service_name, running_service } = target_service;
-        let Some(service) = running_service else {
-            warn!(
-                "get_prompt: trying to get a prompt for which we have no backend {service_name} {backend_name} prompt_name = {prompt_name}"
-            );
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            });
-        };
+        let (service_name, service) = resolve_backend(&session_manager, "get_prompt", &backend_name).await?;
 
         let mut routed_request = request;
         routed_request.name = prompt_name;
@@ -694,6 +578,51 @@ where
             }
         })
         .collect()
+}
+
+/// Resolves the single connected backend named `backend_name` and takes its running service.
+/// Shared by tool, resource, and prompt routing so they reject duplicate or missing backends
+/// the same way; a duplicate match means the session is invalid, so it is cleaned up.
+async fn resolve_backend(
+    session_manager: &SessionManager<'_>,
+    op: &str,
+    backend_name: &str,
+) -> Result<(String, McpClientService), ErrorData> {
+    let backend_transports = session_manager.borrow_transports().await;
+    debug!("{op}: resolving backend {backend_name} from {backend_transports:?}");
+
+    let mut target = None;
+    for service_holder in backend_transports {
+        if service_holder.name == backend_name {
+            if target.is_some() {
+                warn!("{op}: more than one backend matching {backend_name}");
+                session_manager.cleanup_backends("invalid session.. duplicate backends detected").await;
+                return Err(ErrorData {
+                    code: ErrorCode::INVALID_REQUEST,
+                    message: "Routing problem... multiple matching backends".into(),
+                    data: None,
+                });
+            }
+            target = Some(service_holder);
+        }
+    }
+
+    let Some(ServiceHolder { name, running_service }) = target else {
+        return Err(ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... got no responses from backends".into(),
+            data: None,
+        });
+    };
+    let Some(service) = running_service else {
+        warn!("{op}: no running backend for {backend_name}");
+        return Err(ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... got no responses from backends".into(),
+            data: None,
+        });
+    };
+    Ok((name, service))
 }
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
