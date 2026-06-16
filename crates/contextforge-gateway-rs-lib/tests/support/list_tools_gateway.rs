@@ -15,11 +15,13 @@ use super::{MemoryUserConfigStore, mock_counter};
 
 const MOCK_COUNTER_TOOL_NAMES: &[&str] =
     &["decrement", "echo", "get_session_id", "get_value", "increment", "long_task", "say_hello", "sum"];
+const MOCK_COUNTER_PROMPT_NAMES: &[&str] = &["counter_analysis", "example_prompt"];
 
 pub(crate) struct ListToolsGatewaySettings {
     pub(crate) handle: tokio::task::JoinHandle<Vec<Result<()>>>,
     pub(crate) gateway_url: String,
     pub(crate) expected_tool_names: Vec<String>,
+    pub(crate) expected_prompt_names: Vec<String>,
 }
 
 pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
@@ -47,6 +49,8 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
 
     let mut virtual_host_one_tool_names = create_tool_names(&gateway_one_ports);
     virtual_host_one_tool_names.sort();
+    let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
+    virtual_host_one_prompt_names.sort();
 
     let user_key = User::new(user);
 
@@ -83,7 +87,12 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
         let handle =
             tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
-        Ok(ListToolsGatewaySettings { handle, gateway_url, expected_tool_names: virtual_host_one_tool_names })
+        Ok(ListToolsGatewaySettings {
+            handle,
+            gateway_url,
+            expected_tool_names: virtual_host_one_tool_names,
+            expected_prompt_names: virtual_host_one_prompt_names,
+        })
     } else {
         Err("Invalid configuration".into())
     }
@@ -113,6 +122,8 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
 
     let mut virtual_host_one_tool_names = create_tool_names(&gateway_one_ports);
     virtual_host_one_tool_names.sort();
+    let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
+    virtual_host_one_prompt_names.sort();
 
     let user_key = User::new(user);
 
@@ -149,7 +160,12 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
         let handle =
             tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
-        Ok(ListToolsGatewaySettings { handle, gateway_url, expected_tool_names: virtual_host_one_tool_names })
+        Ok(ListToolsGatewaySettings {
+            handle,
+            gateway_url,
+            expected_tool_names: virtual_host_one_tool_names,
+            expected_prompt_names: virtual_host_one_prompt_names,
+        })
     } else {
         Err("Invalid configuration".into())
     }
@@ -186,6 +202,13 @@ fn create_tool_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
         .flat_map(|port| MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
+        .collect()
+}
+
+fn create_prompt_names(ports: &[u16]) -> Vec<String> {
+    ports
+        .iter()
+        .flat_map(|port| MOCK_COUNTER_PROMPT_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
         .collect()
 }
 
