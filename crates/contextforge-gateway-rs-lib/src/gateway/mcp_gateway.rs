@@ -693,7 +693,13 @@ where
         let responses: Vec<_> = get_prompt_tasks_results
             .into_iter()
             .map(|(name, response)| {
-                info!("get_prompt: backend {name} {response:?}");
+                match &response {
+                    Some(Ok(result)) => {
+                        info!("get_prompt: backend {name} returned {} messages", result.messages.len());
+                    },
+                    Some(Err(_)) => warn!("get_prompt: backend {name} returned an error"),
+                    None => warn!("get_prompt: backend {name} returned no response"),
+                }
                 (name, response)
             })
             .collect();
