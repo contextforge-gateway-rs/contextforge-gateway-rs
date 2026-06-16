@@ -251,42 +251,18 @@ where
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
-        let list_tools_tasks = backend_transports
-            .into_iter()
-            .map(|service_holder| {
+        let responses = fan_out_list(
+            backend_transports,
+            "list_tools",
+            |response: &ListToolsResult| response.tools.len(),
+            |service| {
                 let request = request.clone();
-                async move {
-                    if let Some(service) = service_holder.running_service {
-                        //let service = service.read().await;
-                        let response = service.list_tools(request).await;
-                        (service_holder.name, Some(response))
-                    } else {
-                        (service_holder.name, None)
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
+                async move { service.list_tools(request).await }
+            },
+        )
+        .await;
 
-        let list_tools_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_tools_tasks).await;
-
-        let responses: Vec<_> = list_tools_tasks_results
-            .into_iter()
-            .map(|(name, response)| {
-                log_list_backend_response("list_tools", &name, response.as_ref(), |r| r.tools.len());
-                (name, response)
-            })
-            .collect();
-
-        let responses = responses
-            .into_iter()
-            .filter_map(
-                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
-            )
-            .collect::<Vec<_>>();
-
-        let merged_list_tools = merge_tools(responses);
-
-        Ok(ListToolsResult { meta: None, tools: merged_list_tools, next_cursor: None })
+        Ok(ListToolsResult { meta: None, tools: merge_tools(responses), next_cursor: None })
     }
 
     async fn call_tool(
@@ -300,7 +276,7 @@ where
 
         let backend_names = session_manager.get_backend_names();
 
-        let Some(BackendToolPair { backend_name, tool_name }) = split_tool_name(&request.name, &backend_names) else {
+        let Some((backend_name, tool_name)) = split_prefixed_name(&request.name, &backend_names) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... wrong tool name".into(),
@@ -398,42 +374,18 @@ where
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
-        let list_resources_tasks = backend_transports
-            .into_iter()
-            .map(|service_holder| {
+        let responses = fan_out_list(
+            backend_transports,
+            "list_resources",
+            |response: &ListResourcesResult| response.resources.len(),
+            |service| {
                 let request = request.clone();
-                async move {
-                    if let Some(service) = service_holder.running_service {
-                        //let service = service.read().await;
-                        let response = service.list_resources(request).await;
-                        (service_holder.name, Some(response))
-                    } else {
-                        (service_holder.name, None)
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
+                async move { service.list_resources(request).await }
+            },
+        )
+        .await;
 
-        let list_tools_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_resources_tasks).await;
-
-        let responses: Vec<_> = list_tools_tasks_results
-            .into_iter()
-            .map(|(name, response)| {
-                log_list_backend_response("list_resources", &name, response.as_ref(), |r| r.resources.len());
-                (name, response)
-            })
-            .collect();
-
-        let responses = responses
-            .into_iter()
-            .filter_map(
-                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
-            )
-            .collect::<Vec<_>>();
-
-        let merged_list_resources = merge_resources(responses);
-
-        Ok(ListResourcesResult { meta: None, resources: merged_list_resources, next_cursor: None })
+        Ok(ListResourcesResult { meta: None, resources: merge_resources(responses), next_cursor: None })
     }
 
     async fn read_resource(
@@ -447,9 +399,7 @@ where
 
         let backend_names = session_manager.get_backend_names();
 
-        let Some(BackendResourcePair { backend_name, resource_uri }) =
-            split_resource_name(&request.uri, &backend_names)
-        else {
+        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... wrong resource name".into(),
@@ -589,41 +539,18 @@ where
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
-        let list_prompts_tasks = backend_transports
-            .into_iter()
-            .map(|service_holder| {
+        let responses = fan_out_list(
+            backend_transports,
+            "list_prompts",
+            |response: &ListPromptsResult| response.prompts.len(),
+            |service| {
                 let request = request.clone();
-                async move {
-                    if let Some(service) = service_holder.running_service {
-                        let response = service.list_prompts(request).await;
-                        (service_holder.name, Some(response))
-                    } else {
-                        (service_holder.name, None)
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
+                async move { service.list_prompts(request).await }
+            },
+        )
+        .await;
 
-        let list_prompts_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_prompts_tasks).await;
-
-        let responses: Vec<_> = list_prompts_tasks_results
-            .into_iter()
-            .map(|(name, response)| {
-                info!("list_prompts: backend {name} {response:?}");
-                (name, response)
-            })
-            .collect();
-
-        let responses = responses
-            .into_iter()
-            .filter_map(
-                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
-            )
-            .collect::<Vec<_>>();
-
-        let merged_list_prompts = merge_prompts(responses);
-
-        Ok(ListPromptsResult { meta: None, prompts: merged_list_prompts, next_cursor: None })
+        Ok(ListPromptsResult { meta: None, prompts: merge_prompts(responses), next_cursor: None })
     }
 
     async fn get_prompt(
@@ -637,8 +564,7 @@ where
 
         let backend_names = session_manager.get_backend_names();
 
-        let Some(BackendPromptPair { backend_name, prompt_name }) = split_prompt_name(&request.name, &backend_names)
-        else {
+        let Some((backend_name, prompt_name)) = split_prefixed_name(&request.name, &backend_names) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... wrong prompt name".into(),
@@ -723,37 +649,51 @@ where
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
-struct BackendToolPair<'a> {
-    backend_name: &'a str,
-    tool_name: &'a str,
+/// Splits a `{backend}-{rest}` routing name, returning `(backend_name, rest)` for the first
+/// backend whose name is a `-`-delimited prefix. Shared by tool, resource, and prompt routing.
+fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N]) -> Option<(&'a str, &'a str)> {
+    backend_names.iter().find_map(|backend| {
+        let backend = backend.as_ref();
+        name.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
+    })
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
-struct BackendResourcePair<'a> {
-    backend_name: &'a str,
-    resource_uri: &'a str,
-}
-
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
-struct BackendPromptPair<'a> {
-    backend_name: &'a str,
-    prompt_name: &'a str,
-}
-
-fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
-    tool_name: &'a T,
-    backend_names: &'a [N],
-) -> Option<BackendToolPair<'a>> {
-    for name in backend_names {
-        let tool_name = tool_name.as_ref();
-        let name = name.as_ref();
-        let extended_name = name.to_owned() + "-";
-        if tool_name.starts_with(&extended_name) {
-            return Some(BackendToolPair { backend_name: name, tool_name: &tool_name[extended_name.len()..] });
+/// Fans a paginated list request out to every connected backend concurrently, logs each response,
+/// and returns the `(backend_name, result)` pairs that succeeded.
+async fn fan_out_list<R, E, F, Fut, C>(
+    backends: Vec<ServiceHolder>,
+    op: &str,
+    item_count: C,
+    call: F,
+) -> Vec<(String, R)>
+where
+    F: Fn(McpClientService) -> Fut,
+    Fut: std::future::Future<Output = Result<R, E>>,
+    C: Fn(&R) -> usize,
+    E: std::fmt::Debug,
+{
+    let tasks = backends.into_iter().map(|service_holder| {
+        let call = &call;
+        async move {
+            let response = match service_holder.running_service {
+                Some(service) => Some(call(service).await),
+                None => None,
+            };
+            (service_holder.name, response)
         }
-    }
-    None
+    });
+
+    futures::future::join_all(tasks)
+        .await
+        .into_iter()
+        .filter_map(|(name, response)| {
+            log_list_backend_response(op, &name, response.as_ref(), &item_count);
+            match response {
+                Some(Ok(response)) => Some((name, response)),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
@@ -821,39 +761,6 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
         .collect::<Vec<_>>()
 }
 
-fn split_resource_name<'a, T: AsRef<str>, N: AsRef<str>>(
-    resource_uri: &'a T,
-    backend_names: &'a [N],
-) -> Option<BackendResourcePair<'a>> {
-    for name in backend_names {
-        let resource_uri = resource_uri.as_ref();
-        let name = name.as_ref();
-        let extended_name = name.to_owned() + "-";
-        if resource_uri.starts_with(&extended_name) {
-            return Some(BackendResourcePair {
-                backend_name: name,
-                resource_uri: &resource_uri[extended_name.len()..],
-            });
-        }
-    }
-    None
-}
-
-fn split_prompt_name<'a, T: AsRef<str>, N: AsRef<str>>(
-    prompt_name: &'a T,
-    backend_names: &'a [N],
-) -> Option<BackendPromptPair<'a>> {
-    for name in backend_names {
-        let prompt_name = prompt_name.as_ref();
-        let name = name.as_ref();
-        let extended_name = name.to_owned() + "-";
-        if prompt_name.starts_with(&extended_name) {
-            return Some(BackendPromptPair { backend_name: name, prompt_name: &prompt_name[extended_name.len()..] });
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
@@ -861,32 +768,20 @@ mod tests {
 
     #[test]
     fn test_splitting() {
-        let tool_name = "counter-one-increment";
         let backend_names = vec!["counter-on", "counter-oneee", "counter-one"];
-        let pair = BackendToolPair { backend_name: "counter-one", tool_name: "increment" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
-        let tool_name = "counter-oneincrement";
-        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
-        let tool_name = "counteroneincrement";
-        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
-        let tool_name = "counter-one-get-value";
-        let pair = BackendToolPair { backend_name: "counter-one", tool_name: "get-value" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        assert_eq!(Some(("counter-one", "increment")), split_prefixed_name("counter-one-increment", &backend_names));
+        assert_eq!(None, split_prefixed_name("counter-oneincrement", &backend_names));
+        assert_eq!(None, split_prefixed_name("counteroneincrement", &backend_names));
+        assert_eq!(Some(("counter-one", "get-value")), split_prefixed_name("counter-one-get-value", &backend_names));
+
+        // Tool, resource, and prompt routing all share this splitter.
+        assert_eq!(
+            Some(("counter-one", "example-prompt")),
+            split_prefixed_name("counter-one-example-prompt", &backend_names)
+        );
+        assert_eq!(None, split_prefixed_name("counter-oneexample-prompt", &backend_names));
 
         let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
-        let tool_name = "counter_one-get-value";
-        let pair = BackendToolPair { backend_name: "counter_one", tool_name: "get-value" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
-    }
-
-    #[test]
-    fn test_prompt_splitting() {
-        let prompt_name = "counter-one-example-prompt";
-        let backend_names = vec!["counter-on", "counter-oneee", "counter-one"];
-        let pair = BackendPromptPair { backend_name: "counter-one", prompt_name: "example-prompt" };
-        assert_eq!(Some(pair), split_prompt_name(&prompt_name, &backend_names));
-
-        let prompt_name = "counter-oneexample-prompt";
-        assert_eq!(None, split_prompt_name(&prompt_name, &backend_names));
+        assert_eq!(Some(("counter_one", "get-value")), split_prefixed_name("counter_one-get-value", &backend_names));
     }
 }
