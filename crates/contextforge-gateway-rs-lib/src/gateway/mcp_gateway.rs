@@ -645,77 +645,51 @@ where
                 data: None,
             });
         };
+        let backend_name = backend_name.to_owned();
+        let prompt_name = prompt_name.to_owned();
+        let request_name = request.name.clone();
 
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
 
-        let get_prompt_tasks: Vec<_> = backend_transports
-            .into_iter()
-            .map(|service_holder| {
-                debug!(
-                    "get_prompt: Finding backend for {} {service_holder:?} {backend_name} prompt_name = {prompt_name}",
-                    &request.name,
-                );
-                (service_holder.name == backend_name).then(|| {
-                    let mut request = request.clone();
-                    prompt_name.clone_into(&mut request.name);
-                    async move {
-                        if let Some(service) = service_holder.running_service {
-                            let response = service.get_prompt(request).await;
-
-                            (service_holder.name, Some(response))
-                        } else {
-                            warn!(
-                                "get_prompt: trying to get a prompt for which we have no backend {service_holder:?} {backend_name} prompt_name = {prompt_name}"
-                            );
-                            (service_holder.name, None)
-                        }
-                    }
-                })
-            })
-            .collect();
-
-        let get_prompt_tasks = get_prompt_tasks.into_iter().flatten().collect::<Vec<_>>();
-        if get_prompt_tasks.len() > 1 {
-            warn!("get_prompt: More than one prompt matching for prompt name {}", request.name);
-
-            session_manager.cleanup_backends("get_prompt: invalid session.. duplicate prompts detected").await;
-
+        let target_service = backend_transports.into_iter().find(|service_holder| {
+            debug!(
+                "get_prompt: Finding backend for {request_name} {service_holder:?} {backend_name} prompt_name = {prompt_name}",
+            );
+            service_holder.name == backend_name
+        });
+        let Some(target_service) = target_service else {
             return Err(ErrorData {
-                code: ErrorCode::INVALID_REQUEST,
-                message: "Routing problem... multiple matching prompts".into(),
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
                 data: None,
             });
-        }
+        };
 
-        let get_prompt_tasks_results: Vec<_> = futures::future::join_all(get_prompt_tasks).await;
+        let ServiceHolder { name: service_name, running_service } = target_service;
+        let Some(service) = running_service else {
+            warn!(
+                "get_prompt: trying to get a prompt for which we have no backend {service_name} {backend_name} prompt_name = {prompt_name}"
+            );
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
+                data: None,
+            });
+        };
 
-        let responses: Vec<_> = get_prompt_tasks_results
-            .into_iter()
-            .map(|(name, response)| {
-                match &response {
-                    Some(Ok(result)) => {
-                        info!("get_prompt: backend {name} returned {} messages", result.messages.len());
-                    },
-                    Some(Err(_)) => warn!("get_prompt: backend {name} returned an error"),
-                    None => warn!("get_prompt: backend {name} returned no response"),
-                }
-                (name, response)
-            })
-            .collect();
-
-        let responses = responses
-            .into_iter()
-            .filter_map(
-                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
-            )
-            .collect::<Vec<_>>();
-
-        responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Routing problem... got no responses from backends".into(),
-            data: None,
-        })
+        let mut routed_request = request;
+        routed_request.name = prompt_name;
+        let response = service.get_prompt(routed_request).await.map_err(|_| {
+            warn!("get_prompt: backend {service_name} returned an error");
+            ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
+                data: None,
+            }
+        })?;
+        info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
+        Ok(response)
     }
 
     async fn complete(
@@ -838,14 +812,10 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
     prompts
         .into_iter()
         .flat_map(|(backend_name, result)| {
-            result
-                .prompts
-                .into_iter()
-                .map(|mut prompt| {
-                    prompt.name = format!("{backend_name}-{}", prompt.name);
-                    prompt
-                })
-                .collect::<Vec<_>>()
+            result.prompts.into_iter().map(move |mut prompt| {
+                prompt.name = format!("{backend_name}-{}", prompt.name);
+                prompt
+            })
         })
         .sorted_by(|prompt, other| prompt.name.cmp(&other.name))
         .collect::<Vec<_>>()

@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports, reason = "shared CPEX test fixture is used by separate integration test targets")]
 
 mod auth;
+mod client;
 mod list_tools_gateway;
 pub(crate) mod mock_counter;
 mod plugin;
@@ -10,6 +11,7 @@ mod tool;
 mod user_config_store;
 
 pub(crate) use auth::token;
+pub(crate) use client::{connect_client, create_client, create_tls_client};
 pub(crate) use list_tools_gateway::{
     ListToolsGatewaySettings, create_gateway_with_four_counters, create_ports,
     create_tls_gateway_with_four_tls_counters,

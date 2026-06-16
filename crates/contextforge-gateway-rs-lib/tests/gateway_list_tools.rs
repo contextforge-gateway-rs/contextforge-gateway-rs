@@ -1,29 +1,16 @@
 mod support;
 
-use std::{
-    fs::File,
-    io::Read,
-    time::{Duration, Instant},
-};
+use std::{fs::File, io::Read};
 
 use contextforge_gateway_rs_lib::{Config, Result, UpstreamConnectionMode};
 use futures::{FutureExt, future::BoxFuture};
-use http::{HeaderMap, HeaderValue};
-use rmcp::{
-    ServiceExt,
-    model::InitializeRequestParams,
-    transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
-};
 use rustls::crypto;
 use tracing::{info, warn};
 
 use support::{
-    ListToolsGatewaySettings, create_gateway_with_four_counters, create_ports,
-    create_tls_gateway_with_four_tls_counters, token,
+    ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
+    create_tls_client, create_tls_gateway_with_four_tls_counters,
 };
-
-const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
@@ -109,29 +96,6 @@ async fn tls_lists_prefixed_backend_tools() -> Result<()> {
     Ok(())
 }
 
-fn create_client(user: &str) -> reqwest::Client {
-    reqwest::Client::builder().default_headers(auth_headers(user)).build().expect("This should work")
-}
-
-fn create_tls_client(user: &str, certificates: Vec<reqwest::Certificate>) -> reqwest::Client {
-    reqwest::Client::builder()
-        .https_only(true)
-        .tls_certs_only(certificates)
-        .default_headers(auth_headers(user))
-        .build()
-        .expect("This should work")
-}
-
-fn auth_headers(user: &str) -> HeaderMap {
-    let mut default_headers = HeaderMap::new();
-    let token = token(user);
-    default_headers.insert(
-        http::header::AUTHORIZATION,
-        HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
-    );
-    default_headers
-}
-
 async fn assert_list_tools(
     gateway_url: String,
     client: reqwest::Client,
@@ -158,28 +122,4 @@ async fn assert_list_tools(
     }
 
     Ok(())
-}
-
-async fn connect_client(
-    gateway_url: String,
-    client: reqwest::Client,
-) -> Result<rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams>> {
-    let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
-    loop {
-        let config = StreamableHttpClientTransportConfig::with_uri(gateway_url.clone());
-        let transport = StreamableHttpClientTransport::with_client(client.clone(), config);
-        let request = InitializeRequestParams::default();
-
-        match request.serve(transport).await {
-            Ok(running_service) => return Ok(running_service),
-            Err(error) if Instant::now() < deadline => {
-                warn!("No Service {error:?}");
-                tokio::time::sleep(TEST_POLL_INTERVAL).await;
-            },
-            Err(error) => {
-                warn!("No Service {error:?}");
-                return Err("Couldn't get a service".into());
-            },
-        }
-    }
 }
