@@ -273,7 +273,7 @@ where
         let responses: Vec<_> = list_tools_tasks_results
             .into_iter()
             .map(|(name, response)| {
-                info!("list_tools: backend {name} {response:?}");
+                log_list_backend_response("list_tools", &name, response.as_ref(), |r| r.tools.len());
                 (name, response)
             })
             .collect();
@@ -420,7 +420,7 @@ where
         let responses: Vec<_> = list_tools_tasks_results
             .into_iter()
             .map(|(name, response)| {
-                info!("list_resources: backend {name} {response:?}");
+                log_list_backend_response("list_resources", &name, response.as_ref(), |r| r.resources.len());
                 (name, response)
             })
             .collect();
@@ -730,6 +730,27 @@ const TEST_IMAGE_DATA: &str =
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
     ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().build()
+}
+
+fn log_list_backend_response<T: std::fmt::Debug, E: std::fmt::Debug>(
+    kind: &str,
+    name: &str,
+    response: Option<&Result<T, E>>,
+    item_count: impl Fn(&T) -> usize,
+) {
+    match response {
+        Some(Ok(response)) => {
+            info!(backend = name, item_count = item_count(response), "{kind}: backend completed");
+            debug!(backend = name, response = ?response, "{kind}: backend response");
+        },
+        Some(Err(error)) => {
+            info!(backend = name, "{kind}: backend error");
+            debug!(backend = name, error = ?error, "{kind}: backend error");
+        },
+        None => {
+            info!(backend = name, "{kind}: backend unavailable");
+        },
+    }
 }
 
 fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
