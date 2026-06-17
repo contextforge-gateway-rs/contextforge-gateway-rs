@@ -732,7 +732,7 @@ fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabiliti
     ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().build()
 }
 
-fn log_list_backend_response<T: std::fmt::Debug, E: std::fmt::Debug>(
+fn log_list_backend_response<T, E: std::fmt::Debug>(
     kind: &str,
     name: &str,
     response: Option<&Result<T, E>>,
