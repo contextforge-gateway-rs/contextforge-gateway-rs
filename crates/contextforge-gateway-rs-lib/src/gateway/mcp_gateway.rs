@@ -739,17 +739,9 @@ fn log_list_backend_response<T: std::fmt::Debug, E: std::fmt::Debug>(
     item_count: impl Fn(&T) -> usize,
 ) {
     match response {
-        Some(Ok(response)) => {
-            info!(backend = name, item_count = item_count(response), "{kind}: backend completed");
-            debug!(backend = name, response = ?response, "{kind}: backend response");
-        },
-        Some(Err(error)) => {
-            info!(backend = name, "{kind}: backend error");
-            debug!(backend = name, error = ?error, "{kind}: backend error");
-        },
-        None => {
-            info!(backend = name, "{kind}: backend unavailable");
-        },
+        Some(Ok(response)) => info!("{kind}: backend {name} completed ({} items)", item_count(response)),
+        Some(Err(error)) => warn!("{kind}: backend {name} {error:?}"),
+        None => info!("{kind}: backend {name} unavailable"),
     }
 }
 
