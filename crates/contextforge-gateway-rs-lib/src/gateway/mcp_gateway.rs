@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use contextforge_gateway_rs_apis::user_store::UserConfig;
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
@@ -57,8 +54,6 @@ pub struct McpService<T>
 where
     T: UserSessionStore,
 {
-    #[builder(default = Arc::new(Mutex::new(HashSet::new())))]
-    subscriptions: Arc<Mutex<HashSet<String>>>,
     #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
     http_client: reqwest::Client,
@@ -418,13 +413,34 @@ where
         request: SubscribeRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("subscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mcp_call_validator = AuthorizedCallValidator::new("subscribe", &cx);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let mut subs = self.subscriptions.lock().await;
-        subs.insert(request.uri.clone());
+        let backend_names = session_manager.get_backend_names();
+
+        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... wrong resource name".into(),
+                data: None,
+            });
+        };
+        let resource_uri = resource_uri.to_owned();
+
+        let (service_name, service) = resolve_backend(&session_manager, "subscribe", backend_name).await?;
+
+        let mut routed_request = request;
+        routed_request.uri = resource_uri;
+        service.subscribe(routed_request).await.map_err(|error| {
+            warn!("subscribe: backend {service_name} {error:?}");
+            ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
+                data: None,
+            }
+        })?;
+        info!("subscribe: backend {service_name} completed");
         Ok(())
     }
 
@@ -433,13 +449,34 @@ where
         request: UnsubscribeRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("unsubscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mcp_call_validator = AuthorizedCallValidator::new("unsubscribe", &cx);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let mut subs = self.subscriptions.lock().await;
-        subs.remove(request.uri.as_str());
+        let backend_names = session_manager.get_backend_names();
+
+        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... wrong resource name".into(),
+                data: None,
+            });
+        };
+        let resource_uri = resource_uri.to_owned();
+
+        let (service_name, service) = resolve_backend(&session_manager, "unsubscribe", backend_name).await?;
+
+        let mut routed_request = request;
+        routed_request.uri = resource_uri;
+        service.unsubscribe(routed_request).await.map_err(|error| {
+            warn!("unsubscribe: backend {service_name} {error:?}");
+            ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
+                data: None,
+            }
+        })?;
+        info!("unsubscribe: backend {service_name} completed");
         Ok(())
     }
 
