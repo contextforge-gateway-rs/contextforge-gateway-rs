@@ -10,8 +10,8 @@ use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
-        ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
         Prompt, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
         ServerCapabilities, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
@@ -507,29 +507,45 @@ where
         request: CompleteRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("complete user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
-        let values = match &request.r#ref {
-            Reference::Resource(_) => {
-                if request.argument.name == "id" {
-                    vec!["1".into(), "2".into(), "3".into()]
-                } else {
-                    vec![]
-                }
-            },
-            Reference::Prompt(prompt_ref) => {
-                if request.argument.name == "name" {
-                    vec!["Alice".into(), "Bob".into(), "Charlie".into()]
-                } else if request.argument.name == "style" {
-                    vec!["friendly".into(), "formal".into(), "casual".into()]
-                } else {
-                    vec![prompt_ref.name.clone()]
-                }
-            },
+        let mcp_call_validator = AuthorizedCallValidator::new("complete", &cx);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
+
+        let backend_names = session_manager.get_backend_names();
+
+        // The reference carries a namespaced prompt name or resource URI; route on that.
+        let namespaced = match &request.r#ref {
+            Reference::Prompt(prompt) => prompt.name.as_str(),
+            Reference::Resource(resource) => resource.uri.as_str(),
         };
-        Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| ErrorData::internal_error(e, None))?))
+
+        let Some((backend_name, stripped)) = split_prefixed_name(namespaced, &backend_names) else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... wrong completion reference".into(),
+                data: None,
+            });
+        };
+        let backend_name = backend_name.to_owned();
+        let stripped = stripped.to_owned();
+
+        let (service_name, service) = resolve_backend(&session_manager, "complete", &backend_name).await?;
+
+        let mut routed_request = request;
+        match &mut routed_request.r#ref {
+            Reference::Prompt(prompt) => prompt.name = stripped,
+            Reference::Resource(resource) => resource.uri = stripped,
+        }
+        let response = service.complete(routed_request).await.map_err(|error| {
+            warn!("complete: backend {service_name} {error:?}");
+            ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... got no responses from backends".into(),
+                data: None,
+            }
+        })?;
+        info!("complete: backend {service_name} returned {} values", response.completion.values.len());
+        Ok(response)
     }
 }
 
