@@ -10,10 +10,10 @@ use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
-        ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo, ErrorCode,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        Prompt, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
+        Prompt, ReadResourceRequestParams, ReadResourceResult, Reference, Resource, ResourceTemplate,
         ServerCapabilities, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
     service::{RequestContext, RunningService},
@@ -386,26 +386,29 @@ where
 
     async fn list_resource_templates(
         &self,
-        _request: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         cx: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("list_resource_templates user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mcp_call_validator = AuthorizedCallValidator::new("list_resource_templates", &cx);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
+        let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+
+        let responses = fan_out_list(
+            backend_transports,
+            "list_resource_templates",
+            |response: &ListResourceTemplatesResult| response.resource_templates.len(),
+            |service| {
+                let request = request.clone();
+                async move { service.list_resource_templates(request).await }
+            },
+        )
+        .await;
+
         Ok(ListResourceTemplatesResult {
             meta: None,
-            resource_templates: vec![
-                RawResourceTemplate {
-                    uri_template: "test://template/{id}/data".into(),
-                    name: "Dynamic Resource".into(),
-                    title: None,
-                    description: Some("A dynamic resource with parameter substitution".into()),
-                    mime_type: Some("application/json".into()),
-                    icons: None,
-                }
-                .no_annotation(),
-            ],
+            resource_templates: merge_resource_templates(responses),
             next_cursor: None,
         })
     }
@@ -674,6 +677,20 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
                 .collect::<Vec<_>>()
         })
         .sorted_by(|t, o| t.name.cmp(&o.name))
+        .collect::<Vec<_>>()
+}
+
+fn merge_resource_templates(templates: Vec<(String, ListResourceTemplatesResult)>) -> Vec<ResourceTemplate> {
+    templates
+        .into_iter()
+        .flat_map(|(backend_name, result)| {
+            result.resource_templates.into_iter().map(move |mut template| {
+                template.name = format!("{backend_name}-{}", template.name);
+                template.uri_template = format!("{backend_name}-{}", template.uri_template);
+                template
+            })
+        })
+        .sorted_by(|template, other| template.name.cmp(&other.name))
         .collect::<Vec<_>>()
 }
 

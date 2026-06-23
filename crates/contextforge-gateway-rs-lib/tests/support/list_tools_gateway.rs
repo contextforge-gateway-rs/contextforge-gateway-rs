@@ -16,12 +16,14 @@ use super::{MemoryUserConfigStore, mock_counter};
 const MOCK_COUNTER_TOOL_NAMES: &[&str] =
     &["decrement", "echo", "get_session_id", "get_value", "increment", "long_task", "say_hello", "sum"];
 const MOCK_COUNTER_PROMPT_NAMES: &[&str] = &["counter_analysis", "example_prompt"];
+const MOCK_COUNTER_RESOURCE_TEMPLATE_NAMES: &[&str] = &["filesystem", "memo"];
 
 pub(crate) struct ListToolsGatewaySettings {
     pub(crate) handle: tokio::task::JoinHandle<Vec<Result<()>>>,
     pub(crate) gateway_url: String,
     pub(crate) expected_tool_names: Vec<String>,
     pub(crate) expected_prompt_names: Vec<String>,
+    pub(crate) expected_resource_template_names: Vec<String>,
 }
 
 pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
@@ -51,6 +53,8 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     virtual_host_one_tool_names.sort();
     let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
     virtual_host_one_prompt_names.sort();
+    let mut virtual_host_one_resource_template_names = create_resource_template_names(&gateway_one_ports);
+    virtual_host_one_resource_template_names.sort();
 
     let user_key = User::new(user);
 
@@ -92,6 +96,7 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
             gateway_url,
             expected_tool_names: virtual_host_one_tool_names,
             expected_prompt_names: virtual_host_one_prompt_names,
+            expected_resource_template_names: virtual_host_one_resource_template_names,
         })
     } else {
         Err("Invalid configuration".into())
@@ -124,6 +129,8 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     virtual_host_one_tool_names.sort();
     let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
     virtual_host_one_prompt_names.sort();
+    let mut virtual_host_one_resource_template_names = create_resource_template_names(&gateway_one_ports);
+    virtual_host_one_resource_template_names.sort();
 
     let user_key = User::new(user);
 
@@ -165,6 +172,7 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
             gateway_url,
             expected_tool_names: virtual_host_one_tool_names,
             expected_prompt_names: virtual_host_one_prompt_names,
+            expected_resource_template_names: virtual_host_one_resource_template_names,
         })
     } else {
         Err("Invalid configuration".into())
@@ -209,6 +217,13 @@ fn create_prompt_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
         .flat_map(|port| MOCK_COUNTER_PROMPT_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
+        .collect()
+}
+
+fn create_resource_template_names(ports: &[u16]) -> Vec<String> {
+    ports
+        .iter()
+        .flat_map(|port| MOCK_COUNTER_RESOURCE_TEMPLATE_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
         .collect()
 }
 
