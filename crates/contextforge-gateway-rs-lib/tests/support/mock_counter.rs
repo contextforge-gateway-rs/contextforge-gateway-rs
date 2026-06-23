@@ -243,7 +243,27 @@ impl ServerHandler for Counter {
         _request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, McpError> {
-        Ok(ListResourceTemplatesResult { next_cursor: None, resource_templates: Vec::new(), meta: None })
+        let resource_templates = vec![
+            RawResourceTemplate {
+                uri_template: "str:////{path}".into(),
+                name: "filesystem".into(),
+                title: None,
+                description: Some("Read a file by absolute path".into()),
+                mime_type: Some("text/plain".into()),
+                icons: None,
+            }
+            .no_annotation(),
+            RawResourceTemplate {
+                uri_template: "memo://{id}".into(),
+                name: "memo".into(),
+                title: None,
+                description: Some("Read a memo by id".into()),
+                mime_type: Some("text/plain".into()),
+                icons: None,
+            }
+            .no_annotation(),
+        ];
+        Ok(ListResourceTemplatesResult { next_cursor: None, resource_templates, meta: None })
     }
 
     async fn initialize(
