@@ -259,6 +259,26 @@ impl ServerHandler for Counter {
         Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| McpError::internal_error(e, None))?))
     }
 
+    async fn subscribe(&self, request: SubscribeRequestParams, _: RequestContext<RoleServer>) -> Result<(), McpError> {
+        if is_known_resource_uri(&request.uri) {
+            Ok(())
+        } else {
+            Err(McpError::resource_not_found("resource_not_found", Some(json!({ "uri": request.uri }))))
+        }
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        if is_known_resource_uri(&request.uri) {
+            Ok(())
+        } else {
+            Err(McpError::resource_not_found("resource_not_found", Some(json!({ "uri": request.uri }))))
+        }
+    }
+
     async fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParams>,
@@ -299,4 +319,10 @@ impl ServerHandler for Counter {
         }
         Ok(self.get_info())
     }
+}
+
+/// The backend-local resource URIs this mock owns; subscribe/unsubscribe only succeed for these,
+/// so a successful gateway call proves the namespace prefix was stripped before forwarding.
+fn is_known_resource_uri(uri: &str) -> bool {
+    matches!(uri, "str:////Users/to/some/path/" | "memo://insights")
 }
