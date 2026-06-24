@@ -1,68 +1,169 @@
 # Runtime Configuration
 
-Runtime configuration is the routing source of truth. The control plane owns
-the durable model. The gateway consumes the model through `UserConfigStore` and
-applies it on the request path.
+> 🗂️ **Config boundary:** process config tells the gateway how to run. Runtime
+> user config tells each request where it may route. Plugin config controls the
+> optional CPEX hook runtime.
 
-## Model
+![Runtime configuration](assets/runtime-config.svg)
 
-The API crate defines the shared config shape:
+The gateway consumes configuration from three places. Keeping them separate is
+important because they change at different times and are used by different
+parts of the dataplane.
+
+## Config Surfaces
+
+| Surface | Source | Loaded | Main user |
+| --- | --- | --- | --- |
+| Process `Config` | CLI flags and `CONTEXTFORGE_GATEWAY_RS_*` env vars parsed by `clap`. | Startup. | Listener setup, JWT decoder keys, Redis connection, upstream HTTP client, telemetry, runtime shape. |
+| `UserConfig` | `UserConfigStore`, currently Redis through `RedisUserConfigStore`. | Per request after JWT validation. | Virtual host and backend selection. |
+| `RuntimePluginConfigDocument` | Redis key `ContextForgeGatewayRuntimePluginConfig` when runtime plugins are enabled. | Startup and watcher reload. | CPEX tool pre/post hooks. |
+
+The control plane owns durable authoring. This repo owns reading those values
+and applying them on the request path.
+
+## UserConfig Shape
+
+The API crate defines the shared runtime routing model:
 
 ```text
 UserConfig
-  virtual_hosts: HashMap<virtual_host_id, VirtualHost>
+  virtual_hosts: HashMap<String, VirtualHost>
 
 VirtualHost
-  backends: HashMap<backend_name, BackendMCPGateway>
+  backends: HashMap<String, BackendMCPGateway>
 
 BackendMCPGateway
-  name
-  url
-  transport
-  passthrough_headers
-  allowed_tool_names
-  allowed_resource_names
-  allowed_prompt_names
+  name: String
+  url: Url
+  transport: Transport
+  passthrough_headers: Vec<String>
+  allowed_tool_names: Vec<String>
+  allowed_resource_names: Vec<String>
+  allowed_prompt_names: Vec<String>
 ```
 
-Today, the MCP dataplane primarily uses the backend map key and backend URL.
-The remaining fields show the intended expansion points: transport selection,
-header policy, tool/resource/prompt filters, and richer routing policy.
-
-## Selection
-
-Selection has two dimensions:
+`Transport` currently declares:
 
 ```text
-JWT subject -> UserConfig
-path virtual_host_id -> one VirtualHost inside that UserConfig
+STREAMABLEHTTP
+SSE
+STDIO
 ```
 
-The JWT subject chooses the user config. The path chooses one virtual host
-inside that config. The gateway should not select a backend before both facts
-are known.
+## What The MCP Dataplane Uses Today
 
-## Redis Adapter
+The struct is already wider than the current MCP routing code. That is useful,
+but the distinction should stay explicit:
 
-The current `RedisUserConfigStore` implementation stores keys and values as
-MessagePack. It encodes `User::new(jwt_subject)` as the Redis key and decodes a
-`UserConfig` from the value.
+| Config field | Current MCP dataplane behavior |
+| --- | --- |
+| `UserConfig.virtual_hosts` | Required. `VirtualHostId` from the path selects one entry. |
+| `VirtualHost.backends` map key | Required. This key is the public backend namespace used in tool/resource/prompt prefixes. |
+| `BackendMCPGateway.url` | Required. Used to build the upstream `StreamableHttpClientTransport`. |
+| `BackendMCPGateway.name` | Present in the model. Current routing uses the backend map key, not this field, as the namespace. |
+| `transport` | Present in the model. Current upstream code always builds a streamable HTTP client transport. |
+| `passthrough_headers` | Present in the model. Current MCP routing does not apply header pass-through policy from this field. |
+| `allowed_tool_names` | Present in the model. Current list/call routing does not enforce it. |
+| `allowed_resource_names` | Present in the model. Current resource routing does not enforce it. |
+| `allowed_prompt_names` | Present in the model. Current prompt routing does not enforce it. |
 
-The store also keeps an in-process LRU cache of decoded configs. This reduces
-Redis reads on the hot path, but Redis remains an adapter detail. Routing code
-should depend on `UserConfigStore` and `UserConfig`, not on Redis commands or
-MessagePack serialization.
+The current route selection is:
 
-## Expected Growth
+```text
+JWT subject
+  -> User::new(subject)
+  -> UserConfig
+  -> path VirtualHostId
+  -> VirtualHost
+  -> backend map key
+  -> BackendMCPGateway.url
+```
 
-The config model is expected to grow around enforcement, not management:
+## Redis Storage
 
-- route selection across multiple MCP endpoints
-- principal and virtual-host filters for tools, resources, and prompts
-- backend auth and TLS material references
-- request and response header pass/add/remove rules
-- plugin and CPEX hook settings
-- pagination and SSE behavior where protocol handling needs config
-- future A2A and LLM routing/provider settings
+`RedisUserConfigStore` stores user routing config as MessagePack:
 
-The durable authoring workflow for those settings remains outside this repo.
+| Item | Encoding |
+| --- | --- |
+| Redis key | MessagePack-encoded `User::new(jwt_subject)`. |
+| Redis value | MessagePack-encoded `UserConfig`. |
+| Cache key | Raw subject string through `User::key()`. |
+| Cache value | Decoded `UserConfig`. |
+
+The in-process cache is an implementation detail:
+
+| Setting | Value |
+| --- | --- |
+| Entries | 50,000 |
+| Expiry | 1 hour |
+| Redis connection retries | 1,000 |
+
+Routing code should stay behind the `UserConfigStore` trait. That keeps Redis,
+MessagePack, and cache behavior out of MCP method handling.
+
+## Plugin Runtime Config
+
+When `runtime_plugins_enabled` is true, startup builds a
+`CpexRuntimeRegistry::with_redis_config(...)`. The registry reads a separate
+runtime plugin document:
+
+```text
+Redis key: ContextForgeGatewayRuntimePluginConfig
+
+RuntimePluginConfigDocument
+  version: 1
+  cpex: CpexConfig
+```
+
+The plugin config loader accepts JSON bytes or MessagePack bytes. It rejects
+documents with the wrong version, missing `cpex` config, unsupported CPEX
+features, or an unavailable config store.
+
+Current supported plugin scope is deliberately narrow:
+
+| CPEX feature | Current support |
+| --- | --- |
+| `TOOL_PRE_INVOKE` | Supported for `call_tool` before backend invocation. |
+| `TOOL_POST_INVOKE` | Supported for `call_tool` responses and backend progress events. |
+| CPEX routing | Rejected. Gateway routing is owned by `UserConfig` and MCP routing code. |
+| Plugin conditions | Rejected. |
+| Plugin dirs, global policies, global defaults | Rejected. |
+| Other hook types | Rejected. |
+
+The registry has a watcher interval of 10 minutes. On valid reloads it swaps in
+the new runtime. On invalid reloads it marks the runtime failed so new plugin
+calls return an internal MCP error until a valid config is applied.
+
+## Process Config
+
+Process `Config` is not per-user routing state. It is parsed once and controls
+the gateway shell:
+
+| Area | Examples |
+| --- | --- |
+| Listener | `address`, `tls_address`, downstream TLS certificate and private key. |
+| Authentication | RSA public key path or HMAC secret for JWT verification. |
+| Redis | Host, port, plain/TLS/mTLS mode, trust bundle, client cert, client key. |
+| Upstream HTTP client | Plaintext/TLS/mTLS mode, upstream trust bundle, client cert, client key. |
+| Telemetry | OpenTelemetry traces, metrics endpoint/protocol, OTLP headers, service name. |
+| Runtime shape | CPU count and single-runtime versus multi-runtime mode. |
+| Plugins | Whether runtime plugins are enabled. |
+| Logging | Log name and rotation. |
+
+The process config decides whether the gateway can start and what dependencies
+it can reach. It does not decide which backend a specific MCP caller may use;
+that remains in `UserConfig`.
+
+## Selection Invariant
+
+Backend selection should only happen after these facts exist:
+
+```text
+authenticated subject
+  + loaded UserConfig
+  + path VirtualHostId
+  + MCP session context
+```
+
+That invariant is why runtime config access is in middleware and MCP validators,
+not hidden inside individual backend calls.

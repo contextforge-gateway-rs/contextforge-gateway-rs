@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 470" role="img" aria-labelledby="title desc">
+  <title id="title">Authentication and user config lookup</title>
+  <desc id="desc">The gateway extracts the virtual host id, validates a bearer JWT into ContextForgeClaims, reads the MCP session id if present, loads UserConfig by JWT subject through the cache and Redis, and exposes typed extensions to MCP validators.</desc>
+
+  <rect x="0" y="0" width="1080" height="470" rx="18" fill="#ffffff" />
+  <rect x="1" y="1" width="1078" height="468" rx="18" fill="none" stroke="#d7dde5" />
+
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1f2933; }
+    .title { font-size: 18px; font-weight: 700; }
+    .body { font-size: 13px; fill: #4b5563; }
+    .mini { font-size: 12px; fill: #5f6b7a; }
+    .label { font-size: 12px; font-weight: 700; }
+    .box { fill: #ffffff; stroke: #cfd8e3; stroke-width: 1.6; }
+    .request { fill: #eef7ff; stroke: #4b8bbe; stroke-width: 2; }
+    .auth { fill: #f1fbf5; stroke: #3f9b6d; stroke-width: 2; }
+    .config { fill: #fff8e7; stroke: #c28a25; stroke-width: 2; }
+    .mcp { fill: #f7f4ff; stroke: #7b68b4; stroke-width: 2; }
+    .reject { fill: #fff1f0; stroke: #d65f5f; stroke-width: 1.6; }
+    .arrow { stroke: #3d75a8; stroke-width: 2.5; fill: none; }
+    .ok { stroke: #2f8f6b; stroke-width: 2.5; fill: none; }
+    .side { stroke: #c28a25; stroke-width: 2.2; fill: none; stroke-dasharray: 5 5; }
+    .arrow-fill { fill: #3d75a8; }
+    .ok-fill { fill: #2f8f6b; }
+    .side-fill { fill: #c28a25; }
+    .reject-text { fill: #9f3a3a; }
+    .ok-text { fill: #2f6b50; }
+    .side-text { fill: #8a621b; }
+  </style>
+
+  <g>
+    <rect x="36" y="166" width="166" height="96" rx="12" class="request" />
+    <text x="119" y="200" text-anchor="middle" class="title">HTTP request</text>
+    <text x="119" y="229" text-anchor="middle" class="body">path + bearer JWT</text>
+    <text x="119" y="250" text-anchor="middle" class="mini">optional Mcp-session-id</text>
+  </g>
+
+  <g>
+    <rect x="250" y="42" width="230" height="82" rx="12" class="box" />
+    <text x="365" y="73" text-anchor="middle" class="title">virtual_host_id_layer</text>
+    <text x="365" y="101" text-anchor="middle" class="body">insert VirtualHostId</text>
+
+    <rect x="250" y="168" width="230" height="96" rx="12" class="auth" />
+    <text x="365" y="200" text-anchor="middle" class="title">claims_layer</text>
+    <text x="365" y="228" text-anchor="middle" class="body">validate issuer, audience, exp</text>
+    <text x="365" y="249" text-anchor="middle" class="mini">insert ContextForgeClaims</text>
+
+    <rect x="250" y="312" width="230" height="82" rx="12" class="box" />
+    <text x="365" y="343" text-anchor="middle" class="title">session_id_layer</text>
+    <text x="365" y="371" text-anchor="middle" class="body">insert SessionId if present</text>
+  </g>
+
+  <g>
+    <rect x="546" y="160" width="230" height="112" rx="12" class="config" />
+    <text x="661" y="191" text-anchor="middle" class="title">user_config_store_layer</text>
+    <text x="661" y="221" text-anchor="middle" class="body">claims.sub -> User::new</text>
+    <text x="661" y="242" text-anchor="middle" class="mini">load and insert UserConfig</text>
+  </g>
+
+  <g>
+    <rect x="822" y="56" width="210" height="94" rx="12" class="config" />
+    <text x="927" y="88" text-anchor="middle" class="title">LRU cache</text>
+    <text x="927" y="118" text-anchor="middle" class="body">50k entries, 1 hour</text>
+    <text x="927" y="138" text-anchor="middle" class="mini">keyed by claims.sub string</text>
+
+    <rect x="822" y="192" width="210" height="94" rx="12" class="config" />
+    <text x="927" y="224" text-anchor="middle" class="title">Redis</text>
+    <text x="927" y="254" text-anchor="middle" class="body">MessagePack key/value</text>
+    <text x="927" y="274" text-anchor="middle" class="mini">User -> UserConfig</text>
+  </g>
+
+  <g>
+    <rect x="822" y="342" width="210" height="82" rx="12" class="mcp" />
+    <text x="927" y="374" text-anchor="middle" class="title">MCP validators</text>
+    <text x="927" y="399" text-anchor="middle" class="body">VirtualHostId + UserConfig</text>
+    <text x="927" y="417" text-anchor="middle" class="mini">SessionId when present</text>
+  </g>
+
+  <g>
+    <line x1="202" y1="214" x2="238" y2="214" class="arrow" />
+    <polygon points="238,214 227,208 227,220" class="arrow-fill" />
+
+    <path d="M 238 214 L 228 214 L 228 83 L 240 83" class="arrow" />
+    <polygon points="240,83 229,77 229,89" class="arrow-fill" />
+    <path d="M 480 83 L 792 83 L 792 374 L 812 374" class="ok" />
+    <polygon points="812,374 801,368 801,380" class="ok-fill" />
+
+    <line x1="480" y1="216" x2="536" y2="216" class="ok" />
+    <polygon points="536,216 525,210 525,222" class="ok-fill" />
+    <text x="508" y="207" text-anchor="middle" class="label ok-text">claims</text>
+
+    <path d="M 238 214 L 228 214 L 228 353 L 240 353" class="arrow" />
+    <polygon points="240,353 229,347 229,359" class="arrow-fill" />
+    <path d="M 480 353 L 790 353 L 790 392 L 812 392" class="ok" />
+    <polygon points="812,392 801,386 801,398" class="ok-fill" />
+
+    <path d="M 776 198 C 800 198 798 118 812 118" class="side" />
+    <polygon points="812,118 801,112 801,124" class="side-fill" />
+    <path d="M 822 132 C 798 132 802 214 786 214" class="side" />
+    <polygon points="786,214 797,220 797,208" class="side-fill" />
+    <text x="802" y="160" text-anchor="middle" class="label side-text">cache hit</text>
+
+    <path d="M 776 234 C 800 234 798 238 812 238" class="side" />
+    <polygon points="812,238 801,232 801,244" class="side-fill" />
+    <path d="M 822 260 C 798 260 802 252 786 252" class="side" />
+    <polygon points="786,252 797,258 797,246" class="side-fill" />
+    <text x="802" y="226" text-anchor="middle" class="label side-text">cache miss</text>
+
+    <path d="M 776 250 L 802 250 L 802 383 L 812 383" class="ok" />
+    <polygon points="812,383 801,377 801,389" class="ok-fill" />
+  </g>
+
+  <g>
+    <rect x="498" y="288" width="110" height="34" rx="8" class="reject" />
+    <text x="553" y="310" text-anchor="middle" class="body reject-text">401 auth</text>
+    <line x1="430" y1="264" x2="498" y2="298" stroke="#d65f5f" stroke-width="1.8" />
+
+    <rect x="636" y="304" width="130" height="34" rx="8" class="reject" />
+    <text x="701" y="326" text-anchor="middle" class="body reject-text">400/500 config</text>
+    <line x1="690" y1="272" x2="690" y2="304" stroke="#d65f5f" stroke-width="1.8" />
+  </g>
+</svg>
