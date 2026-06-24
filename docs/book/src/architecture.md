@@ -14,5 +14,5 @@ boundaries exist.
 | 🔐 [Authentication And User Config Lookup](authentication-and-user-config.md) | How JWT claims, Redis-backed user config, and virtual host selection combine before routing. |
 | 🗂️ [Runtime Configuration](runtime-configuration.md) | The current `UserConfig` model, MessagePack Redis persistence, cache behavior, and expected growth. |
 | 🔌 [Backend Connections And Transports](backend-connections-and-transports.md) | Downstream listeners, upstream RMCP transports, config-store transport, and TLS direction. |
-| 🧵 [Session Ownership](session-ownership.md) | Why backend services move in and out of the shared map, and what that means for load balancing. |
+| 🧵 [Session Ownership](session-ownership.md) | How backend services are keyed, shared, cleaned up, and constrained by local process ownership. |
 | 🧱 [Architectural Choices](architectural-choices.md) | The main tradeoffs behind dataplane scope, namespacing, config boundaries, and future protocols. |

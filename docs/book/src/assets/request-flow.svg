@@ -1,0 +1,230 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 980" role="img" aria-labelledby="title desc">
+  <title id="title">ContextForge Gateway request flow</title>
+  <desc id="desc">A normal MCP HTTP request enters the TCP or TLS listener, passes through metrics, tracing, the contextforge nested router, CORS, virtual host extraction, claims validation, session extraction, user config lookup, and RMCP. RMCP then follows either initialize handling or authorized MCP method handling, calls backend MCP servers as needed, and returns the response through the same stack.</desc>
+
+  <rect x="0" y="0" width="1500" height="980" rx="18" fill="#ffffff" />
+  <rect x="1" y="1" width="1498" height="978" rx="18" fill="none" stroke="#d7dde5" />
+
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1f2933; }
+    .title { font-size: 18px; font-weight: 700; }
+    .section { font-size: 16px; font-weight: 700; }
+    .body { font-size: 13px; fill: #4b5563; }
+    .mini { font-size: 12px; fill: #5f6b7a; }
+    .label { font-size: 12px; font-weight: 700; }
+    .box { fill: #ffffff; stroke: #cfd8e3; stroke-width: 1.6; }
+    .entry { fill: #eef7ff; stroke: #4b8bbe; stroke-width: 2; }
+    .stack { fill: #f6faf8; stroke: #3f9b6d; stroke-width: 2; }
+    .rmcp { fill: #f1fbf5; stroke: #3f9b6d; stroke-width: 2; }
+    .init { fill: #fff8e7; stroke: #c28a25; stroke-width: 2; }
+    .auth { fill: #f7f4ff; stroke: #7b68b4; stroke-width: 2; }
+    .backend { fill: #f7f4ff; stroke: #7b68b4; stroke-width: 2; }
+    .response { fill: #eef9f4; stroke: #2f8f6b; stroke-width: 2; }
+    .request-line { stroke: #3d75a8; stroke-width: 2.5; fill: none; }
+    .response-line { stroke: #2f8f6b; stroke-width: 2.5; fill: none; }
+    .side-line { stroke: #c28a25; stroke-width: 2.2; fill: none; stroke-dasharray: 5 5; }
+    .request-fill { fill: #3d75a8; }
+    .response-fill { fill: #2f8f6b; }
+    .side-fill { fill: #c28a25; }
+    .request-text { fill: #315f87; }
+    .response-text { fill: #2f6b50; }
+    .side-text { fill: #8a621b; }
+    .failure { fill: #fff1f0; stroke: #d65f5f; stroke-width: 1.4; }
+    .failure-text { fill: #9f3a3a; }
+  </style>
+
+  <g>
+    <rect x="40" y="38" width="168" height="58" rx="10" class="entry" />
+    <text x="124" y="62" text-anchor="middle" class="title">MCP client</text>
+    <text x="124" y="83" text-anchor="middle" class="mini">streamable HTTP</text>
+
+    <rect x="252" y="38" width="168" height="58" rx="10" class="entry" />
+    <text x="336" y="62" text-anchor="middle" class="title">TCP/TLS</text>
+    <text x="336" y="83" text-anchor="middle" class="mini">listener transport</text>
+
+    <rect x="464" y="38" width="168" height="58" rx="10" class="box" />
+    <text x="548" y="62" text-anchor="middle" class="title">Metrics</text>
+    <text x="548" y="83" text-anchor="middle" class="mini">HttpMetricsLayer</text>
+
+    <rect x="676" y="38" width="168" height="58" rx="10" class="box" />
+    <text x="760" y="62" text-anchor="middle" class="title">Tracing</text>
+    <text x="760" y="83" text-anchor="middle" class="mini">TraceLayer</text>
+
+    <rect x="888" y="38" width="260" height="58" rx="10" class="box" />
+    <text x="1018" y="62" text-anchor="middle" class="title">Nested router</text>
+    <text x="1018" y="83" text-anchor="middle" class="mini">/contextforge-rs</text>
+
+    <line x1="208" y1="67" x2="242" y2="67" class="request-line" />
+    <polygon points="242,67 231,61 231,73" class="request-fill" />
+    <line x1="420" y1="67" x2="454" y2="67" class="request-line" />
+    <polygon points="454,67 443,61 443,73" class="request-fill" />
+    <line x1="632" y1="67" x2="666" y2="67" class="request-line" />
+    <polygon points="666,67 655,61 655,73" class="request-fill" />
+    <line x1="844" y1="67" x2="878" y2="67" class="request-line" />
+    <polygon points="878,67 867,61 867,73" class="request-fill" />
+  </g>
+
+  <g>
+    <rect x="70" y="150" width="420" height="650" rx="14" class="stack" />
+    <text x="280" y="183" text-anchor="middle" class="section">Inner Axum request order</text>
+    <text x="280" y="207" text-anchor="middle" class="mini">normal MCP request after /contextforge-rs nesting</text>
+
+    <rect x="108" y="234" width="344" height="54" rx="9" class="box" />
+    <text x="280" y="256" text-anchor="middle" class="title">CORS layer</text>
+    <text x="280" y="277" text-anchor="middle" class="mini">may answer preflight before MCP handling</text>
+
+    <rect x="108" y="324" width="344" height="72" rx="9" class="box" />
+    <text x="280" y="348" text-anchor="middle" class="title">virtual_host_id_layer</text>
+    <text x="280" y="371" text-anchor="middle" class="body">extracts /servers/{virtual_host_id}/mcp</text>
+    <text x="280" y="390" text-anchor="middle" class="mini">inserts VirtualHostId</text>
+
+    <rect x="108" y="432" width="344" height="72" rx="9" class="box" />
+    <text x="280" y="456" text-anchor="middle" class="title">claims_layer</text>
+    <text x="280" y="479" text-anchor="middle" class="body">validates Authorization: Bearer token</text>
+    <text x="280" y="498" text-anchor="middle" class="mini">inserts ContextForgeClaims</text>
+
+    <rect x="108" y="540" width="344" height="90" rx="9" class="box" />
+    <text x="280" y="564" text-anchor="middle" class="title">session_id_layer</text>
+    <text x="280" y="587" text-anchor="middle" class="body">reads Mcp-session-id when present</text>
+    <text x="280" y="606" text-anchor="middle" class="mini">inserts SessionId for authorized calls</text>
+    <text x="280" y="623" text-anchor="middle" class="mini">DELETE cleanup happens on successful response</text>
+
+    <rect x="108" y="666" width="344" height="82" rx="9" class="box" />
+    <text x="280" y="690" text-anchor="middle" class="title">user_config_store_layer</text>
+    <text x="280" y="713" text-anchor="middle" class="body">loads UserConfig for claims.sub</text>
+    <text x="280" y="732" text-anchor="middle" class="mini">inserts UserConfig</text>
+
+    <line x1="280" y1="288" x2="280" y2="314" class="request-line" />
+    <polygon points="280,314 274,303 286,303" class="request-fill" />
+    <line x1="280" y1="396" x2="280" y2="422" class="request-line" />
+    <polygon points="280,422 274,411 286,411" class="request-fill" />
+    <line x1="280" y1="504" x2="280" y2="530" class="request-line" />
+    <polygon points="280,530 274,519 286,519" class="request-fill" />
+    <line x1="280" y1="630" x2="280" y2="656" class="request-line" />
+    <polygon points="280,656 274,645 286,645" class="request-fill" />
+
+    <rect x="458" y="340" width="62" height="26" rx="6" class="failure" />
+    <text x="489" y="358" text-anchor="middle" class="mini failure-text">400</text>
+    <rect x="458" y="448" width="62" height="26" rx="6" class="failure" />
+    <text x="489" y="466" text-anchor="middle" class="mini failure-text">401</text>
+    <rect x="458" y="736" width="62" height="26" rx="6" class="failure" />
+    <text x="489" y="754" text-anchor="middle" class="mini failure-text">400/500</text>
+  </g>
+
+  <g>
+    <path d="M 1018 96 L 1018 120 L 280 120 L 280 224" class="request-line" />
+    <polygon points="280,224 274,213 286,213" class="request-fill" />
+    <text x="650" y="113" text-anchor="middle" class="label request-text">request enters inner router</text>
+  </g>
+
+  <g>
+    <rect x="570" y="380" width="300" height="118" rx="12" class="rmcp" />
+    <text x="720" y="414" text-anchor="middle" class="title">RMCP service</text>
+    <text x="720" y="440" text-anchor="middle" class="body">StreamableHttpService</text>
+    <text x="720" y="461" text-anchor="middle" class="mini">creates or reuses McpService</text>
+    <text x="720" y="480" text-anchor="middle" class="mini">handler reads typed extensions</text>
+
+    <path d="M 452 707 L 548 707 L 548 439 L 560 439" class="request-line" />
+    <polygon points="560,439 549,433 549,445" class="request-fill" />
+  </g>
+
+  <g>
+    <rect x="930" y="132" width="400" height="344" rx="14" class="init" />
+    <text x="1130" y="181" text-anchor="middle" class="section">initialize path</text>
+
+    <rect x="966" y="198" width="328" height="58" rx="8" class="box" />
+    <text x="1130" y="219" text-anchor="middle" class="body">InitializeCallValidator</text>
+    <text x="1130" y="239" text-anchor="middle" class="mini">DownstreamSessionId</text>
+    <text x="1130" y="254" text-anchor="middle" class="mini">UserConfig + VirtualHostId + claims</text>
+
+    <rect x="966" y="270" width="328" height="38" rx="8" class="box" />
+    <text x="1130" y="294" text-anchor="middle" class="body">resolve selected VirtualHost</text>
+
+    <rect x="966" y="322" width="328" height="38" rx="8" class="box" />
+    <text x="1130" y="346" text-anchor="middle" class="body">read local user session mapping</text>
+
+    <rect x="966" y="374" width="328" height="58" rx="8" class="box" />
+    <text x="1130" y="395" text-anchor="middle" class="body">join_all over configured backends</text>
+    <text x="1130" y="415" text-anchor="middle" class="mini">StreamableHttpClientTransport</text>
+    <text x="1130" y="430" text-anchor="middle" class="mini">GatewayBackendClient::serve</text>
+
+    <rect x="966" y="446" width="328" height="22" rx="8" class="box" />
+    <text x="1130" y="462" text-anchor="middle" class="mini">set session mapping, then store BackendTransports</text>
+  </g>
+
+  <g>
+    <rect x="930" y="514" width="400" height="338" rx="14" class="auth" />
+    <text x="1130" y="545" text-anchor="middle" class="section">authorized MCP calls</text>
+
+    <rect x="966" y="568" width="328" height="58" rx="8" class="box" />
+    <text x="1130" y="589" text-anchor="middle" class="body">AuthorizedCallValidator</text>
+    <text x="1130" y="609" text-anchor="middle" class="mini">SessionId</text>
+    <text x="1130" y="624" text-anchor="middle" class="mini">UserConfig + VirtualHostId + claims</text>
+
+    <rect x="966" y="640" width="328" height="54" rx="8" class="box" />
+    <text x="1130" y="661" text-anchor="middle" class="body">list_tools / list_resources / list_prompts</text>
+    <text x="1130" y="681" text-anchor="middle" class="mini">borrow transports -> fan_out_list -> namespace + sort</text>
+
+    <rect x="966" y="708" width="328" height="58" rx="8" class="box" />
+    <text x="1130" y="729" text-anchor="middle" class="body">call_tool</text>
+    <text x="1130" y="749" text-anchor="middle" class="mini">split prefix -> resolve backend -> hooks</text>
+    <text x="1130" y="764" text-anchor="middle" class="mini">backend call -> response</text>
+
+    <rect x="966" y="780" width="328" height="48" rx="8" class="box" />
+    <text x="1130" y="801" text-anchor="middle" class="body">read_resource / get_prompt</text>
+    <text x="1130" y="821" text-anchor="middle" class="mini">split prefix -> resolve backend -> strip prefix -> call</text>
+
+    <text x="1130" y="844" text-anchor="middle" class="mini">ping, templates, subscribe, complete are local today</text>
+  </g>
+
+  <g>
+    <path d="M 870 420 C 900 420 900 303 920 303" class="request-line" />
+    <polygon points="920,303 909,297 909,309" class="request-fill" />
+    <text x="890" y="352" text-anchor="middle" class="label request-text">initialize</text>
+
+    <path d="M 870 458 C 900 458 900 683 920 683" class="request-line" />
+    <polygon points="920,683 909,677 909,689" class="request-fill" />
+    <text x="892" y="583" text-anchor="middle" class="label request-text">post-init calls</text>
+  </g>
+
+  <g>
+    <rect x="1360" y="430" width="116" height="184" rx="14" class="backend" />
+    <text x="1418" y="468" text-anchor="middle" class="title">Backend</text>
+    <text x="1418" y="492" text-anchor="middle" class="title">MCP</text>
+    <text x="1418" y="516" text-anchor="middle" class="title">servers</text>
+    <text x="1418" y="550" text-anchor="middle" class="mini">initialize</text>
+    <text x="1418" y="569" text-anchor="middle" class="mini">list/call/read/get</text>
+    <text x="1418" y="588" text-anchor="middle" class="mini">progress events</text>
+
+    <path d="M 1294 403 C 1340 403 1340 458 1350 458" class="request-line" />
+    <polygon points="1350,458 1339,452 1339,464" class="request-fill" />
+    <text x="1338" y="392" text-anchor="middle" class="label request-text">backend init</text>
+
+    <path d="M 1360 492 C 1338 492 1338 420 1294 420" class="response-line" />
+    <polygon points="1294,420 1305,426 1305,414" class="response-fill" />
+    <text x="1338" y="444" text-anchor="middle" class="label response-text">capabilities</text>
+
+    <path d="M 1294 738 C 1342 738 1342 566 1350 566" class="request-line" />
+    <polygon points="1350,566 1339,560 1339,572" class="request-fill" />
+    <text x="1338" y="694" text-anchor="middle" class="label request-text">routed call</text>
+
+    <path d="M 1360 590 C 1340 590 1340 808 1294 808" class="response-line" />
+    <polygon points="1294,808 1305,814 1305,802" class="response-fill" />
+    <text x="1340" y="744" text-anchor="middle" class="label response-text">result/progress</text>
+  </g>
+
+  <g>
+    <rect x="570" y="882" width="400" height="62" rx="12" class="response" />
+    <text x="770" y="908" text-anchor="middle" class="title">HTTP response unwinds stack</text>
+    <text x="770" y="930" text-anchor="middle" class="mini">successful DELETE removes local session and backend transports</text>
+
+    <path d="M 1130 476 L 1130 498 L 888 498 L 888 872 L 770 872" class="response-line" />
+    <polygon points="770,872 764,861 776,861" class="response-fill" />
+    <path d="M 1130 852 L 1130 914 L 980 914" class="response-line" />
+    <polygon points="980,914 991,920 991,908" class="response-fill" />
+
+    <path d="M 570 914 L 24 914 L 24 67 L 32 67" class="response-line" />
+    <polygon points="32,67 21,61 21,73" class="response-fill" />
+    <text x="155" y="902" text-anchor="middle" class="label response-text">response to client</text>
+  </g>
+</svg>
