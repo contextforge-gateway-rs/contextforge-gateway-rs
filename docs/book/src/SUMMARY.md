@@ -1,9 +1,9 @@
 # The ContextForge Gateway Book
 
 - [🌉 What is ContextForge Gateway?](what-is-contextforge-gateway.md)
-- [🚀 Usage](usage.md)
-  - [Running the Gateway](running-the-gateway.md)
-  - [Gateway Options](gateway-options.md)
+- [🚀 Getting Started](usage.md)
+  - [Run the Gateway Locally](running-the-gateway.md)
+  - [Configuration Reference](gateway-options.md)
 - [🏗️ Architecture](architecture.md)
   - [System Shape](system-shape.md)
   - [Request Flow](request-flow.md)
