@@ -1,0 +1,9 @@
+[book]
+authors = ["ContextForge Gateway maintainers"]
+language = "en"
+src = "src"
+title = "The ContextForge Gateway Book"
+
+[output.html]
+git-repository-url = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
+edit-url-template = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs/edit/main/docs/book/{path}"
