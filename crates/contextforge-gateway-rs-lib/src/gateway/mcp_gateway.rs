@@ -642,7 +642,7 @@ async fn resolve_backend(
 }
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
-    ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().build()
+    ServerCapabilities::builder().enable_completions().enable_prompts().enable_resources().enable_tools().build()
 }
 
 fn log_list_backend_response<T, E: std::fmt::Debug>(

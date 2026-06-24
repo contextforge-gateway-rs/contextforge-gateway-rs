@@ -74,6 +74,12 @@ async fn assert_prompt_completion(gateway_url: String, client: reqwest::Client) 
     info!("Sending request to {gateway_url}");
     let running_service = connect_client(gateway_url, client).await?;
 
+    // Spec-compliant clients only issue completion/complete when the server advertises the
+    // capability, so the gateway must declare it for the proxying below to be reachable.
+    if running_service.peer_info().and_then(|info| info.capabilities.completions.clone()).is_none() {
+        return Err("gateway must advertise the completions capability".into());
+    }
+
     let prompts = running_service.list_prompts(None).await?;
     let prompt_name = prompts
         .prompts
