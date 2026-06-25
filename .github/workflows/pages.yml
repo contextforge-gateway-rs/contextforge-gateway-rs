@@ -15,18 +15,18 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pages-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages-build-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v6.0.2
-      - uses: dtolnay/rust-toolchain@stable
       - name: Install mdBook
-        run: cargo install mdbook --version 0.5.3 --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.5.3
       - name: Build book
         run: mdbook build docs/book
       - name: Upload Pages artifact
@@ -45,6 +45,9 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
