@@ -20,7 +20,8 @@ The graph uses color only to separate paths:
 
 This page follows a normal streamable HTTP MCP request through the code. The
 shape below is based on the current `main.rs`, `runtime.rs`, `Gateway::run_gateway`,
-the request layers, and `McpService`.
+the request layers, and `McpService`. To watch the same flow with real requests,
+follow [Run the Gateway Locally](running-the-gateway.md) alongside this page.
 
 ## Startup Path
 

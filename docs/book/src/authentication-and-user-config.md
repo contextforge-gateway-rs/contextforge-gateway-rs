@@ -48,6 +48,35 @@ important to routing are:
 | `iss`, `aud`, `exp` | Authentication checks only. |
 | `teams`, `user`, `scopes` | Carried in claims for future policy use; not currently used by MCP routing. |
 
+A concrete decoded payload for the local `admin@example.com` subject looks like
+this (timestamps shown as example Unix seconds). Of everything here, MCP routing
+depends only on `sub` today:
+
+```json
+{
+  "iss": "mcpgateway",
+  "aud": "mcpgateway-api",
+  "sub": "admin@example.com",
+  "exp": 1717180800,
+  "iat": 1717177200,
+  "jti": "example-token",
+  "token_use": "api",
+  "teams": ["team_awesome"],
+  "user": {
+    "email": "admin@example.com",
+    "full_name": "API Token User",
+    "is_admin": true,
+    "auth_provider": "api_token"
+  },
+  "scopes": {
+    "server_id": "my_id",
+    "permissions": ["tools.read", "servers.use"],
+    "ip_restrictions": [],
+    "time_restrictions": null
+  }
+}
+```
+
 ## User Config Key
 
 `user_config_store_layer` turns the subject into a typed key:

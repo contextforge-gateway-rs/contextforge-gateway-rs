@@ -7,6 +7,10 @@ boundaries exist.
 > request handling, config lookup, backend sessions, transports, and
 > control-plane boundaries explicit.
 
+The pages are ordered for a first read: start at the top for the big picture,
+then work down into each boundary. If you are changing one area, jump straight
+to its page.
+
 | Page | What it covers |
 | --- | --- |
 | 🧭 [System Shape](system-shape.md) | The gateway's role in ContextForge, its crate layout, and the line between dataplane and control plane. |
