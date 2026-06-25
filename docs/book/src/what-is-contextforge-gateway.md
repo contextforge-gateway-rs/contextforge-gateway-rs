@@ -1,10 +1,19 @@
 # What is ContextForge Gateway?
 
-Welcome to the ContextForge Gateway book. `contextforge-gateway-rs` is the Rust
-dataplane for ContextForge. It accepts downstream MCP streamable HTTP traffic,
-authenticates the caller, loads the caller's runtime configuration, opens MCP
-client sessions to configured backend MCP servers, and presents those backends
-as one merged MCP server.
+Welcome to the ContextForge Gateway book.
+
+`contextforge-gateway-rs` is the Rust **dataplane** for ContextForge: a single
+MCP entry point that sits in front of many backend MCP servers and makes them
+look like one. If you have used an API gateway or reverse proxy for HTTP APIs,
+this is the same idea for the Model Context Protocol (MCP).
+
+Concretely, the gateway accepts MCP streamable HTTP traffic from a client,
+authenticates the caller, loads that caller's runtime configuration, opens MCP
+client sessions to the backend MCP servers that configuration allows, and
+presents those backends to the client as one merged MCP server.
+
+Throughout this book, *downstream* means the client side of the gateway and
+*upstream* means the backend side.
 
 ![Gateway overview](assets/gateway-overview.svg)
 
@@ -53,6 +62,21 @@ not durable cluster state; they are local process state today.
 | Configuration | JWT subject and virtual host id | `UserConfig` and selected `VirtualHost` | control plane data, gateway enforcement |
 | Upstream | selected backend names and URLs | running backend MCP client services | gateway |
 
+## Key terms
+
+These words appear on almost every page. It is worth pinning them down once.
+
+| Term | Meaning in this book |
+| --- | --- |
+| Dataplane | The process on the live request path (this repository). It handles MCP traffic. |
+| Control plane | The external ContextForge application that authors config, policy, and identity. It is not in this repository. |
+| Downstream | The client side of the gateway: the calling MCP client and its requests. |
+| Upstream | The backend side of the gateway: the configured backend MCP servers. |
+| Virtual host | A named routing group inside the caller's config. The URL path selects exactly one. |
+| Backend | One configured MCP server behind the gateway. Its name prefixes every tool, resource, and prompt it exposes. |
+| Principal | The authenticated caller identity, taken from the JWT `sub` claim. |
+| Session | An initialized MCP session, tracked by `Mcp-session-id`, that owns the per-caller backend client sessions. |
+
 ## Mental model
 
 The gateway is easiest to understand as one logical MCP server assembled from a
@@ -91,3 +115,9 @@ It also should not expose backend topology as more than the MCP routing
 contract requires. Backend names are visible in prefixed tool, resource, and
 prompt names, but clients should still experience one gateway endpoint and one
 logical MCP server.
+
+## Where to go next
+
+- To run the gateway yourself, start with [Getting Started](usage.md).
+- To understand how requests move through it, read [Architecture](architecture.md).
+- For the exact client-facing protocol behavior, see [MCP Behavior](mcp-behavior.md).

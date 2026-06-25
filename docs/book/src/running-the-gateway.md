@@ -19,6 +19,10 @@ sample backend MCP servers:
 > deployment, the external ContextForge control plane mints tokens and writes
 > config to Redis.
 
+Run the numbered steps in order, in the same terminal. Later steps reuse shell
+variables such as `${TOKEN}` and `${SESSION_ID}` that earlier steps set, so a
+fresh shell will not have them.
+
 ## Prerequisites
 
 - Rust toolchain matching the workspace `rust-version`.
