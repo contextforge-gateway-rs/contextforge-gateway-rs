@@ -50,6 +50,10 @@ SSE
 STDIO
 ```
 
+The Rust types above are easier to picture as JSON. For a complete, working
+`UserConfig` document, see the seed request body in
+[Run the Gateway Locally](running-the-gateway.md).
+
 ## What The MCP Dataplane Uses Today
 
 The struct is already wider than the current MCP routing code. That is useful,

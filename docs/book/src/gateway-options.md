@@ -1,11 +1,18 @@
 # Configuration Reference
 
-The binary uses `clap`, so every CLI flag listed here also has an environment
-variable. CLI values and env vars both feed the same `Config` struct.
+This page is the reference for every gateway setting. The binary parses its
+configuration with `clap`, so each option has both a CLI flag and an environment
+variable, and both feed the same `Config` struct. When a setting is supplied as
+a flag and an environment variable at the same time, the command-line flag wins.
+
+For the always-current list, ask the binary directly:
 
 ```bash
 cargo run -p contextforge-gateway-rs --bin contextforge-gateway-rs -- --help
 ```
+
+The sections below group the options by concern: listeners, JWT, Redis, upstream
+transport, runtime, telemetry, and logging.
 
 ## Minimum Useful Configuration
 
