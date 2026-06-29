@@ -775,7 +775,7 @@ dependencies = [
 [[package]]
 name = "cpex-payload-marker"
 version = "0.1.0"
-source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=423626f1079bdabf1fbd71f23413db4e91c1a3f2#423626f1079bdabf1fbd71f23413db4e91c1a3f2"
+source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=ab47801daccfbba44ea07b033034a347e7b5afdd#ab47801daccfbba44ea07b033034a347e7b5afdd"
 dependencies = [
  "cpex",
 ]
@@ -783,7 +783,7 @@ dependencies = [
 [[package]]
 name = "cpex-text-prefixer"
 version = "0.1.0"
-source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=423626f1079bdabf1fbd71f23413db4e91c1a3f2#423626f1079bdabf1fbd71f23413db4e91c1a3f2"
+source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=ab47801daccfbba44ea07b033034a347e7b5afdd#ab47801daccfbba44ea07b033034a347e7b5afdd"
 dependencies = [
  "cpex",
 ]
@@ -791,7 +791,7 @@ dependencies = [
 [[package]]
 name = "cpex-tool-namespace"
 version = "0.1.0"
-source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=423626f1079bdabf1fbd71f23413db4e91c1a3f2#423626f1079bdabf1fbd71f23413db4e91c1a3f2"
+source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=ab47801daccfbba44ea07b033034a347e7b5afdd#ab47801daccfbba44ea07b033034a347e7b5afdd"
 dependencies = [
  "cpex",
 ]
