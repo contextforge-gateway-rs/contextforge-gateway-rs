@@ -1,4 +1,4 @@
-use cpex_core::config::CpexConfig;
+use cpex::cpex_core::config::CpexConfig;
 use serde::{Deserialize, Serialize};
 
 pub const RUNTIME_PLUGIN_CONFIG_KEY: &str = "ContextForgeGatewayRuntimePluginConfig";

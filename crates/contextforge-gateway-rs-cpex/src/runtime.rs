@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use cpex_core::{
+use cpex::cpex_core::{
     cmf::{CmfHook, MessagePayload},
     config::CpexConfig,
     context::PluginContextTable,

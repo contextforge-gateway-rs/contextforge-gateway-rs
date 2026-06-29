@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use cpex_core::{
+use cpex::cpex_core::{
     cmf::CmfHook,
     error::PluginError,
     factory::{PluginFactory, PluginInstance},

@@ -7,7 +7,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use cpex_core::{
+use cpex::cpex_core::{
     config::CpexConfig,
     factory::{PluginFactory, PluginFactoryRegistry},
 };
@@ -309,7 +309,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use cpex_core::{
+    use cpex::cpex_core::{
         cmf::{CmfHook, ContentPart, MessagePayload, Role},
         context::PluginContext,
         error::{PluginError, PluginViolation},
@@ -477,7 +477,7 @@ mod tests {
     }
 
     impl HookHandler<CmfHook> for TestPlugin {
-        fn handle(
+        async fn handle(
             &self,
             payload: &MessagePayload,
             _extensions: &Extensions,

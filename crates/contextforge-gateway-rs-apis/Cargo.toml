@@ -9,7 +9,7 @@ keywords.workspace = true
 
 
 [dependencies]
-cpex-core.workspace = true
+cpex.workspace = true
 serde= {workspace = true, features=["derive"]}
 serde_json.workspace = true
 url = {workspace  = true, features = ["serde"] }

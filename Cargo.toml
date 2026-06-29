@@ -11,7 +11,7 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.91.1"
+rust-version = "1.96"
 license = "Apache-2.0"
 keywords = ["mcp", "gateway", "rust", "contextforge", "a2a", "ai", "llm"]
 homepage = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
@@ -64,7 +64,7 @@ itertools = "0.14"
 typed-builder = "0.23.2"
 rustls = { version = "0.23", features = ["ring"] }
 rustls-pki-types = "1.14.1"
-cpex-core = { git = "https://github.com/contextforge-org/contextforge-plugins-framework", rev = "5ae3f120eb9af227b4eac1804156cd463bcd4eee" }
+cpex = "0.2.0"
 
 [profile.release]
 codegen-units = 1

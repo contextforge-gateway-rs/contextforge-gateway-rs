@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use cpex_core::{
+use cpex::cpex_core::{
     cmf::{CmfHook, ContentPart, Message, MessagePayload, Role},
     context::PluginContext,
     error::{PluginError, PluginViolation},
@@ -154,7 +154,7 @@ impl Plugin for TestPlugin {
 }
 
 impl HookHandler<CmfHook> for TestPlugin {
-    fn handle(
+    async fn handle(
         &self,
         payload: &MessagePayload,
         _extensions: &Extensions,
@@ -327,14 +327,14 @@ impl PluginFactory for TestPluginFactory {
             handlers.push((
                 cmf_hook_names::TOOL_PRE_INVOKE,
                 Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
-                    as Arc<dyn cpex_core::registry::AnyHookHandler>,
+                    as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
             ));
         }
         if config.hooks.iter().any(|hook| hook == cmf_hook_names::TOOL_POST_INVOKE) {
             handlers.push((
                 cmf_hook_names::TOOL_POST_INVOKE,
                 Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
-                    as Arc<dyn cpex_core::registry::AnyHookHandler>,
+                    as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
             ));
         }
         Ok(PluginInstance { plugin: Arc::<TestPlugin>::clone(&plugin), handlers })

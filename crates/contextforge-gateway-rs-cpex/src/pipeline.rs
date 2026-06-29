@@ -1,5 +1,5 @@
-use cpex_core::cmf::MessagePayload;
-use cpex_core::executor::PipelineResult;
+use cpex::cpex_core::cmf::MessagePayload;
+use cpex::cpex_core::executor::PipelineResult;
 use rmcp::{
     ErrorData,
     model::{CallToolResult, ErrorCode},
