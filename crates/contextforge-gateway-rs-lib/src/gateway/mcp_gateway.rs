@@ -10,7 +10,7 @@ use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo, ErrorCode,
+        CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, ErrorCode,
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
         Prompt, ReadResourceRequestParams, ReadResourceResult, Reference, Resource, ResourceTemplate,
