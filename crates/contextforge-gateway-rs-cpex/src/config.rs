@@ -10,7 +10,7 @@ use crate::error::GatewayPluginRuntimeError;
 use contextforge_gateway_rs_apis::runtime_plugin_config::{
     RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION, RuntimePluginConfigDocument,
 };
-use cpex_core::config::CpexConfig;
+use cpex::cpex_core::config::CpexConfig;
 
 #[async_trait]
 pub(crate) trait RuntimePluginConfigStore: Send + Sync {
@@ -84,7 +84,7 @@ pub(crate) fn decode_config_document(config: &[u8]) -> Result<RuntimePluginConfi
 
 #[cfg(test)]
 mod tests {
-    use cpex_core::config::CpexConfig;
+    use cpex::cpex_core::config::CpexConfig;
 
     use contextforge_gateway_rs_apis::runtime_plugin_config::RuntimePluginConfigDocument;
 

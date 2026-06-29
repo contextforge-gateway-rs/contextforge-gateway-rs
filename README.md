@@ -75,15 +75,15 @@ This integration currently passes only tool payloads. CPEX configs that enable r
 
 ### Payload Marker Demo
 
-This demo uses [`cpex-payload-marker`](https://github.com/contextforge-gateway-rs/cpex-plugins-rs/tree/07af215bc9f00a6c3cd6d4838479518569607581/crates/cpex-payload-marker). The plugin must be included in the gateway build before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
+This demo uses the `test-plugins` feature, which includes the demo plugin crates from `cpex-plugins-rs`. The plugin must be included in the gateway build before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
 
 Build the gateway with the demo plugin factories:
 
 ```bash
-CARGO_NET_GIT_FETCH_WITH_CLI=true cargo check -p contextforge-gateway-rs --features test-plugins
+cargo check -p contextforge-gateway-rs --features test-plugins
 ```
 
-The `test-plugins` feature includes those demo plugin crates and registers their factories through the gateway's generic CMF factory adapter.
+The `test-plugins` feature registers those demo plugin factories through the gateway's generic CMF factory adapter.
 
 Start Redis and the sample MCP backends:
 
@@ -122,7 +122,7 @@ Run only one gateway process on port `8001` at a time. Stop the current gateway 
 Start the gateway with runtime plugins disabled for a baseline run:
 
 ```bash
-CARGO_NET_GIT_FETCH_WITH_CLI=true cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
+cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \
@@ -137,7 +137,7 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true cargo run --release --features test-plugins --
 Start the gateway with runtime plugins enabled for the marker run:
 
 ```bash
-CARGO_NET_GIT_FETCH_WITH_CLI=true cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
+cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \

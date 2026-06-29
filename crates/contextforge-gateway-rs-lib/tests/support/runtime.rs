@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
-use cpex_core::config::CpexConfig;
+use cpex::cpex_core::config::CpexConfig;
 use serde_json::json;
 
 use super::{TestPlugin, TestPluginFactory};

@@ -3,8 +3,8 @@ mod support;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
-use cpex_core::cmf::Role;
-use cpex_core::hooks::types::cmf_hook_names;
+use cpex::cpex_core::cmf::Role;
+use cpex::cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
     model::{

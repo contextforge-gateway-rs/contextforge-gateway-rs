@@ -1,4 +1,4 @@
-use cpex_core::cmf::{ContentPart, Message, MessagePayload, Role, ToolCall, ToolResult};
+use cpex::cpex_core::cmf::{ContentPart, Message, MessagePayload, Role, ToolCall, ToolResult};
 use rmcp::model::{CallToolRequestParams, CallToolResult, Content};
 use serde_json::{Map, Value};
 
