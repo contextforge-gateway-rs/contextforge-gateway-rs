@@ -9,6 +9,7 @@ use redis::{
     cmd,
 };
 use tokio::sync::Mutex;
+use tracing::{debug, warn};
 
 use super::{ConfigStoreError, UserConfigStore};
 use crate::{
@@ -30,7 +31,10 @@ impl RedisUserConfigStore {
                     ConnectionManagerConfig::default().set_number_of_retries(REDIS_RETRIES),
                 )
                 .await
-                .map_err(|_| ConfigStoreError::InvalidConnection)?,
+                .map_err(|error| {
+                    warn!("RedisUserConfigStore::new - failed to create Redis user config connection error = {error}");
+                    ConfigStoreError::InvalidConnection
+                })?,
             cache: Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(
                 LRU_CACHE_EXPIRY_DURATION,
                 LRU_CACHE_ENTRIES,
@@ -42,51 +46,103 @@ impl RedisUserConfigStore {
 #[async_trait]
 impl UserConfigStore for RedisUserConfigStore {
     async fn get_config<'a>(&self, user_key: &'a User) -> Result<UserConfig, ConfigStoreError> {
-        let has_key = { self.cache.lock().await.contains_key(user_key.key()) };
-        if has_key {
-            if let Some(user_config) = self.cache.lock().await.get_mut(user_key.key()) {
-                Ok(user_config.clone())
-            } else {
-                return Err(ConfigStoreError::NoDataForKey);
+        let subject = user_key.key();
+
+        {
+            let mut cache = self.cache.lock().await;
+            if let Some(user_config) = cache.get_mut(subject) {
+                let virtual_hosts = user_config.virtual_hosts.len();
+                debug!(
+                    "RedisUserConfigStore::get_config - user config cache hit subject = {subject} virtual_hosts = {virtual_hosts}"
+                );
+                return Ok(user_config.clone());
             }
-        } else {
-            let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
-                return Err(ConfigStoreError::DataEncoding);
-            };
-
-            let mut connection = self.connection.clone();
-            let maybe_user_config: Result<Option<Vec<u8>>, RedisError> =
-                cmd("GET").arg(key).take().query_async(&mut connection).await;
-
-            let Ok(Some(user_config)) = maybe_user_config else {
-                return Err(ConfigStoreError::NoDataForKey);
-            };
-
-            let Ok(user_config) = rmp_serde::decode::from_slice::<UserConfig>(&user_config) else {
-                return Err(ConfigStoreError::DataWrongFormat);
-            };
-
-            self.cache.lock().await.insert(user_key.key().to_owned(), user_config.clone());
-            Ok(user_config)
         }
+
+        debug!("RedisUserConfigStore::get_config - user config cache miss subject = {subject}");
+
+        let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
+            warn!("RedisUserConfigStore::get_config - failed to encode Redis user config key subject = {subject}");
+            return Err(ConfigStoreError::DataEncoding);
+        };
+
+        let mut connection = self.connection.clone();
+        let maybe_user_config: Result<Option<Vec<u8>>, RedisError> =
+            cmd("GET").arg(key).take().query_async(&mut connection).await;
+
+        let user_config = match maybe_user_config {
+            Ok(Some(user_config)) => {
+                let bytes = user_config.len();
+                debug!(
+                    "RedisUserConfigStore::get_config - loaded user config blob from Redis subject = {subject} bytes = {bytes}"
+                );
+                user_config
+            },
+            Ok(None) => {
+                debug!("RedisUserConfigStore::get_config - no user config found in Redis subject = {subject}");
+                return Err(ConfigStoreError::NoDataForKey);
+            },
+            Err(error) => {
+                warn!(
+                    "RedisUserConfigStore::get_config - failed to load user config from Redis subject = {subject} error = {error}"
+                );
+                return Err(ConfigStoreError::NoDataForKey);
+            },
+        };
+
+        let user_config = match rmp_serde::decode::from_slice::<UserConfig>(&user_config) {
+            Ok(user_config) => user_config,
+            Err(error) => {
+                warn!(
+                    "RedisUserConfigStore::get_config - failed to decode Redis user config blob subject = {subject} error = {error}"
+                );
+                return Err(ConfigStoreError::DataWrongFormat);
+            },
+        };
+
+        let virtual_hosts = user_config.virtual_hosts.len();
+        debug!(
+            "RedisUserConfigStore::get_config - decoded user config subject = {subject} virtual_hosts = {virtual_hosts}"
+        );
+
+        self.cache.lock().await.insert(subject.to_owned(), user_config.clone());
+        Ok(user_config)
     }
 
     async fn set_config<'a>(&self, user_key: &'a User, config: &'a UserConfig) -> Result<(), ConfigStoreError> {
+        let subject = user_key.key();
+
         let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
+            warn!("RedisUserConfigStore::set_config - failed to encode Redis user config key subject = {subject}");
             return Err(ConfigStoreError::DataEncoding);
         };
 
         let Ok(encoded) = rmp_serde::encode::to_vec::<UserConfig>(config) else {
+            let virtual_hosts = config.virtual_hosts.len();
+            warn!(
+                "RedisUserConfigStore::set_config - failed to encode user config subject = {subject} virtual_hosts = {virtual_hosts}"
+            );
             return Err(ConfigStoreError::DataEncoding);
         };
 
         let mut connection = self.connection.clone();
 
-        if connection.set::<&[u8], &[u8], String>(&key, &encoded).await.is_ok() {
-            self.cache.lock().await.insert(user_key.key().to_owned(), config.clone());
-            Ok(())
-        } else {
-            return Err(ConfigStoreError::CantWriteData);
+        match connection.set::<&[u8], &[u8], String>(&key, &encoded).await {
+            Ok(_) => {
+                let bytes = encoded.len();
+                let virtual_hosts = config.virtual_hosts.len();
+                debug!(
+                    "RedisUserConfigStore::set_config - wrote user config to Redis subject = {subject} bytes = {bytes} virtual_hosts = {virtual_hosts}"
+                );
+                self.cache.lock().await.insert(subject.to_owned(), config.clone());
+                Ok(())
+            },
+            Err(error) => {
+                warn!(
+                    "RedisUserConfigStore::set_config - failed to write user config to Redis subject = {subject} error = {error}"
+                );
+                Err(ConfigStoreError::CantWriteData)
+            },
         }
     }
 }

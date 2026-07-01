@@ -14,13 +14,14 @@ impl VirtualHostId {
 }
 
 pub async fn virtual_host_id_layer(mut request: http::Request<axum::body::Body>, next: Next) -> Response {
-    let uri = request.uri();
+    let path = request.uri().path().to_owned();
 
-    debug!("Extracting virtual host from path {:?}", uri.path());
-    if let Some(virtual_host_id) = extract_virtual_host_id(uri.path()) {
+    debug!("virtual_host_id_layer - extracting virtual host from path path = {path}");
+    if let Some(virtual_host_id) = extract_virtual_host_id(&path) {
         request.extensions_mut().insert(virtual_host_id);
         next.run(request).await
     } else {
+        debug!("virtual_host_id_layer - failed to extract virtual host id from request path path = {path}");
         Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "text/plain")

@@ -14,31 +14,48 @@ pub async fn user_config_store_layer(
     mut request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
     let maybe_claims = request.extensions().get::<ContextForgeClaims>();
     if let Some(claims) = maybe_claims {
         let subject = claims.sub.clone();
-        debug!("Getting user config for {subject:?}");
+        debug!(
+            "user_config_store_layer - getting user config for request subject = {subject} method = {method} path = {path}"
+        );
         match state.config_store.get_config(&User::new(&subject)).await {
             Ok(user_config) => {
-                info!(subject, virtual_hosts = user_config.virtual_hosts.len(), "loaded user config");
+                let virtual_hosts = user_config.virtual_hosts.len();
+                info!(
+                    "user_config_store_layer - loaded user config subject = {subject} virtual_hosts = {virtual_hosts}"
+                );
                 request.extensions_mut().insert(user_config);
                 next.run(request).await
             },
 
-            Err(ConfigStoreError::NoDataForKey) => Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .header(header::CONTENT_TYPE, "text/plain")
-                .body(Body::from("Problem occurred retrieving the configuration"))
-                .expect("Expecting this to work"),
+            Err(ConfigStoreError::NoDataForKey) => {
+                debug!(
+                    "user_config_store_layer - user config lookup returned no data subject = {subject} method = {method} path = {path}"
+                );
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from("Problem occurred retrieving the configuration"))
+                    .expect("Expecting this to work")
+            },
 
-            Err(_) => Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .header(header::CONTENT_TYPE, "text/plain")
-                .body(Body::from("Problem occurred retrieving the configuration"))
-                .expect("Expecting this to work"),
+            Err(error) => {
+                debug!(
+                    "user_config_store_layer - user config lookup failed subject = {subject} method = {method} path = {path} error = {error}"
+                );
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from("Problem occurred retrieving the configuration"))
+                    .expect("Expecting this to work")
+            },
         }
     } else {
-        warn!("No claims");
+        warn!("user_config_store_layer - no claims found in request extensions method = {method} path = {path}");
         Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "text/plain")
