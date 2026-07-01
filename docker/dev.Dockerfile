@@ -1,5 +1,5 @@
 
-FROM rust:1.91.1 AS builder
+FROM rust:1.96.1 AS builder
 WORKDIR /tmp/
 
 RUN <<EOF
