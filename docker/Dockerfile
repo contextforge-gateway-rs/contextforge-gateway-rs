@@ -9,14 +9,12 @@ git clone https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 EOF
 WORKDIR /tmp/contextforge-gateway-rs
 COPY .cargo/config.toml ./.cargo/config.toml
-RUN \
-    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
     cargo fetch --locked
-RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry  \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
-    cargo build  --release
+RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \    
+    cargo build --release
 
 FROM debian:trixie-slim
 RUN <<EOF
