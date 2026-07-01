@@ -3,7 +3,7 @@
   "title": "UserConfig",
   "type": "object",
   "properties": {
-    "virtualHosts": {
+    "virtual_hosts": {
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/VirtualHost"
@@ -11,7 +11,7 @@
     }
   },
   "required": [
-    "virtualHosts"
+    "virtual_hosts"
   ],
   "$defs": {
     "VirtualHost": {
@@ -31,13 +31,57 @@
     "BackendMCPGateway": {
       "type": "object",
       "properties": {
+        "name": {
+          "type": "string"
+        },
         "url": {
           "type": "string",
           "format": "uri"
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport"
+        },
+        "passthrough_headers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_tool_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_resource_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_prompt_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
-        "url"
+        "name",
+        "url",
+        "transport",
+        "passthrough_headers",
+        "allowed_tool_names",
+        "allowed_resource_names",
+        "allowed_prompt_names"
+      ]
+    },
+    "Transport": {
+      "type": "string",
+      "enum": [
+        "STREAMABLEHTTP",
+        "SSE",
+        "STDIO"
       ]
     }
   }
