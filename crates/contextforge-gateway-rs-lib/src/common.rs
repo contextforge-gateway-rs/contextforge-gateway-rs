@@ -35,7 +35,8 @@ pub struct ContextForgeGatewayAppState {
 #[derive(Clone, Debug, Serialize, Deserialize, TypedBuilder)]
 pub struct User {
     email: String,
-    full_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    full_name: Option<String>,
     is_admin: bool,
     auth_provider: String,
 }
@@ -52,7 +53,8 @@ pub struct Scopes {
 pub struct ContextForgeClaims {
     pub sub: String,
     pub jti: String,
-    pub token_use: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_use: Option<String>,
     pub iat: Option<u64>,
     pub iss: String,
     pub aud: String,

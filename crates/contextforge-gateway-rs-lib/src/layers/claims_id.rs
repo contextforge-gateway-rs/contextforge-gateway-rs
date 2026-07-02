@@ -111,12 +111,12 @@ mod test {
             exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
             iat: Some(now),
             jti: Uuid::new_v4().to_string(),
-            token_use: "api".to_owned(),
+            token_use: Some("api".to_owned()),
             teams: Some(vec!["team_awesome".to_owned()]),
             user: common::User::builder()
                 .email(user_id)
                 .auth_provider("api_token".to_owned())
-                .full_name("API Token User".to_owned())
+                .full_name(Some("API Token User".to_owned()))
                 .is_admin(true)
                 .build(),
             scopes: Some(
@@ -195,6 +195,48 @@ mod test {
 
         let mut claims = active_test_claims();
         claims.scopes = None;
+        let token = get_hmac_token_for_claims(&claims);
+
+        let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
+
+        let state = ContextForgeGatewayAppState {
+            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
+            config_store: Arc::new(MockedUserConfigStore {}),
+            config: Config::default(),
+        };
+        let http_requst = Request::builder()
+            .header("Authorization", format!("Bearer {token}"))
+            .method("GET")
+            .body(Body::empty())
+            .expect("This should work");
+
+        let app =
+            Router::new().route("/", get(handle)).layer(middleware::from_fn_with_state(state.clone(), claims_layer));
+
+        let res = app.oneshot(http_requst).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[allow(clippy::items_after_statements)]
+    async fn claim_test_missing_token_use_and_full_name_is_allowed() {
+        CRYPTO.call_once(|| {
+            _ = rustls::crypto::ring::default_provider().install_default();
+        });
+
+        async fn handle(_: HeaderMap) -> Response {
+            Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
+        }
+
+        let user_id = "admin@example.com".to_owned();
+        let mut claims = active_test_claims();
+        claims.token_use = None;
+        claims.user = common::User::builder()
+            .email(user_id)
+            .auth_provider("local".to_owned())
+            .full_name(None)
+            .is_admin(true)
+            .build();
         let token = get_hmac_token_for_claims(&claims);
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
