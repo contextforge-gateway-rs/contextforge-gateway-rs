@@ -30,12 +30,12 @@ impl ContextForgeClaims {
             exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
             iat: Some(now),
             jti: Uuid::new_v4().to_string(),
-            token_use: "api".to_owned(),
+            token_use: Some("api".to_owned()),
             teams: Some(vec!["team_awesome".to_owned()]),
             user: User::builder()
                 .email(user_id.to_owned())
                 .auth_provider("api_token".to_owned())
-                .full_name("API Token User".to_owned())
+                .full_name(Some("API Token User".to_owned()))
                 .is_admin(true)
                 .build(),
             scopes: Some(
