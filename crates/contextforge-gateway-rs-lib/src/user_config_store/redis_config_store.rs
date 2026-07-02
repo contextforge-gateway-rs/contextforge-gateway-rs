@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
@@ -17,11 +20,29 @@ use crate::{
     const_values::{LRU_CACHE_ENTRIES, REDIS_RETRIES},
 };
 
+/// Cached config stamped with its insertion time.
+#[derive(Clone)]
+struct CachedUserConfig {
+    inserted_at: Instant,
+    config: UserConfig,
+}
+
+impl CachedUserConfig {
+    fn new(config: UserConfig) -> Self {
+        Self { inserted_at: Instant::now(), config }
+    }
+
+    fn is_fresh(&self, expiry: Duration) -> bool {
+        self.inserted_at.elapsed() < expiry
+    }
+}
+
 #[derive(Clone)]
 pub struct RedisUserConfigStore {
     connection: ConnectionManager,
     /// `None` when caching is disabled (zero expiry): every request reads Redis.
-    cache: Option<Arc<Mutex<LruCache<String, UserConfig>>>>,
+    cache: Option<Arc<Mutex<LruCache<String, CachedUserConfig>>>>,
+    cache_expiry: Duration,
 }
 
 impl RedisUserConfigStore {
@@ -39,6 +60,7 @@ impl RedisUserConfigStore {
             cache: (!cache_expiry.is_zero()).then(|| {
                 Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(cache_expiry, LRU_CACHE_ENTRIES)))
             }),
+            cache_expiry,
         })
     }
 }
@@ -49,15 +71,19 @@ impl UserConfigStore for RedisUserConfigStore {
         let subject = user_key.key();
 
         if let Some(cache) = &self.cache {
-            if let Some(user_config) = cache.lock().await.get_mut(subject) {
-                let virtual_hosts = user_config.virtual_hosts.len();
-                debug!(
-                    "RedisUserConfigStore::get_config - user config cache hit subject = {subject} virtual_hosts = {virtual_hosts}"
-                );
-                return Ok(user_config.clone());
-            }
+            if let Some(entry) = cache.lock().await.get_mut(subject) {
+                if entry.is_fresh(self.cache_expiry) {
+                    let virtual_hosts = entry.config.virtual_hosts.len();
+                    debug!(
+                        "RedisUserConfigStore::get_config - user config cache hit subject = {subject} virtual_hosts = {virtual_hosts}"
+                    );
+                    return Ok(entry.config.clone());
+                }
 
-            debug!("RedisUserConfigStore::get_config - user config cache miss subject = {subject}");
+                debug!("RedisUserConfigStore::get_config - user config cache entry expired subject = {subject}");
+            } else {
+                debug!("RedisUserConfigStore::get_config - user config cache miss subject = {subject}");
+            }
         }
 
         let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
@@ -105,7 +131,7 @@ impl UserConfigStore for RedisUserConfigStore {
         );
 
         if let Some(cache) = &self.cache {
-            cache.lock().await.insert(subject.to_owned(), user_config.clone());
+            cache.lock().await.insert(subject.to_owned(), CachedUserConfig::new(user_config.clone()));
         }
         Ok(user_config)
     }
@@ -136,7 +162,7 @@ impl UserConfigStore for RedisUserConfigStore {
                     "RedisUserConfigStore::set_config - wrote user config to Redis subject = {subject} bytes = {bytes} virtual_hosts = {virtual_hosts}"
                 );
                 if let Some(cache) = &self.cache {
-                    cache.lock().await.insert(subject.to_owned(), config.clone());
+                    cache.lock().await.insert(subject.to_owned(), CachedUserConfig::new(config.clone()));
                 }
                 Ok(())
             },
@@ -146,6 +172,53 @@ impl UserConfigStore for RedisUserConfigStore {
                 );
                 Err(ConfigStoreError::CantWriteData)
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn empty_config() -> UserConfig {
+        UserConfig { virtual_hosts: HashMap::new() }
+    }
+
+    fn instant_ago(duration: Duration) -> Instant {
+        Instant::now().checked_sub(duration).unwrap_or_else(Instant::now)
+    }
+
+    #[test]
+    fn cache_entry_is_fresh_within_expiry() {
+        let entry = CachedUserConfig::new(empty_config());
+
+        assert!(entry.is_fresh(Duration::from_mins(1)));
+    }
+
+    #[test]
+    fn cache_entry_expires_by_insert_time() {
+        let expiry = Duration::from_mins(1);
+        let entry =
+            CachedUserConfig { inserted_at: instant_ago(expiry + Duration::from_secs(1)), config: empty_config() };
+
+        assert!(!entry.is_fresh(expiry));
+    }
+
+    #[test]
+    fn cache_access_does_not_renew_freshness() {
+        let expiry = Duration::from_mins(1);
+        let mut cache: LruCache<String, CachedUserConfig> =
+            LruCache::with_expiry_duration_and_capacity(expiry, LRU_CACHE_ENTRIES);
+        cache.insert(
+            "subject".to_owned(),
+            CachedUserConfig { inserted_at: instant_ago(expiry + Duration::from_secs(1)), config: empty_config() },
+        );
+
+        for _ in 0..3 {
+            let entry = cache.get_mut("subject").expect("entry should still be present in LruCache");
+            assert!(!entry.is_fresh(expiry));
         }
     }
 }
