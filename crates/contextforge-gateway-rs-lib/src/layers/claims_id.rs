@@ -119,12 +119,14 @@ mod test {
                 .full_name("API Token User".to_owned())
                 .is_admin(true)
                 .build(),
-            scopes: Scopes::builder()
-                .server_id(Some("my_id".to_owned()))
-                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
-                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
-                .time_restrictions(None)
-                .build(),
+            scopes: Some(
+                Scopes::builder()
+                    .server_id(Some("my_id".to_owned()))
+                    .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
+                    .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
+                    .time_restrictions(None)
+                    .build(),
+            ),
         }
     }
 
@@ -159,6 +161,41 @@ mod test {
         }
 
         let token = get_hmac_token_for_claims(&active_test_claims());
+
+        let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
+
+        let state = ContextForgeGatewayAppState {
+            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
+            config_store: Arc::new(MockedUserConfigStore {}),
+            config: Config::default(),
+        };
+        let http_requst = Request::builder()
+            .header("Authorization", format!("Bearer {token}"))
+            .method("GET")
+            .body(Body::empty())
+            .expect("This should work");
+
+        let app =
+            Router::new().route("/", get(handle)).layer(middleware::from_fn_with_state(state.clone(), claims_layer));
+
+        let res = app.oneshot(http_requst).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[allow(clippy::items_after_statements)]
+    async fn claim_test_missing_scopes_is_allowed() {
+        CRYPTO.call_once(|| {
+            _ = rustls::crypto::ring::default_provider().install_default();
+        });
+
+        async fn handle(_: HeaderMap) -> Response {
+            Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
+        }
+
+        let mut claims = active_test_claims();
+        claims.scopes = None;
+        let token = get_hmac_token_for_claims(&claims);
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
