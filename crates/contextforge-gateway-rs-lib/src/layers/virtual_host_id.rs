@@ -8,6 +8,10 @@ pub struct VirtualHostId {
 }
 
 impl VirtualHostId {
+    pub(crate) fn new(value: String) -> Self {
+        Self { value }
+    }
+
     pub fn value(&self) -> &String {
         &self.value
     }
@@ -36,7 +40,7 @@ fn extract_virtual_host_id(path: &str) -> Option<VirtualHostId> {
             let l1 = "/servers/".len();
             let l2 = path.len() - "/mcp".len();
             let vh = &path[l1..l2];
-            VirtualHostId { value: vh.to_owned() }
+            VirtualHostId::new(vh.to_owned())
         })
     } else {
         None

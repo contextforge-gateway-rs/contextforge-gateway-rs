@@ -41,6 +41,7 @@ use crate::{
         claims_id::claims_layer,
         session_id::{SessionIdState, session_id_layer},
         user_config_store::user_config_store_layer,
+        virtual_host_config::virtual_host_config_layer,
         virtual_host_id::virtual_host_id_layer,
     },
 };
@@ -128,6 +129,7 @@ impl Gateway {
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
+            .layer(middleware::from_fn(virtual_host_config_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
             .layer(middleware::from_fn_with_state(session_id_state, session_id_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
