@@ -59,7 +59,8 @@ pub struct ContextForgeClaims {
     pub exp: u64,
     pub teams: Option<Vec<String>>,
     pub user: User,
-    pub scopes: Scopes,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Scopes>,
 }
 
 pub type RedisClient = redis::Client;

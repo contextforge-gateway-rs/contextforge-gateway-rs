@@ -38,12 +38,14 @@ impl ContextForgeClaims {
                 .full_name("API Token User".to_owned())
                 .is_admin(true)
                 .build(),
-            scopes: Scopes::builder()
-                .server_id(Some("my_id".to_owned()))
-                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
-                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
-                .time_restrictions(None)
-                .build(),
+            scopes: Some(
+                Scopes::builder()
+                    .server_id(Some("my_id".to_owned()))
+                    .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
+                    .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
+                    .time_restrictions(None)
+                    .build(),
+            ),
         }
     }
 }
