@@ -225,6 +225,13 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_TRUST_BUNDLE")]
     pub upstream_trust_bundle: Option<PathBuf>,
 
+    /// Expiry in seconds for the in-process user config cache in front of
+    /// Redis. The control-plane dataplane publisher rewrites UserConfig keys
+    /// every 60s, so this bounds how stale a subject's config can get.
+    /// 0 disables caching and reads Redis on every request.
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_USER_CONFIG_CACHE_EXPIRY_SECONDS", default_value_t = 60)]
+    pub user_config_cache_expiry_seconds: u64,
+
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME")]
     pub redis_address: String,
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_PORT")]

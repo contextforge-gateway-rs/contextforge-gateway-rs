@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
@@ -14,17 +14,18 @@ use tracing::{debug, warn};
 use super::{ConfigStoreError, UserConfigStore};
 use crate::{
     common::RedisClient,
-    const_values::{LRU_CACHE_ENTRIES, LRU_CACHE_EXPIRY_DURATION, REDIS_RETRIES},
+    const_values::{LRU_CACHE_ENTRIES, REDIS_RETRIES},
 };
 
 #[derive(Clone)]
 pub struct RedisUserConfigStore {
     connection: ConnectionManager,
-    cache: Arc<Mutex<LruCache<String, UserConfig>>>,
+    /// `None` when caching is disabled (zero expiry): every request reads Redis.
+    cache: Option<Arc<Mutex<LruCache<String, UserConfig>>>>,
 }
 
 impl RedisUserConfigStore {
-    pub async fn new(redis_client: &RedisClient) -> crate::Result<Self> {
+    pub async fn new(redis_client: &RedisClient, cache_expiry: Duration) -> crate::Result<Self> {
         Ok(Self {
             connection: redis_client
                 .get_connection_manager_with_config(
@@ -35,10 +36,9 @@ impl RedisUserConfigStore {
                     warn!("RedisUserConfigStore::new - failed to create Redis user config connection error = {error}");
                     ConfigStoreError::InvalidConnection
                 })?,
-            cache: Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(
-                LRU_CACHE_EXPIRY_DURATION,
-                LRU_CACHE_ENTRIES,
-            ))),
+            cache: (!cache_expiry.is_zero()).then(|| {
+                Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(cache_expiry, LRU_CACHE_ENTRIES)))
+            }),
         })
     }
 }
@@ -48,18 +48,17 @@ impl UserConfigStore for RedisUserConfigStore {
     async fn get_config<'a>(&self, user_key: &'a User) -> Result<UserConfig, ConfigStoreError> {
         let subject = user_key.key();
 
-        {
-            let mut cache = self.cache.lock().await;
-            if let Some(user_config) = cache.get_mut(subject) {
+        if let Some(cache) = &self.cache {
+            if let Some(user_config) = cache.lock().await.get_mut(subject) {
                 let virtual_hosts = user_config.virtual_hosts.len();
                 debug!(
                     "RedisUserConfigStore::get_config - user config cache hit subject = {subject} virtual_hosts = {virtual_hosts}"
                 );
                 return Ok(user_config.clone());
             }
-        }
 
-        debug!("RedisUserConfigStore::get_config - user config cache miss subject = {subject}");
+            debug!("RedisUserConfigStore::get_config - user config cache miss subject = {subject}");
+        }
 
         let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
             warn!("RedisUserConfigStore::get_config - failed to encode Redis user config key subject = {subject}");
@@ -105,7 +104,9 @@ impl UserConfigStore for RedisUserConfigStore {
             "RedisUserConfigStore::get_config - decoded user config subject = {subject} virtual_hosts = {virtual_hosts}"
         );
 
-        self.cache.lock().await.insert(subject.to_owned(), user_config.clone());
+        if let Some(cache) = &self.cache {
+            cache.lock().await.insert(subject.to_owned(), user_config.clone());
+        }
         Ok(user_config)
     }
 
@@ -134,7 +135,9 @@ impl UserConfigStore for RedisUserConfigStore {
                 debug!(
                     "RedisUserConfigStore::set_config - wrote user config to Redis subject = {subject} bytes = {bytes} virtual_hosts = {virtual_hosts}"
                 );
-                self.cache.lock().await.insert(subject.to_owned(), config.clone());
+                if let Some(cache) = &self.cache {
+                    cache.lock().await.insert(subject.to_owned(), config.clone());
+                }
                 Ok(())
             },
             Err(error) => {

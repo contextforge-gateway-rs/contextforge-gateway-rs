@@ -161,5 +161,6 @@ impl Gateway {
 
 pub async fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
     let redis_config = RedisConfig::try_from(config)?;
-    RedisUserConfigStore::new(&RedisClient::try_from(redis_config)?).await
+    let cache_expiry = std::time::Duration::from_secs(config.user_config_cache_expiry_seconds);
+    RedisUserConfigStore::new(&RedisClient::try_from(redis_config)?, cache_expiry).await
 }
