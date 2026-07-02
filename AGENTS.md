@@ -145,6 +145,14 @@ Expected config growth:
 
 Keep persistent config access behind `UserConfigStore`. Do not push Redis details into routing code.
 
+## Logging
+
+- Use consistent formatted tracing messages for related events so logs are easy to grep across request paths.
+- Prefer captured variables inside the message, for example `level!("method_name - event text field = {field} other_field = {other_field}")`, over structured field syntax for dataplane logs.
+- Keep the method/event prefix stable and reuse the same field names/order for related events.
+- Keep warning logs for unexpected conditions that likely need operator attention. Expected user/config misses should be debug or info unless they indicate a platform problem.
+- Do not log tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig`, or backend credentials.
+
 ## Backend Sessions
 
 Initialization fans out:
