@@ -1,18 +1,64 @@
 # MCP Method Reference
 
-> Status: draft. To be implemented.
+> 📋 **Reference lens:** this page lists what each MCP method does at the
+> gateway today, from the client's point of view. For how prefixed names are
+> split and merged, see [MCP Routing Semantics](mcp-routing-semantics.md).
 
-This chapter will be the gateway's MCP behavior reference. It should be short,
-table-driven, and precise.
+Gateway methods fall into three groups: `initialize` creates backend sessions,
+routed methods use them, and a few methods are still local to the gateway
+process.
 
-## To implement
+## Initialize
 
-- `initialize`: required context, backend fanout, stored session state, merged capabilities
-- `ping`: current pass-through behavior
-- `list_tools`: fanout and prefixed merge behavior
-- `call_tool`: prefix split, plugin pre hook, upstream call, plugin post hook
-- `list_resources` and `read_resource`: fanout and exact-backend routing
-- `list_prompts` and `get_prompt`: fanout and exact-backend routing
-- `list_resource_templates`, `subscribe`, `unsubscribe`, and `complete`: current support level
-- `DELETE`: downstream session cleanup behavior
-- current pagination and streaming gaps
+| Aspect | Behavior |
+| --- | --- |
+| Required context | RMCP `DownstreamSessionId`, `UserConfig`, `VirtualHostId`, and `ContextForgeClaims`. The `Mcp-session-id` header is not required yet. |
+| Fanout | One `StreamableHttpClientTransport` per configured backend in the selected virtual host, opened concurrently with `futures::future::join_all`. |
+| Backend failure | Not fatal. A backend that fails to initialize is stored with no running service; list calls skip it and routed calls to it fail. |
+| Stored state | The local user session mapping, plus one `BackendTransports` entry per backend keyed by principal, backend name, and downstream session id. |
+| Result | `InitializeResult` with the merged capabilities of the reachable backends. |
+
+## Routed List Methods
+
+`list_tools`, `list_resources`, `list_prompts`, and `list_resource_templates`
+share one fanout path:
+
+| Aspect | Behavior |
+| --- | --- |
+| Fanout | Concurrent call to every connected backend in the session. |
+| Namespacing | Every returned name is prefixed with its backend name. Resource templates get both the template name and the URI template prefixed. |
+| Ordering | Merged output is sorted by name. |
+| Failures | Failed or unavailable backends are logged and omitted from the merged result. |
+| Pagination | One backend call per request and no downstream cursor; see [Known Gaps](mcp-routing-semantics.md#known-gaps). |
+
+## Routed Targeted Methods
+
+`call_tool`, `read_resource`, and `get_prompt` share the prefix splitter and
+resolve exactly one backend:
+
+| Method | Behavior |
+| --- | --- |
+| `call_tool` | Splits `{backend_name}-{tool_name}`, optionally runs the plugin pre hook, forwards the stripped tool name, tracks the downstream progress token, and optionally runs the plugin post hook on the result. Backend progress notifications for the tracked token are forwarded downstream, and a downstream cancellation is propagated to the backend call. |
+| `read_resource` | Splits the prefixed resource name, strips the gateway prefix, and returns the single backend's result. |
+| `get_prompt` | Splits the prefixed prompt name, strips the gateway prefix, and returns the single backend's result. |
+
+Routed failures are JSON-RPC errors: a malformed prefixed name or an
+unavailable backend returns an internal error, and duplicate backend matches
+invalidate the session; see [Failure Modes](failure-modes.md).
+
+## Local Methods
+
+These methods pass through the same HTTP middleware but do not touch backends:
+
+| Method | Current behavior |
+| --- | --- |
+| `ping` | Returns success. |
+| `subscribe`, `unsubscribe` | Mutate a local subscription set only. |
+| `complete` | Returns local example completions. |
+
+## Session Delete
+
+A downstream `DELETE` with `Mcp-session-id` is handled by RMCP first. On a
+successful response, `session_id_layer` removes the local user session mapping
+and the `BackendTransports` entries for that principal and session id. See
+[Session Ownership](session-ownership.md) for the cleanup rules.

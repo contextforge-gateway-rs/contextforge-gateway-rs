@@ -62,6 +62,7 @@ TCP/TLS listener
   -> claims_layer
   -> session_id_layer
   -> user_config_store_layer
+  -> virtual_host_config_layer
   -> /servers/{virtual_host_name}/mcp RMCP service
 ```
 
@@ -87,7 +88,8 @@ as `VirtualHostId`.
 | Listener | The request reached the Rust dataplane over TCP or TLS. | Metrics, tracing, and nested routing can observe it. |
 | Path extraction | The inner path matched `/servers/{virtual_host_id}/mcp`. | MCP handlers can resolve a `VirtualHost`. |
 | Claims validation | The bearer token was accepted and `ContextForgeClaims` exists. | Config lookup can use `claims.sub`. |
-| User config lookup | A `UserConfig` exists for the authenticated subject. | MCP validators can select the requested virtual host. |
+| User config lookup | A `UserConfig` exists for the authenticated subject. | The virtual host check can run against that config. |
+| Virtual host check | The path's virtual host id exists in the caller's config. | MCP validators can resolve the selected `VirtualHost`. |
 | RMCP dispatch | The streamable HTTP request is mapped to an MCP method. | The handler chooses initialize, routed backend calls, or local behavior. |
 
 ## Middleware Context
@@ -100,6 +102,7 @@ The request layers insert the context used later by RMCP handlers:
 | `claims_layer` | Validates `Authorization: Bearer ...` with configured RS/HMAC decoder, issuer, audience, and expiration. Inserts `ContextForgeClaims`. | Returns `401` for missing or invalid bearer auth. |
 | `session_id_layer` | Reads `Mcp-session-id` and inserts `SessionId` when present. | Missing session id is allowed here; authorized MCP handlers reject it later when required. |
 | `user_config_store_layer` | Uses `claims.sub` as `User::new(subject)`, loads `UserConfig`, and inserts it. | Returns `400` for missing config, `500` for other store failures, and `400` if claims are absent. |
+| `virtual_host_config_layer` | Checks that the path's virtual host id exists in the loaded `UserConfig`. | Returns `404` with body `{"detail":"Server not found"}` when the virtual host is not in the caller's config. |
 
 For `DELETE`, `session_id_layer` also has response-side behavior. It lets RMCP
 handle the request first. If the RMCP response succeeds and a session id exists,
@@ -150,7 +153,7 @@ Current routed method families:
 
 | Method family | Flow |
 | --- | --- |
-| `list_tools`, `list_resources`, `list_prompts` | Borrow all configured backend services, call every available backend concurrently with `fan_out_list`, namespace results with the backend name, sort merged output, and return one list. |
+| `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Borrow all configured backend services, call every available backend concurrently with `fan_out_list`, namespace results with the backend name, sort merged output, and return one list. |
 | `call_tool` | Split `{backend_name}-{tool_name}`, resolve one backend, optionally run `before_tool_call`, apply argument/name changes, track the downstream progress token, call the backend, optionally run `after_tool_call`, and return the backend result. |
 | `read_resource`, `get_prompt` | Split the prefixed resource or prompt name, resolve one backend, strip the gateway prefix, call the backend, and return the backend result. |
 
@@ -171,7 +174,6 @@ backend-routed:
 | Method | Current behavior |
 | --- | --- |
 | `ping` | Returns success. |
-| `list_resource_templates` | Returns a local template stub. |
 | `subscribe`, `unsubscribe` | Mutate the local subscription set. |
 | `complete` | Returns local completion examples. |
 
@@ -185,7 +187,7 @@ plugin hooks before returning. List calls merge and namespace backend output
 before returning. Single-backend calls return the selected backend result after
 gateway prefix removal.
 
-The HTTP response then unwinds through `user_config_store_layer`,
-`session_id_layer`, `claims_layer`, `virtual_host_id_layer`, CORS, trace, and
-metrics. On successful `DELETE`, `session_id_layer` performs local session and
+The HTTP response then unwinds through `virtual_host_config_layer`,
+`user_config_store_layer`, `session_id_layer`, `claims_layer`,
+`virtual_host_id_layer`, CORS, trace, and metrics. On successful `DELETE`, `session_id_layer` performs local session and
 backend transport cleanup during this unwind.

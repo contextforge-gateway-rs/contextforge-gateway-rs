@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 470" role="img" aria-labelledby="title desc">
   <title id="title">Authentication and user config lookup</title>
-  <desc id="desc">The gateway extracts the virtual host id, validates a bearer JWT into ContextForgeClaims, reads the MCP session id if present, loads UserConfig by JWT subject through the cache and Redis, and exposes typed extensions to MCP validators.</desc>
+  <desc id="desc">The gateway extracts the virtual host id, validates a bearer JWT into ContextForgeClaims, reads the MCP session id if present, loads UserConfig by JWT subject through the cache and Redis, rejects unknown virtual hosts with 404, and exposes typed extensions to MCP validators.</desc>
 
   <rect x="0" y="0" width="1080" height="470" rx="18" fill="#ffffff" />
   <rect x="1" y="1" width="1078" height="468" rx="18" fill="none" stroke="#d7dde5" />
@@ -60,7 +60,7 @@
   <g>
     <rect x="822" y="56" width="210" height="94" rx="12" class="config" />
     <text x="927" y="88" text-anchor="middle" class="title">LRU cache</text>
-    <text x="927" y="118" text-anchor="middle" class="body">50k entries, 1 hour</text>
+    <text x="927" y="118" text-anchor="middle" class="body">50k entries, 60s default</text>
     <text x="927" y="138" text-anchor="middle" class="mini">keyed by claims.sub string</text>
 
     <rect x="822" y="192" width="210" height="94" rx="12" class="config" />

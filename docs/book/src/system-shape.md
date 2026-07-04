@@ -153,7 +153,15 @@ to the library crate makes the hot path harder to reason about.
 
 ## Pipeline Shape
 
-The current code builds a bidirectional MCP pipeline:
+The target shape is a bidirectional AI traffic pipeline: authentication,
+rate limiting, routing and protocol selection, request mutation, optional
+retrieval, and request guardrails on the way upstream; response guardrails,
+response mutation, and telemetry on the way back. Upstreams may eventually be
+MCP, A2A, or model providers. Preserve the ordering as pieces land: auth and
+config before backend selection, request plugins before upstream calls,
+response plugins before returning, telemetry around both sides.
+
+The current code implements the MCP subset of that pipeline:
 
 ```text
 downstream request
@@ -181,6 +189,10 @@ from the outside in. The stack is built so the request reaches handlers with:
 | `ContextForgeClaims` | `claims_layer` | Config lookup, session cleanup, routing. |
 | `SessionId` | `session_id_layer` | Authorized MCP calls after initialize. |
 | `UserConfig` | `user_config_store_layer` | Virtual host selection and backend selection. |
+
+After those extensions exist, `virtual_host_config_layer` rejects requests with
+`404` when the path's virtual host id is not present in the loaded
+`UserConfig`, so MCP handlers only see resolvable virtual hosts.
 
 `initialize` is the special call. RMCP provides a downstream session id before
 the gateway has a `Mcp-session-id` header. The gateway fans out to configured

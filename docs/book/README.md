@@ -1,6 +1,9 @@
 # Developing The ContextForge Gateway Book
 
 This directory contains the mdBook source for The ContextForge Gateway Book.
+The rendered book also documents its own publishing path in
+[Publishing This Book](src/publishing-this-book.md); keep the two in sync when
+the workflow or mdBook version changes.
 
 ## Layout
 
