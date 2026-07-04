@@ -9,14 +9,20 @@
 
 The reference `docker/nginx.conf` shows the intended split:
 
-- `location ^~ /contextforge-rs` proxies to the gateway upstream; `/health`
-  can be proxied for external checks.
+- `location ^~ /contextforge-rs` proxies to the gateway upstream.
 - Everything else — UI, management APIs, other ContextForge traffic — stays on
   the existing control-plane paths.
-- The reference listener uses `backlog=4096 reuseport`, and retries the next
-  upstream only on connect-level failures (`error timeout http_502/503/504`,
-  2 tries, 10 s window). Retrying MCP POST bodies beyond that is not safe:
-  requests are not idempotent.
+- The reference listener uses `backlog=4096 reuseport` and configures upstream
+  retries (`error timeout http_502/503/504`, 2 tries, 10 s window). For MCP
+  `POST` bodies this effectively retries only connection-stage failures:
+  nginx does not re-send non-idempotent requests once they reached an
+  upstream, and MCP calls are not idempotent.
+
+There is no production health endpoint today: `/health` is a `with_tools`
+bootstrap helper served at `/contextforge-rs/health`, and production builds
+compile it out. Use TCP-level checks or the exported metrics for liveness
+until a real health endpoint exists. (The reference nginx config's
+`location = /health` predates this and does not match the gateway's route.)
 
 The [`cf-integration`](https://github.com/contextforge-gateway-rs/cf-integration)
 harness runs the same split with the stock upstream control-plane stack and
@@ -70,7 +76,7 @@ returns.
 
 ## Deployment Checklist
 
-1. Front door routes only `/contextforge-rs` (and optionally `/health`) here.
+1. Front door routes only `/contextforge-rs` here.
 2. JWT verification key or secret in place and rotated with the control
    plane's signing key.
 3. Redis reachable, TLS/mTLS across trust zones, write access restricted to
