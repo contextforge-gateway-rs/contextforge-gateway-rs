@@ -59,9 +59,9 @@ commit them whenever `UserConfig`, `VirtualHost`, `BackendMCPGateway`, or the
 ## Front-Door Split
 
 Only MCP dataplane traffic comes to this process. The repository's reference
-`docker/nginx.conf` proxies `location ^~ /contextforge-rs` (and optionally
-`/health`) to the gateway; all UI, management API, and other ContextForge
-traffic stays on the existing control-plane paths.
+`docker/nginx.conf` proxies `location ^~ /contextforge-rs` to the gateway;
+all UI, management API, and other ContextForge traffic stays on the existing
+control-plane paths.
 
 ## Verifying The Integration
 

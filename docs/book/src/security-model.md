@@ -55,10 +55,12 @@ apply, but expect this to tighten as policy work lands.
 ## Local Bootstrap Helpers
 
 The `contextforge-gateway-rs-lib/with_tools` feature compiles in
-`/contextforge-rs/admin/tokens/{user}` and
-`/contextforge-rs/admin/userconfigs/{user}`, which mint tokens and write user
-config for local development. Production builds must not enable this feature:
-in a real deployment the control plane mints tokens and writes config.
+`/contextforge-rs/admin/tokens/{user}`,
+`/contextforge-rs/admin/userconfigs/{user}`, and `/contextforge-rs/health`.
+These routes are registered outside the authentication middleware, so token
+minting and config writes are unauthenticated by design — they exist only for
+local bootstrap. Production builds must not enable this feature: in a real
+deployment the control plane mints tokens and writes config.
 
 ## Secrets Handling
 
