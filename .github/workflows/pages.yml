@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - name: Install mdBook
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.75.27
         with:
           tool: mdbook@0.5.3
       - name: Build book
