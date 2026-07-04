@@ -115,4 +115,7 @@ Known deployment options are:
 | Reinitialize after failover | Operationally simple, but clients must tolerate session loss. |
 
 Until backend service ownership changes, design request handling as if a
-stateful MCP session belongs to one gateway process.
+stateful MCP session belongs to one gateway process. The same constraint
+appears inside one host in multi-runtime mode, where each runtime thread owns
+its own backend transports; see
+[Concurrency And Runtime Model](concurrency-and-runtime.md).
