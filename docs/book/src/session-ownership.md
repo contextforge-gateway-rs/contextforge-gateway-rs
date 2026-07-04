@@ -73,7 +73,7 @@ Backend service lookup splits into two patterns:
 
 | MCP call shape | Session behavior |
 | --- | --- |
-| `list_tools`, `list_resources`, `list_prompts` | Borrow every available backend service for the selected virtual host, call them concurrently, then merge and namespace successful responses. |
+| `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Borrow every available backend service for the selected virtual host, call them concurrently, then merge and namespace successful responses. |
 | `call_tool`, `read_resource`, `get_prompt` | Split the prefixed name into `{backend_name}-{object_name}`, resolve the single backend service, strip the gateway prefix, and call that backend. |
 
 An initialized backend entry can still contain no running service if backend

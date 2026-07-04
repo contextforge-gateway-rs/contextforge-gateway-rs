@@ -83,6 +83,16 @@ JWT subject
   -> BackendMCPGateway.url
 ```
 
+Expected config growth beyond the current fields:
+
+- route selection across multiple MCP endpoints
+- principal/virtual-host filters for tools, resources, and prompts
+- backend auth/TLS material references
+- request/response header pass/add/remove rules
+- plugin/CPEX hook settings
+- pagination/SSE behavior where protocol handling needs config
+- future A2A and LLM routing/provider settings
+
 ## Redis Storage
 
 `RedisUserConfigStore` stores user routing config as MessagePack:
@@ -99,7 +109,7 @@ The in-process cache is an implementation detail:
 | Setting | Value |
 | --- | --- |
 | Entries | 50,000 |
-| Expiry | 1 hour |
+| Expiry | `--user-config-cache-expiry-seconds`, default 60 seconds; `0` disables caching |
 | Redis connection retries | 1,000 |
 
 Routing code should stay behind the `UserConfigStore` trait. That keeps Redis,

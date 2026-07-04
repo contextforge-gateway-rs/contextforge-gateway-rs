@@ -77,6 +77,7 @@ then selects one virtual host inside that config.
 | `--redis-tls-trust-bundle <path>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_TRUST_BUNDLE` | TLS and mTLS | PEM trust bundle for Redis TLS. |
 | `--redis-tls-client-certificate <path>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_CERTIFICATE` | mTLS | PEM client certificate for Redis mTLS. |
 | `--redis-tls-client-private-key <path>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_PRIVATE_KEY` | mTLS | PEM client private key for Redis mTLS. |
+| `--user-config-cache-expiry-seconds <n>` | `CONTEXTFORGE_GATEWAY_RS_USER_CONFIG_CACHE_EXPIRY_SECONDS` | No, default `60` | Expiry for the in-process user config cache in front of Redis. `0` disables caching and reads Redis on every request. |
 
 Local Compose exposes plain Redis on `127.0.0.1:6379`, so local runs normally
 use:

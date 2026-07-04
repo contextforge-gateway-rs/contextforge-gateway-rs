@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 980" role="img" aria-labelledby="title desc">
   <title id="title">ContextForge Gateway request flow</title>
-  <desc id="desc">A normal MCP HTTP request enters the TCP or TLS listener, passes through metrics, tracing, the contextforge nested router, CORS, virtual host extraction, claims validation, session extraction, user config lookup, and RMCP. RMCP then follows either initialize handling or authorized MCP method handling, calls backend MCP servers as needed, and returns the response through the same stack.</desc>
+  <desc id="desc">A normal MCP HTTP request enters the TCP or TLS listener, passes through metrics, tracing, the contextforge nested router, CORS, virtual host extraction, claims validation, session extraction, user config lookup, a virtual host config check, and RMCP. RMCP then follows either initialize handling or authorized MCP method handling, calls backend MCP servers as needed, and returns the response through the same stack.</desc>
 
   <rect x="0" y="0" width="1500" height="980" rx="18" fill="#ffffff" />
   <rect x="1" y="1" width="1498" height="978" rx="18" fill="none" stroke="#d7dde5" />
@@ -92,7 +92,7 @@
     <rect x="108" y="666" width="344" height="82" rx="9" class="box" />
     <text x="280" y="690" text-anchor="middle" class="title">user_config_store_layer</text>
     <text x="280" y="713" text-anchor="middle" class="body">loads UserConfig for claims.sub</text>
-    <text x="280" y="732" text-anchor="middle" class="mini">inserts UserConfig</text>
+    <text x="280" y="732" text-anchor="middle" class="mini">inserts UserConfig; unknown virtual host gets 404</text>
 
     <line x1="280" y1="288" x2="280" y2="314" class="request-line" />
     <polygon points="280,314 274,303 286,303" class="request-fill" />
@@ -108,7 +108,7 @@
     <rect x="458" y="448" width="62" height="26" rx="6" class="failure" />
     <text x="489" y="466" text-anchor="middle" class="mini failure-text">401</text>
     <rect x="458" y="736" width="62" height="26" rx="6" class="failure" />
-    <text x="489" y="754" text-anchor="middle" class="mini failure-text">400/500</text>
+    <text x="489" y="754" text-anchor="middle" class="mini failure-text">400/404/500</text>
   </g>
 
   <g>
@@ -174,7 +174,7 @@
     <text x="1130" y="801" text-anchor="middle" class="body">read_resource / get_prompt</text>
     <text x="1130" y="821" text-anchor="middle" class="mini">split prefix -> resolve backend -> strip prefix -> call</text>
 
-    <text x="1130" y="844" text-anchor="middle" class="mini">ping, templates, subscribe, complete are local today</text>
+    <text x="1130" y="844" text-anchor="middle" class="mini">ping, subscribe, complete are local today</text>
   </g>
 
   <g>

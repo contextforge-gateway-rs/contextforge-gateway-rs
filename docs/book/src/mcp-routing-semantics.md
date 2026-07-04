@@ -27,13 +27,15 @@ changes downstream tool, resource, and prompt names.
 List operations fan out:
 
 ```text
-list_tools      -> all connected backends -> merged sorted tools
-list_resources  -> all connected backends -> merged sorted resources
-list_prompts    -> all connected backends -> merged sorted prompts
+list_tools               -> all connected backends -> merged sorted tools
+list_resources           -> all connected backends -> merged sorted resources
+list_prompts             -> all connected backends -> merged sorted prompts
+list_resource_templates  -> all connected backends -> merged sorted templates
 ```
 
 Each successful backend result is rewritten with its backend prefix before the
-merged response is returned. Failed or unavailable backends are logged and
+merged response is returned. For resource templates, both the template name and
+the URI template are prefixed with the backend name. Failed or unavailable backends are logged and
 omitted from the current merged list result.
 
 ## Routed Operations

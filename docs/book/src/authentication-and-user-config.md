@@ -21,6 +21,7 @@ method:
 | JWT validation | `claims_layer` | `ContextForgeClaims` extension. |
 | Session header | `session_id_layer` | Optional `SessionId` extension. |
 | Config lookup | `user_config_store_layer` | `UserConfig` extension. |
+| Virtual host check | `virtual_host_config_layer` | `404` when the path's virtual host id is not in the loaded config. |
 | MCP validation | `InitializeCallValidator` or `AuthorizedCallValidator` | Selected `VirtualHost`, session id, and claims. |
 
 The order matters: `user_config_store_layer` needs `ContextForgeClaims`, and MCP
@@ -46,7 +47,7 @@ important to routing are:
 | --- | --- |
 | `sub` | Becomes the user config key and the principal for backend session lookup. |
 | `iss`, `aud`, `exp` | Authentication checks only. |
-| `teams`, `user`, `scopes` | Carried in claims for future policy use; not currently used by MCP routing. |
+| `teams`, `user`, `scopes` | Carried in claims for future policy use; not currently used by MCP routing. `teams` and `scopes` are optional, so tokens without them still validate. |
 
 A concrete decoded payload for the local `admin@example.com` subject looks like
 this (timestamps shown as example Unix seconds). Of everything here, MCP routing
@@ -100,7 +101,7 @@ the raw subject string.
 | LRU hit | Clone the decoded `UserConfig` from the cache. |
 | LRU miss | MessagePack-encode `User::new(subject)`, `GET` that Redis key, decode the MessagePack `UserConfig`, then cache it. |
 | Cache size | 50,000 entries. |
-| Cache expiry | 1 hour. |
+| Cache expiry | `--user-config-cache-expiry-seconds`, default 60 seconds. `0` disables the cache and reads Redis on every request. |
 | Redis retry setting | Connection manager is configured with 1,000 retries. |
 
 The cache is an implementation detail of `RedisUserConfigStore`. Routing code
@@ -120,10 +121,11 @@ Failures before RMCP method handling are HTTP responses:
 | No user config exists for `claims.sub` | `400 Bad Request`. |
 | Redis/config store error other than missing data | `500 Internal Server Error`. |
 | `user_config_store_layer` runs without claims | `400 Bad Request`. |
+| Virtual host id not present in the caller's config | `404 Not Found` with body `{"detail":"Server not found"}`. |
 
-Virtual host selection errors happen later inside MCP validators. A valid user
-config can still fail a request if it does not contain the path's
-`VirtualHostId`.
+A valid user config can still fail a request: `virtual_host_config_layer`
+returns `404` before MCP method handling when the config does not contain the
+path's `VirtualHostId`.
 
 ## What This Boundary Does Not Do
 
