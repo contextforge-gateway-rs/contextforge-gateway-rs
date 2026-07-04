@@ -18,8 +18,11 @@ hot path:
 | [What is ContextForge Gateway?](docs/book/src/what-is-contextforge-gateway.md) | Scope, boundaries, key terms, and the mental model. |
 | [System Shape](docs/book/src/system-shape.md) | Crate layout, control-plane boundary, pipeline shape, state ownership, and module boundaries. |
 | [Request Flow](docs/book/src/request-flow.md) | Startup, middleware order, initialize fanout, authorized calls, and the response path. |
+| [Concurrency And Runtime Model](docs/book/src/concurrency-and-runtime.md) | Executor shapes, shared state and locks, fanout, and cancellation. |
 | [Authentication And User Config Lookup](docs/book/src/authentication-and-user-config.md) | JWT validation, config keying, cache behavior, and failure responses. |
+| [Security Model And Trust Boundaries](docs/book/src/security-model.md) | Trust boundaries, compromise impact, and transport security posture. |
 | [Runtime Configuration](docs/book/src/runtime-configuration.md) | The `UserConfig` model, Redis/MessagePack persistence, and plugin runtime config. |
+| [Control-Plane Integration](docs/book/src/control-plane-integration.md) | Redis keys, schemas, token shape, and route parity with the control plane. |
 | [Backend Connections And Transports](docs/book/src/backend-connections-and-transports.md) | Downstream, upstream, and config-store transports plus TLS direction. |
 | [Session Ownership](docs/book/src/session-ownership.md) | Backend session state, cleanup, and load-balancing constraints. |
 | [MCP Routing Semantics](docs/book/src/mcp-routing-semantics.md) | The backend prefix namespace and routing contract. |
