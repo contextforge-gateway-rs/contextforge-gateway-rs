@@ -37,6 +37,16 @@ fresh shell will not have them.
 docker compose -f docker/docker-compose-local.yaml up -d
 ```
 
+The sample backends default to a CPU limit of `8` and a reservation of `4`,
+which Docker rejects on hosts with fewer CPUs
+(`range of CPUs is from 0.01 to ...`). On smaller machines, override the
+sizing knobs:
+
+```bash
+GATEWAY_CPU_LIMIT=2 GATEWAY_CPU_RESERVATION=0.5 \
+  docker compose -f docker/docker-compose-local.yaml up -d
+```
+
 Check that the local dependencies are running:
 
 ```bash
