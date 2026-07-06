@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use contextforge_gateway_rs_apis::user_store::UserConfig;
+use contextforge_gateway_rs_apis::user_store::{BackendMCPGateway, UserConfig, VirtualHost};
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
 use http::request::Parts;
 use itertools::Itertools;
@@ -262,7 +262,7 @@ where
         )
         .await;
 
-        Ok(ListToolsResult { meta: None, tools: merge_tools(responses), next_cursor: None })
+        Ok(ListToolsResult { meta: None, tools: merge_tools(responses, virtual_host), next_cursor: None })
     }
 
     async fn call_tool(
@@ -274,9 +274,7 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
-        let Some((backend_name, tool_name)) = split_prefixed_name(&request.name, &backend_names) else {
+        let Some((backend_name, tool_name)) = resolve_tool_route(virtual_host, &request.name) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... wrong tool name".into(),
@@ -284,7 +282,6 @@ where
             });
         };
         let backend_name = backend_name.to_owned();
-        let tool_name = tool_name.to_owned();
 
         let (service_name, service) = resolve_backend(&session_manager, "call_tool", &backend_name).await?;
 
@@ -545,6 +542,93 @@ fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N])
     })
 }
 
+fn resolve_tool_route<'a>(virtual_host: &'a VirtualHost, public_name: &str) -> Option<(&'a str, String)> {
+    if let Some((backend_name, tool_name)) = virtual_host.backends.iter().find_map(|(backend_name, backend)| {
+        backend_tool_name_for_public_name(backend_name, backend, public_name)
+            .map(|tool_name| (backend_name.as_str(), tool_name))
+    }) {
+        return Some((backend_name, tool_name));
+    }
+
+    for (backend_name, backend) in &virtual_host.backends {
+        let backend_names = [backend_name.as_str()];
+        if let Some((_, tool_name)) = split_prefixed_name(public_name, &backend_names)
+            && public_name_for_backend_tool(backend_name, backend, tool_name).as_deref() == Some(public_name)
+        {
+            return Some((backend_name.as_str(), tool_name.to_owned()));
+        }
+    }
+    None
+}
+
+fn public_name_for_backend_tool(
+    backend_name: &str,
+    backend: &BackendMCPGateway,
+    upstream_tool_name: &str,
+) -> Option<String> {
+    let upstream_tool_slug = slug_name(upstream_tool_name);
+    let prefixes = backend_public_prefixes(backend_name, backend);
+
+    backend.allowed_tool_names.iter().find_map(|allowed_name| {
+        if allowed_name == upstream_tool_name {
+            return Some(format!("{backend_name}-{upstream_tool_name}"));
+        }
+
+        prefixes.iter().find_map(|prefix| {
+            let allowed_suffix = allowed_name.strip_prefix(prefix)?.strip_prefix('-')?;
+            (allowed_suffix == upstream_tool_name || allowed_suffix == upstream_tool_slug).then(|| allowed_name.clone())
+        })
+    })
+}
+
+fn backend_tool_name_for_public_name(
+    backend_name: &str,
+    backend: &BackendMCPGateway,
+    public_name: &str,
+) -> Option<String> {
+    if !backend.allowed_tool_names.iter().any(|allowed_name| allowed_name == public_name) {
+        return None;
+    }
+
+    let prefixes = backend_public_prefixes(backend_name, backend);
+    for prefix in prefixes {
+        if let Some(tool_name) = public_name.strip_prefix(&prefix).and_then(|rest| rest.strip_prefix('-')) {
+            return Some(tool_name.replace('-', "_"));
+        }
+    }
+
+    Some(public_name.to_owned())
+}
+
+fn backend_public_prefixes(backend_name: &str, backend: &BackendMCPGateway) -> Vec<String> {
+    vec![backend_name.to_owned(), slug_name(backend_name), backend.name.clone(), slug_name(&backend.name)]
+        .into_iter()
+        .filter(|prefix| !prefix.is_empty())
+        .unique()
+        .collect()
+}
+
+fn slug_name(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut previous_was_separator = false;
+
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+            previous_was_separator = false;
+        } else if !previous_was_separator && !slug.is_empty() {
+            slug.push('-');
+            previous_was_separator = true;
+        }
+    }
+
+    if previous_was_separator {
+        slug.pop();
+    }
+
+    slug
+}
+
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
 /// and returns the `(backend_name, result)` pairs that succeeded.
 async fn fan_out_list<R, E, F, Fut, C>(
@@ -645,16 +729,21 @@ fn log_list_backend_response<T, E: std::fmt::Debug>(
     }
 }
 
-fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
+fn merge_tools(tools: Vec<(String, ListToolsResult)>, virtual_host: &VirtualHost) -> Vec<Tool> {
     tools
         .into_iter()
         .flat_map(|(backend_name, result)| {
+            let Some(backend) = virtual_host.backends.get(&backend_name) else {
+                return Vec::new();
+            };
+
             result
                 .tools
                 .into_iter()
-                .map(|mut t| {
-                    t.name = format!("{backend_name}-{}", t.name).into();
-                    t
+                .filter_map(|mut t| {
+                    let public_name = public_name_for_backend_tool(&backend_name, backend, &t.name)?;
+                    t.name = public_name.into();
+                    Some(t)
                 })
                 .collect::<Vec<_>>()
         })
@@ -711,6 +800,7 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use contextforge_gateway_rs_apis::user_store::Transport;
 
     #[test]
     fn test_splitting() {
@@ -729,5 +819,98 @@ mod tests {
 
         let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
         assert_eq!(Some(("counter_one", "get-value")), split_prefixed_name("counter_one-get-value", &backend_names));
+    }
+
+    #[test]
+    fn merge_tools_uses_control_plane_slug_names() {
+        let virtual_host = virtual_host_with_backend(
+            "gateway-uuid",
+            "compliance_reference",
+            vec!["compliance-reference-echo", "compliance-reference-progress-reporter"],
+        );
+        let result = ListToolsResult {
+            meta: None,
+            next_cursor: None,
+            tools: vec![tool("echo"), tool("progress_reporter"), tool("hidden")],
+        };
+
+        let tool_names: Vec<_> = merge_tools(vec![("gateway-uuid".to_owned(), result)], &virtual_host)
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+
+        assert_eq!(vec!["compliance-reference-echo", "compliance-reference-progress-reporter"], tool_names);
+    }
+
+    #[test]
+    fn resolve_tool_route_maps_slug_name_to_backend_tool_name() {
+        let virtual_host = virtual_host_with_backend(
+            "gateway-uuid",
+            "compliance_reference",
+            vec!["compliance-reference-progress-reporter"],
+        );
+
+        assert_eq!(
+            Some(("gateway-uuid", "progress_reporter".to_owned())),
+            resolve_tool_route(&virtual_host, "compliance-reference-progress-reporter")
+        );
+    }
+
+    #[test]
+    fn resolve_tool_route_maps_slug_name_when_backend_key_is_slug() {
+        let virtual_host = virtual_host_with_backend(
+            "compliance-reference",
+            "compliance_reference",
+            vec!["compliance-reference-progress-reporter"],
+        );
+
+        assert_eq!(
+            Some(("compliance-reference", "progress_reporter".to_owned())),
+            resolve_tool_route(&virtual_host, "compliance-reference-progress-reporter")
+        );
+    }
+
+    #[test]
+    fn bare_allowed_tool_name_keeps_backend_prefix() {
+        let virtual_host = virtual_host_with_backend("gateway-one", "Gateway One", vec!["echo"]);
+        let result = ListToolsResult { meta: None, next_cursor: None, tools: vec![tool("echo"), tool("hidden")] };
+
+        let tool_names: Vec<_> = merge_tools(vec![("gateway-one".to_owned(), result)], &virtual_host)
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+
+        assert_eq!(vec!["gateway-one-echo"], tool_names);
+        assert_eq!(Some(("gateway-one", "echo".to_owned())), resolve_tool_route(&virtual_host, "gateway-one-echo"));
+    }
+
+    #[test]
+    fn empty_allowed_tool_names_advertises_no_tools() {
+        let virtual_host = virtual_host_with_backend("gateway-one", "Gateway One", Vec::new());
+        let result = ListToolsResult { meta: None, next_cursor: None, tools: vec![tool("echo")] };
+
+        assert!(merge_tools(vec![("gateway-one".to_owned(), result)], &virtual_host).is_empty());
+        assert_eq!(None, resolve_tool_route(&virtual_host, "gateway-one-echo"));
+    }
+
+    fn virtual_host_with_backend(backend_key: &str, backend_name: &str, allowed_tool_names: Vec<&str>) -> VirtualHost {
+        VirtualHost {
+            backends: HashMap::from([(
+                backend_key.to_owned(),
+                BackendMCPGateway {
+                    name: backend_name.to_owned(),
+                    url: "http://127.0.0.1:8000/mcp".parse().expect("valid URL"),
+                    transport: Transport::default(),
+                    passthrough_headers: Vec::new(),
+                    allowed_tool_names: allowed_tool_names.into_iter().map(str::to_owned).collect(),
+                    allowed_resource_names: Vec::new(),
+                    allowed_prompt_names: Vec::new(),
+                },
+            )]),
+        }
+    }
+
+    fn tool(name: &'static str) -> Tool {
+        Tool::new(name, "", rmcp::model::JsonObject::new())
     }
 }

@@ -231,6 +231,10 @@ async fn start_gateway_with_runtime(
     let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("backend binds");
     let backend_port = backend_listener.local_addr().expect("backend address").port();
     let backend_name = format!("backend-{backend_port}");
+    let allowed_tool_names = ["sum", "progress_sum", "progress_counter_tokens", "wait_for_cancellation"]
+        .into_iter()
+        .map(|tool_name| format!("{backend_name}-{tool_name}"))
+        .collect();
     let virtual_host_id = "vh-cpex-test";
     let backend_state = BackendState::default();
 
@@ -259,7 +263,7 @@ async fn start_gateway_with_runtime(
                                 name: String::new(),
                                 transport: Transport::default(),
                                 passthrough_headers: Vec::new(),
-                                allowed_tool_names: Vec::new(),
+                                allowed_tool_names,
                                 allowed_resource_names: Vec::new(),
                                 allowed_prompt_names: Vec::new(),
                             },

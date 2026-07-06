@@ -198,6 +198,8 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
             };
 
             let name = format!("backend-{port}");
+            let allowed_tool_names =
+                MOCK_COUNTER_TOOL_NAMES.iter().map(|tool_name| format!("{name}-{tool_name}")).collect();
             (
                 name.clone(),
                 BackendMCPGateway {
@@ -205,7 +207,7 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     url,
                     transport: Transport::default(),
                     passthrough_headers: Vec::new(),
-                    allowed_tool_names: Vec::new(),
+                    allowed_tool_names,
                     allowed_resource_names: Vec::new(),
                     allowed_prompt_names: Vec::new(),
                 },
