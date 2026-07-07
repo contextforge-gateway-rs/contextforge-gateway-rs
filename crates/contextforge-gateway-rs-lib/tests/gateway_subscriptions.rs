@@ -21,11 +21,13 @@ use tracing::warn;
 
 use support::{
     ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
+    mock_counter::RESOURCE_UPDATE_NOTIFY_INTERVAL,
 };
 
 const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
-const EXPECTED_UPDATES_PER_BACKEND: usize = 4;
+/// The mocks notify continuously, so this is just the threshold proving delivery works.
+const MIN_UPDATES_PER_BACKEND: usize = 4;
 
 type Recorded<T> = Arc<StdMutex<Vec<T>>>;
 
@@ -122,11 +124,33 @@ async fn assert_two_backend_subscribe_roundtrips(gateway_url: String, client: re
 
     try_join_all(selected_uris.iter().map(|uri| running_service.subscribe(SubscribeRequestParams::new(uri.clone()))))
         .await?;
-    wait_for_resource_updates(&resource_updates, &selected_uris, EXPECTED_UPDATES_PER_BACKEND).await?;
+    wait_for_resource_updates(&resource_updates, &selected_uris, MIN_UPDATES_PER_BACKEND).await?;
     for uri in selected_uris {
         running_service.unsubscribe(UnsubscribeRequestParams::new(uri)).await?;
     }
 
+    assert_no_more_resource_updates(&resource_updates).await
+}
+
+/// The mock backends keep notifying after unsubscribe, so any update recorded after the quiet
+/// window starts would mean the gateway kept forwarding for an unsubscribed URI.
+async fn assert_no_more_resource_updates(
+    resource_updates: &StdMutex<Vec<ResourceUpdatedNotificationParam>>,
+) -> Result<()> {
+    // Let updates the gateway forwarded before the unsubscribe finish arriving.
+    tokio::time::sleep(RESOURCE_UPDATE_NOTIFY_INTERVAL * 5).await;
+    let count_after_drain = resource_updates.lock().expect("resource update lock poisoned").len();
+
+    tokio::time::sleep(RESOURCE_UPDATE_NOTIFY_INTERVAL * 10).await;
+    let count_after_quiet = resource_updates.lock().expect("resource update lock poisoned").len();
+
+    if count_after_quiet != count_after_drain {
+        return Err(format!(
+            "expected no resource updates after unsubscribe, got {} new",
+            count_after_quiet - count_after_drain
+        )
+        .into());
+    }
     Ok(())
 }
 
