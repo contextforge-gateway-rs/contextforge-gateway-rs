@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 #![allow(dead_code)]
 
-use std::{any::Any, sync::Arc};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -267,13 +267,14 @@ impl ServerHandler for Counter {
         if is_known_resource_uri(&request.uri) {
             let uri = request.uri.clone();
             let peer = context.peer;
+            // Keeps notifying even after unsubscribe (a rude backend): the gateway must stop
+            // forwarding updates for unsubscribed URIs itself, and tests assert exactly that.
             tokio::spawn(async move {
-                for _ in 0..4 {
-                    if let Err(error) =
-                        peer.notify_resource_updated(ResourceUpdatedNotificationParam::new(uri.clone())).await
-                    {
-                        tracing::warn!("mock_counter: failed to send resource update notification: {error:?}");
+                for _ in 0..MAX_RESOURCE_UPDATE_NOTIFICATIONS {
+                    if peer.notify_resource_updated(ResourceUpdatedNotificationParam::new(uri.clone())).await.is_err() {
+                        break;
                     }
+                    tokio::time::sleep(RESOURCE_UPDATE_NOTIFY_INTERVAL).await;
                 }
             });
             Ok(())
@@ -341,3 +342,9 @@ impl ServerHandler for Counter {
 fn is_known_resource_uri(uri: &str) -> bool {
     matches!(uri, "str:////Users/to/some/path/" | "memo://insights")
 }
+
+/// Interval between the resource-update notifications sent after a subscribe is accepted.
+pub const RESOURCE_UPDATE_NOTIFY_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Safety cap so notify loops can't outlive a hung test run.
+const MAX_RESOURCE_UPDATE_NOTIFICATIONS: usize = 1000;
