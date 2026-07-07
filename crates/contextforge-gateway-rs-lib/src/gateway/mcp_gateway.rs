@@ -268,22 +268,12 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
-        let Some((backend_name, tool_name)) = split_prefixed_name(&request.name, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong tool name".into(),
-                data: None,
-            });
-        };
-        let backend_name = backend_name.to_owned();
-        let tool_name = tool_name.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "call_tool", &backend_name).await?;
+        let (service_name, service, tool_name) =
+            route_prefixed_name(&session_manager, "call_tool", &request.name, "Routing problem... wrong tool name")
+                .await?;
 
         let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
+            plugin_runtime.before_tool_call(&request, &tool_name, &service_name).await?
         } else {
             ToolPreCallResult::unchanged()
         };
@@ -351,18 +341,13 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
-        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong resource name".into(),
-                data: None,
-            });
-        };
-        let resource_uri = resource_uri.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "read_resource", backend_name).await?;
+        let (service_name, service, resource_uri) = route_prefixed_name(
+            &session_manager,
+            "read_resource",
+            &request.uri,
+            "Routing problem... wrong resource name",
+        )
+        .await?;
 
         let mut routed_request = request;
         routed_request.uri = resource_uri;
@@ -416,22 +401,13 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
+        let (service_name, service, resource_uri) =
+            route_prefixed_name(&session_manager, "subscribe", &request.uri, "Routing problem... wrong resource name")
+                .await?;
 
-        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong resource name".into(),
-                data: None,
-            });
-        };
-        let resource_uri = resource_uri.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "subscribe", backend_name).await?;
-
+        let tracked_uri = resource_uri.clone();
         let mut routed_request = request;
         routed_request.uri = resource_uri;
-        let tracked_uri = routed_request.uri.clone();
         service.service().track_resource_subscription(tracked_uri.clone(), cx.peer.clone()).await;
 
         if let Err(error) = service.subscribe(routed_request).await {
@@ -456,21 +432,16 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
+        let (service_name, service, resource_uri) = route_prefixed_name(
+            &session_manager,
+            "unsubscribe",
+            &request.uri,
+            "Routing problem... wrong resource name",
+        )
+        .await?;
 
-        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong resource name".into(),
-                data: None,
-            });
-        };
-        let resource_uri = resource_uri.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "unsubscribe", backend_name).await?;
-
-        let mut routed_request = request;
         let tracked_uri = resource_uri.clone();
+        let mut routed_request = request;
         routed_request.uri = resource_uri;
         service.unsubscribe(routed_request).await.map_err(|error| {
             warn!("unsubscribe: backend {service_name} {error:?}");
@@ -519,19 +490,9 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
-        let Some((backend_name, prompt_name)) = split_prefixed_name(&request.name, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong prompt name".into(),
-                data: None,
-            });
-        };
-        let backend_name = backend_name.to_owned();
-        let prompt_name = prompt_name.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "get_prompt", &backend_name).await?;
+        let (service_name, service, prompt_name) =
+            route_prefixed_name(&session_manager, "get_prompt", &request.name, "Routing problem... wrong prompt name")
+                .await?;
 
         let mut routed_request = request;
         routed_request.name = prompt_name;
@@ -556,25 +517,19 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
         // The reference carries a namespaced prompt name or resource URI; route on that.
         let namespaced = match &request.r#ref {
             Reference::Prompt(prompt) => prompt.name.as_str(),
             Reference::Resource(resource) => resource.uri.as_str(),
         };
 
-        let Some((backend_name, stripped)) = split_prefixed_name(namespaced, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong completion reference".into(),
-                data: None,
-            });
-        };
-        let backend_name = backend_name.to_owned();
-        let stripped = stripped.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "complete", &backend_name).await?;
+        let (service_name, service, stripped) = route_prefixed_name(
+            &session_manager,
+            "complete",
+            namespaced,
+            "Routing problem... wrong completion reference",
+        )
+        .await?;
 
         let mut routed_request = request;
         match &mut routed_request.r#ref {
@@ -639,6 +594,24 @@ where
             }
         })
         .collect()
+}
+
+/// Routes a namespaced `{backend}-{rest}` name: splits it against the session's backend names
+/// and resolves the owning backend, returning `(backend_name, service, rest)`. Shared by tool,
+/// resource, prompt, and completion routing.
+async fn route_prefixed_name(
+    session_manager: &SessionManager<'_>,
+    op: &str,
+    namespaced: &str,
+    no_route_message: &'static str,
+) -> Result<(String, McpClientService, String), ErrorData> {
+    let backend_names = session_manager.get_backend_names();
+    let Some((backend_name, rest)) = split_prefixed_name(namespaced, &backend_names) else {
+        return Err(ErrorData { code: ErrorCode::INTERNAL_ERROR, message: no_route_message.into(), data: None });
+    };
+    let rest = rest.to_owned();
+    let (backend_name, service) = resolve_backend(session_manager, op, backend_name).await?;
+    Ok((backend_name, service, rest))
 }
 
 /// Resolves the single connected backend named `backend_name` and takes its running service.
