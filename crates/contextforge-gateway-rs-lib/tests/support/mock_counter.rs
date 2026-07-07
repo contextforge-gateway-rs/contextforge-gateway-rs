@@ -238,6 +238,27 @@ impl ServerHandler for Counter {
         }
     }
 
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, McpError> {
+        // Only backend-local references are known here; a still-namespaced name/URI won't match,
+        // proving the gateway stripped the prefix before forwarding.
+        let values = match &request.r#ref {
+            Reference::Prompt(prompt) if prompt.name == "example_prompt" && request.argument.name == "message" => {
+                vec!["hello".to_owned(), "hola".to_owned()]
+            },
+            Reference::Resource(resource)
+                if matches!(resource.uri.as_str(), "str:////Users/to/some/path/" | "memo://insights") =>
+            {
+                vec![resource.uri.clone()]
+            },
+            _ => return Err(McpError::invalid_params("unknown completion reference", None)),
+        };
+        Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| McpError::internal_error(e, None))?))
+    }
+
     async fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParams>,
