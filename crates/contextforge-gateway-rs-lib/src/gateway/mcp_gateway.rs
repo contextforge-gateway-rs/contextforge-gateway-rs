@@ -1,8 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use contextforge_gateway_rs_apis::user_store::UserConfig;
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
-use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
