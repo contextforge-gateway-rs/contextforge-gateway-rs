@@ -146,7 +146,8 @@ where
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
-                let backend_client = GatewayBackendClient::new(request.clone(), self.plugin_runtime.clone());
+                let backend_client =
+                    GatewayBackendClient::new(name.clone(), request.clone(), self.plugin_runtime.clone());
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
@@ -432,14 +433,18 @@ where
 
         let mut routed_request = request;
         routed_request.uri = resource_uri;
-        service.subscribe(routed_request).await.map_err(|error| {
+        let tracked_uri = routed_request.uri.clone();
+        service.service().track_resource_subscription(tracked_uri.clone(), cx.peer.clone()).await;
+
+        if let Err(error) = service.subscribe(routed_request).await {
+            service.service().stop_tracking_resource_subscription(&tracked_uri).await;
             warn!("subscribe: backend {service_name} {error:?}");
-            ErrorData {
+            return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... got no responses from backends".into(),
                 data: None,
-            }
-        })?;
+            });
+        }
         info!("subscribe: backend {service_name} completed");
         Ok(())
     }
@@ -467,6 +472,7 @@ where
         let (service_name, service) = resolve_backend(&session_manager, "unsubscribe", backend_name).await?;
 
         let mut routed_request = request;
+        let tracked_uri = resource_uri.clone();
         routed_request.uri = resource_uri;
         service.unsubscribe(routed_request).await.map_err(|error| {
             warn!("unsubscribe: backend {service_name} {error:?}");
@@ -476,6 +482,7 @@ where
                 data: None,
             }
         })?;
+        service.service().stop_tracking_resource_subscription(&tracked_uri).await;
         info!("unsubscribe: backend {service_name} completed");
         Ok(())
     }

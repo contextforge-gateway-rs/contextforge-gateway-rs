@@ -259,8 +259,23 @@ impl ServerHandler for Counter {
         Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| McpError::internal_error(e, None))?))
     }
 
-    async fn subscribe(&self, request: SubscribeRequestParams, _: RequestContext<RoleServer>) -> Result<(), McpError> {
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
         if is_known_resource_uri(&request.uri) {
+            let uri = request.uri.clone();
+            let peer = context.peer;
+            tokio::spawn(async move {
+                for _ in 0..4 {
+                    if let Err(error) =
+                        peer.notify_resource_updated(ResourceUpdatedNotificationParam::new(uri.clone())).await
+                    {
+                        tracing::warn!("mock_counter: failed to send resource update notification: {error:?}");
+                    }
+                }
+            });
             Ok(())
         } else {
             Err(McpError::resource_not_found("resource_not_found", Some(json!({ "uri": request.uri }))))
