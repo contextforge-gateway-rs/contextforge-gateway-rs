@@ -20,6 +20,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 
 [workspace.dependencies]
+unicode-normalization = "0.1"
 contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib" }
 contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}

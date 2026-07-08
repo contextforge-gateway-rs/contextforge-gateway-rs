@@ -22,6 +22,7 @@ use rmcp::{
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
+use unicode_normalization::UnicodeNormalization;
 
 use super::{
     backend_client::{GatewayBackendClient, call_backend_tool},
@@ -563,26 +564,56 @@ fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N])
     })
 }
 
-/// Slugifies a federated item name the way the control plane composes its
-/// namespaced names: lowercase, runs of non-alphanumeric characters collapse
-/// to a single hyphen, no leading/trailing hyphen. Advertising
-/// `{backend}-{slug(tool)}` keeps the dataplane's tool names identical to the
-/// control plane's for the same virtual server.
+/// Slugifies a federated item name exactly like the control plane's
+/// `mcpgateway.utils.create_slug.slugify` (default "-" separator), so that
+/// advertising `{backend}-{cp_slug(tool)}` yields names identical to the
+/// control plane's for the same virtual server. Steps, in the control
+/// plane's order: unicode lowercase; drop apostrophes inside contractions;
+/// collapse runs of non-alphanumeric characters (underscore included) into
+/// single hyphens and trim them; map æ→ae, ß→ss, ø→o; NFKD-decompose and
+/// keep ASCII only (accents fold away, characters with no ASCII
+/// decomposition are dropped).
 fn cp_slug(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
+    // Unicode lowercase, matching Python's str.lower().
+    let lowered: Vec<char> = name.chars().flat_map(char::to_lowercase).collect();
+
+    // Drop apostrophes between word characters (contractions).
+    let mut decontracted = String::with_capacity(lowered.len());
+    for (i, &c) in lowered.iter().enumerate() {
+        let is_apostrophe = c == '\'' || c == '\u{2019}';
+        if is_apostrophe
+            && i > 0
+            && lowered[i - 1].is_alphanumeric()
+            && lowered.get(i + 1).is_some_and(|next| next.is_alphanumeric())
+        {
+            continue;
+        }
+        decontracted.push(c);
+    }
+
+    // Runs of non-word characters (and underscores) become single hyphens;
+    // ends are trimmed here — before the ASCII fold below — matching the
+    // control plane's ordering (a dropped non-ASCII prefix therefore leaves
+    // its separator behind, exactly as the control plane does).
+    let mut slug = String::with_capacity(decontracted.len());
     let mut pending_hyphen = false;
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() {
-            if pending_hyphen && !out.is_empty() {
-                out.push('-');
+    for c in decontracted.chars() {
+        if c.is_alphanumeric() {
+            if pending_hyphen && !slug.is_empty() {
+                slug.push('-');
             }
             pending_hyphen = false;
-            out.push(c.to_ascii_lowercase());
+            slug.push(c);
         } else {
             pending_hyphen = true;
         }
     }
-    out
+
+    // Special characters the NFKD fold does not decompose to ASCII.
+    let slug = slug.replace('æ', "ae").replace('ß', "ss").replace('ø', "o");
+
+    // NFKD-decompose and keep ASCII only.
+    slug.nfkd().filter(char::is_ascii).collect()
 }
 
 /// Maps a slugified tool name back to the upstream's original tool name using
@@ -784,11 +815,33 @@ mod tests {
 
     #[test]
     fn test_cp_slug_matches_control_plane_naming() {
+        // Expected values generated with the control plane's
+        // mcpgateway.utils.create_slug.slugify (default "-" separator).
         assert_eq!("get-stats", cp_slug("get_stats"));
         assert_eq!("stub-073", cp_slug("stub_073"));
         assert_eq!("echo", cp_slug("echo"));
         assert_eq!("already-slugged", cp_slug("already-slugged"));
         assert_eq!("mixed-case-name", cp_slug("Mixed Case__Name"));
+        assert_eq!("mixedcase-name", cp_slug("MixedCASE_Name"));
+        assert_eq!("multiple-spaces", cp_slug("Multiple   Spaces"));
+        assert_eq!("test", cp_slug("---test---"));
+        assert_eq!("user-example-com", cp_slug("user@example.com"));
+        // Contractions lose the apostrophe without gaining a hyphen.
+        assert_eq!("dont-stop", cp_slug("Don't Stop"));
+        // Accents fold to ASCII via NFKD.
+        assert_eq!("cafe-restaurant", cp_slug("Café & Restaurant"));
+        assert_eq!("naive-resume", cp_slug("Naïve résumé"));
+        assert_eq!("zurich", cp_slug("Zürich"));
+        // Special characters NFKD cannot decompose are mapped explicitly.
+        assert_eq!("strasse", cp_slug("Straße"));
+        assert_eq!("soren", cp_slug("Søren"));
+        assert_eq!("aero", cp_slug("Ærø"));
+        // Symbols with no ASCII decomposition act as separators...
+        assert_eq!("emoji-tool", cp_slug("emoji🚀tool"));
+        // ...while undecomposable word characters are dropped after the
+        // trim step, leaving their separator — the control plane does the
+        // same for e.g. CJK prefixes.
+        assert_eq!("-tool", cp_slug("日本語-tool"));
     }
 
     #[test]
