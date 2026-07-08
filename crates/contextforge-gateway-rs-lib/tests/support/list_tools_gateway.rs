@@ -217,7 +217,11 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
 fn create_tool_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
+        // Tool names are advertised in control-plane slug form (underscores
+        // become hyphens); prompts and resources keep their raw names.
+        .flat_map(|port| {
+            MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}-{}", name.replace('_', "-")))
+        })
         .collect()
 }
 

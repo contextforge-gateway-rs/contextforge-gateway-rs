@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use contextforge_gateway_rs_apis::user_store::UserConfig;
+use contextforge_gateway_rs_apis::user_store::{UserConfig, VirtualHost};
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
 use http::request::Parts;
 use itertools::Itertools;
@@ -284,7 +284,9 @@ where
             });
         };
         let backend_name = backend_name.to_owned();
-        let tool_name = tool_name.to_owned();
+        // Advertised names carry the control-plane slug of the upstream tool
+        // name; map back to the original before calling the backend.
+        let tool_name = original_tool_name(virtual_host, &backend_name, tool_name);
 
         let (service_name, service) = resolve_backend(&session_manager, "call_tool", &backend_name).await?;
 
@@ -561,6 +563,39 @@ fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N])
     })
 }
 
+/// Slugifies a federated item name the way the control plane composes its
+/// namespaced names: lowercase, runs of non-alphanumeric characters collapse
+/// to a single hyphen, no leading/trailing hyphen. Advertising
+/// `{backend}-{slug(tool)}` keeps the dataplane's tool names identical to the
+/// control plane's for the same virtual server.
+fn cp_slug(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut pending_hyphen = false;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            if pending_hyphen && !out.is_empty() {
+                out.push('-');
+            }
+            pending_hyphen = false;
+            out.push(c.to_ascii_lowercase());
+        } else {
+            pending_hyphen = true;
+        }
+    }
+    out
+}
+
+/// Maps a slugified tool name back to the upstream's original tool name using
+/// the backend's published `allowed_tool_names`. Falls back to the slug itself
+/// when no entry matches (e.g. tools whose names are already slug-shaped).
+fn original_tool_name(virtual_host: &VirtualHost, backend_name: &str, slugged: &str) -> String {
+    virtual_host
+        .backends
+        .get(backend_name)
+        .and_then(|backend| backend.allowed_tool_names.iter().find(|original| cp_slug(original) == slugged).cloned())
+        .unwrap_or_else(|| slugged.to_owned())
+}
+
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
 /// and returns the `(backend_name, result)` pairs that succeeded.
 async fn fan_out_list<R, E, F, Fut, C>(
@@ -669,7 +704,7 @@ fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
                 .tools
                 .into_iter()
                 .map(|mut t| {
-                    t.name = format!("{backend_name}-{}", t.name).into();
+                    t.name = format!("{backend_name}-{}", cp_slug(&t.name)).into();
                     t
                 })
                 .collect::<Vec<_>>()
@@ -745,5 +780,36 @@ mod tests {
 
         let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
         assert_eq!(Some(("counter_one", "get-value")), split_prefixed_name("counter_one-get-value", &backend_names));
+    }
+
+    #[test]
+    fn test_cp_slug_matches_control_plane_naming() {
+        assert_eq!("get-stats", cp_slug("get_stats"));
+        assert_eq!("stub-073", cp_slug("stub_073"));
+        assert_eq!("echo", cp_slug("echo"));
+        assert_eq!("already-slugged", cp_slug("already-slugged"));
+        assert_eq!("mixed-case-name", cp_slug("Mixed Case__Name"));
+    }
+
+    #[test]
+    fn test_original_tool_name_reverse_maps_slug() {
+        let config_json = serde_json::json!({
+            "backends": {
+                "compliance-reference": {
+                    "name": "compliance_reference",
+                    "url": "http://upstream:9000/mcp",
+                    "transport": "STREAMABLEHTTP",
+                    "passthrough_headers": [],
+                    "allowed_tool_names": ["get_stats", "echo"],
+                    "allowed_resource_names": [],
+                    "allowed_prompt_names": []
+                }
+            }
+        });
+        let virtual_host: VirtualHost = serde_json::from_value(config_json).expect("valid virtual host");
+        assert_eq!("get_stats", original_tool_name(&virtual_host, "compliance-reference", "get-stats"));
+        assert_eq!("echo", original_tool_name(&virtual_host, "compliance-reference", "echo"));
+        // No matching entry: the slug passes through unchanged.
+        assert_eq!("unknown-tool", original_tool_name(&virtual_host, "compliance-reference", "unknown-tool"));
     }
 }
