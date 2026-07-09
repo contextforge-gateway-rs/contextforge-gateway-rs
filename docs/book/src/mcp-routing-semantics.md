@@ -62,10 +62,10 @@ matches are treated as invalid session state and trigger backend cleanup.
 
 ## Known Gaps
 
-Pagination is not complete. `list_tools`, `list_resources`, and `list_prompts`
-currently perform one backend call and return a merged response with no
-downstream cursor. Full parity needs to gather all backend pages or define a
-merged cursor strategy.
+Pagination is not complete. `list_tools`, `list_resources`, `list_prompts`,
+and `list_resource_templates` currently perform one backend call and return a
+merged response with no downstream cursor. Full parity needs to gather all
+backend pages or define a merged cursor strategy.
 
 Streaming/SSE behavior is also still a tracked design area. The target is to
 stream downstream as backend chunks arrive while preserving plugin behavior,

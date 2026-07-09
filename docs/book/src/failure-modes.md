@@ -60,8 +60,9 @@ healthy stack the middleware has already established the context.
 | Failure | Behavior |
 | --- | --- |
 | Redis connection loss | The connection manager retries (configured with 1,000 retries). |
-| User config missing or undecodable | `400 Bad Request` from `user_config_store_layer`. |
-| Other Redis errors | `500 Internal Server Error` from `user_config_store_layer`. |
+| User config missing | `400 Bad Request` from `user_config_store_layer`. |
+| Redis `GET` returns an error | Currently reported by the Redis adapter as missing data, so the layer returns `400 Bad Request`. |
+| User config undecodable, key encoding failure, or other non-missing store errors | `500 Internal Server Error` from `user_config_store_layer`. |
 
 For a symptom-first version of this table, see the troubleshooting section in
 [Run the Gateway Locally](running-the-gateway.md#troubleshooting).

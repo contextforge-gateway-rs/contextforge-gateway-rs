@@ -72,7 +72,7 @@ depends only on `sub` today:
   "scopes": {
     "server_id": "my_id",
     "permissions": ["tools.read", "servers.use"],
-    "ip_restrictions": [],
+    "ip_restrictions": ["192.169.1.0/24"],
     "time_restrictions": null
   }
 }

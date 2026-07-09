@@ -16,7 +16,7 @@ process.
 | Fanout | One `StreamableHttpClientTransport` per configured backend in the selected virtual host, opened concurrently with `futures::future::join_all`. |
 | Backend failure | Not fatal. A backend that fails to initialize is stored with no running service; list calls skip it and routed calls to it fail. |
 | Stored state | The local user session mapping, plus one `BackendTransports` entry per backend keyed by principal, backend name, and downstream session id. |
-| Result | `InitializeResult` with the merged capabilities of the reachable backends. |
+| Result | `InitializeResult` with the gateway's current fixed capability set: prompts, resources, and tools enabled. Backend capabilities are stored with transport state but are not merged into the response yet. |
 
 ## Routed List Methods
 

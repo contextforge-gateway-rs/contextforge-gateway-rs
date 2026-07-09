@@ -57,8 +57,9 @@ Backend MCP sessions are local process state
 Redis is required at startup and on every uncached config lookup. The
 connection manager retries heavily (1,000 retries) rather than failing fast,
 and the in-process cache (default 60 s) rides out short blips for warm
-subjects. A cold subject during a Redis outage fails with `500` until Redis
-returns.
+subjects. A cold subject during a Redis outage fails at config lookup; the
+current Redis adapter reports failed `GET` calls as missing data, so the layer
+returns `400` until Redis returns.
 
 ## Images And Sizing
 

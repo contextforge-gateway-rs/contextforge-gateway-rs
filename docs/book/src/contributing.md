@@ -39,16 +39,19 @@ middle of routing code.
 
 ## Validation
 
-The pre-commit hooks and CI run the same gates:
+The pre-commit hooks run these local gates:
 
 ```bash
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo deny check
+cargo deny check advisories licenses
 cargo nextest run --locked --workspace
 cargo build --locked --workspace
-cargo bench --no-run
+cargo bench --locked --workspace --no-run
 ```
+
+CI runs the same gates and additionally runs
+`cargo shear --check-test-targets --deny-warnings --locked`.
 
 Expectations by change type:
 
