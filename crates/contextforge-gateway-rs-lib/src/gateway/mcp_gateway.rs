@@ -289,14 +289,7 @@ where
         let response = call_backend_tool(service.peer(), routed_request, progress_token.clone(), cx.ct.clone()).await;
         service.service().stop_tracking_tool_call(progress_token.clone()).await;
 
-        let response = response.map_err(|error| {
-            warn!("call_tool: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = response.map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
         let response = match (&self.plugin_runtime, post_state) {
             (Some(plugin_runtime), Some(post_state)) => {
                 plugin_runtime.after_tool_call(&tool_name, response, Some(post_state)).await?
@@ -351,14 +344,10 @@ where
 
         let mut routed_request = request;
         routed_request.uri = resource_uri;
-        let response = service.read_resource(routed_request).await.map_err(|error| {
-            warn!("read_resource: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = service
+            .read_resource(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
         info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
         Ok(response)
     }
@@ -405,19 +394,13 @@ where
             route_prefixed_name(&session_manager, "subscribe", &request.uri, "Routing problem... wrong resource name")
                 .await?;
 
-        let tracked_uri = resource_uri.clone();
         let mut routed_request = request;
-        routed_request.uri = resource_uri;
-        service.service().track_resource_subscription(tracked_uri.clone(), cx.peer.clone()).await;
+        routed_request.uri = resource_uri.clone();
+        service.service().track_resource_subscription(&resource_uri, cx.peer.clone()).await;
 
         if let Err(error) = service.subscribe(routed_request).await {
-            service.service().stop_tracking_resource_subscription(&tracked_uri).await;
-            warn!("subscribe: backend {service_name} {error:?}");
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            });
+            service.service().stop_tracking_resource_subscription(&resource_uri).await;
+            return Err(backend_forward_error("subscribe", &service_name, &error));
         }
         info!("subscribe: backend {service_name} completed");
         Ok(())
@@ -440,18 +423,13 @@ where
         )
         .await?;
 
-        let tracked_uri = resource_uri.clone();
         let mut routed_request = request;
-        routed_request.uri = resource_uri;
-        service.unsubscribe(routed_request).await.map_err(|error| {
-            warn!("unsubscribe: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
-        service.service().stop_tracking_resource_subscription(&tracked_uri).await;
+        routed_request.uri = resource_uri.clone();
+        service
+            .unsubscribe(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
+        service.service().stop_tracking_resource_subscription(&resource_uri).await;
         info!("unsubscribe: backend {service_name} completed");
         Ok(())
     }
@@ -496,14 +474,10 @@ where
 
         let mut routed_request = request;
         routed_request.name = prompt_name;
-        let response = service.get_prompt(routed_request).await.map_err(|_| {
-            warn!("get_prompt: backend {service_name} returned an error");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = service
+            .get_prompt(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
         info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
         Ok(response)
     }
@@ -536,14 +510,10 @@ where
             Reference::Prompt(prompt) => prompt.name = stripped,
             Reference::Resource(resource) => resource.uri = stripped,
         }
-        let response = service.complete(routed_request).await.map_err(|error| {
-            warn!("complete: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = service
+            .complete(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("complete", &service_name, &error))?;
         info!("complete: backend {service_name} returned {} values", response.completion.values.len());
         Ok(response)
     }
@@ -556,6 +526,22 @@ fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N])
         let backend = backend.as_ref();
         name.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
     })
+}
+
+/// Joins a backend name and a backend-local name into the namespaced `{backend}-{rest}` form.
+/// Inverse of [`split_prefixed_name`]; together they own the naming convention.
+pub(crate) fn prefixed_name(backend_name: &str, rest: &str) -> String {
+    format!("{backend_name}-{rest}")
+}
+
+/// Logs a backend forwarding failure and maps it to the routing error every handler returns.
+fn backend_forward_error(op: &str, backend_name: &str, error: &impl std::fmt::Debug) -> ErrorData {
+    warn!("{op}: backend {backend_name} {error:?}");
+    ErrorData {
+        code: ErrorCode::INTERNAL_ERROR,
+        message: "Routing problem... got no responses from backends".into(),
+        data: None,
+    }
 }
 
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
@@ -690,7 +676,7 @@ fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
                 .tools
                 .into_iter()
                 .map(|mut t| {
-                    t.name = format!("{backend_name}-{}", t.name).into();
+                    t.name = prefixed_name(&backend_name, &t.name).into();
                     t
                 })
                 .collect::<Vec<_>>()
@@ -707,8 +693,8 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
                 .resources
                 .into_iter()
                 .map(|mut t| {
-                    t.name = format!("{backend_name}-{}", t.name);
-                    t.uri = format!("{backend_name}-{}", t.uri);
+                    t.name = prefixed_name(&backend_name, &t.name);
+                    t.uri = prefixed_name(&backend_name, &t.uri);
                     t
                 })
                 .collect::<Vec<_>>()
@@ -722,8 +708,8 @@ fn merge_resource_templates(templates: Vec<(String, ListResourceTemplatesResult)
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.resource_templates.into_iter().map(move |mut template| {
-                template.name = format!("{backend_name}-{}", template.name);
-                template.uri_template = format!("{backend_name}-{}", template.uri_template);
+                template.name = prefixed_name(&backend_name, &template.name);
+                template.uri_template = prefixed_name(&backend_name, &template.uri_template);
                 template
             })
         })
@@ -736,7 +722,7 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.prompts.into_iter().map(move |mut prompt| {
-                prompt.name = format!("{backend_name}-{}", prompt.name);
+                prompt.name = prefixed_name(&backend_name, &prompt.name);
                 prompt
             })
         })
