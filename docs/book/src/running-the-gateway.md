@@ -247,7 +247,8 @@ and MCP session id.
 | Symptom | Likely boundary |
 | --- | --- |
 | `401 Unauthorized` | Missing bearer token, invalid signature, expired token, wrong issuer, wrong audience, or no configured decoder key. |
-| `400 Problem occurred retrieving the configuration` | Redis has no config for the JWT subject, or the config could not be decoded. |
+| `400 Problem occurred retrieving the configuration` | Redis has no config for the JWT subject, or the Redis lookup returned no data. |
+| `500 Problem occurred retrieving the configuration` | The stored config could not be decoded, the Redis key could not be encoded, or another non-missing config-store error occurred. |
 | `404` with `{"detail":"Server not found"}` | The path virtual host id is not present in that user's config. |
 | MCP session id is empty | The `initialize` call failed before RMCP created a downstream session. |
 | Backend calls fail | Backend URL is wrong, backend process is down, or `--upstream-connection-mode` rejects the URL scheme. |

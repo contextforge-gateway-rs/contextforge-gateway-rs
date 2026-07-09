@@ -137,10 +137,10 @@ Tear the stack down with the same three `-f` files and `down`.
 
 | Question | Query |
 | --- | --- |
-| Request count by method, status, and service | `http_server_request_duration_count` |
-| p95 latency | `histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket[1m])))` |
+| Request count by method, status, and service | `http_server_request_duration_seconds_count` |
+| p95 latency | `histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[1m])))` |
 | In-flight requests | `http_server_active_requests` |
-| Payload throughput | `http_server_request_body_size_sum` / `http_server_response_body_size_sum` |
+| Payload throughput | `http_server_request_body_size_bytes_sum` / `http_server_response_body_size_bytes_sum` |
 
 ## Debugging Checklist
 

@@ -123,11 +123,14 @@ creates a `DownstreamSessionId` and places it in the request context.
 4. For every backend in the selected virtual host, it concurrently builds a
    `StreamableHttpClientTransport` with the configured backend URL and serves a
    `GatewayBackendClient` over that transport.
-5. It collects backend capabilities and running RMCP client services.
+5. It collects backend capabilities and running RMCP client services. The
+   capabilities are stored with backend transport state for future routing, but
+   they do not shape the downstream initialize response yet.
 6. It writes the local user session mapping.
 7. It stores each backend service in `BackendTransports` keyed by principal,
    backend name, and downstream session id.
-8. It returns `InitializeResult` with merged gateway capabilities.
+8. It returns `InitializeResult` with the gateway's current fixed capability
+   set: prompts, resources, and tools enabled.
 
 Backend initialization is concurrent through `futures::future::join_all`.
 
