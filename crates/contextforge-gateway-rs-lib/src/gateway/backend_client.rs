@@ -14,6 +14,8 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+use super::mcp_gateway::prefixed_name;
+
 #[derive(Clone)]
 pub(crate) struct GatewayBackendClient {
     backend_name: String,
@@ -79,10 +81,10 @@ impl GatewayBackendClient {
         calls.get(progress_token).cloned()
     }
 
-    pub(crate) async fn track_resource_subscription(&self, resource_uri: String, downstream: Peer<RoleServer>) {
+    pub(crate) async fn track_resource_subscription(&self, resource_uri: &str, downstream: Peer<RoleServer>) {
         debug!("track_resource_subscription backend {} uri {resource_uri}", self.backend_name);
         let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.insert(resource_uri, downstream);
+        subscriptions.insert(resource_uri.to_owned(), downstream);
     }
 
     pub(crate) async fn stop_tracking_resource_subscription(&self, resource_uri: &str) {
@@ -153,7 +155,7 @@ impl ClientHandler for GatewayBackendClient {
             return;
         };
 
-        params.uri = format!("{}-{}", self.backend_name, params.uri);
+        params.uri = prefixed_name(&self.backend_name, &params.uri);
         if let Err(error) = downstream.notify_resource_updated(params).await {
             warn!("resource_updated: unable to forward backend notification downstream: {error:?}");
         }

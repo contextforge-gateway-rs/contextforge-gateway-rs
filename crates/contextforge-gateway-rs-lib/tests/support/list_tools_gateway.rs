@@ -4,7 +4,9 @@ use contextforge_gateway_rs_apis::{
     User,
     user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
 };
-use contextforge_gateway_rs_lib::{Config, Gateway, Result, UserConfigStore, UserConfigStoreType};
+use contextforge_gateway_rs_lib::{
+    Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
+};
 use futures::{FutureExt, future::BoxFuture};
 use rmcp::transport::{
     StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
@@ -26,6 +28,16 @@ pub(crate) struct ListToolsGatewaySettings {
     pub(crate) expected_prompt_names: Vec<String>,
     pub(crate) expected_resource_template_names: Vec<String>,
     pub(crate) expected_resource_template_uris: Vec<String>,
+}
+
+/// Gateway config for plaintext-upstream tests, shared by the integration test binaries.
+pub(crate) fn plaintext_config(gateway_port: u16) -> Config {
+    Config {
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
+        upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
+        ..Default::default()
+    }
 }
 
 pub(crate) fn create_ports(ports: usize) -> Vec<u16> {

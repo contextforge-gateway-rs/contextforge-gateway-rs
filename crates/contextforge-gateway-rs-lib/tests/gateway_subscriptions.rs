@@ -3,29 +3,27 @@ mod support;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex as StdMutex},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
-use contextforge_gateway_rs_lib::{Config, Result, UpstreamConnectionMode};
+use contextforge_gateway_rs_lib::Result;
 use futures::future::try_join_all;
 use rmcp::{
-    ClientHandler, ServiceExt,
+    ClientHandler,
     model::{
         ClientCapabilities, Implementation, InitializeRequestParams, ResourceUpdatedNotificationParam,
         SubscribeRequestParams, UnsubscribeRequestParams,
     },
-    service::{NotificationContext, RoleClient, RunningService},
-    transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
+    service::{NotificationContext, RoleClient},
 };
-use tracing::warn;
 
 use support::{
-    ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
-    mock_counter::RESOURCE_UPDATE_NOTIFY_INTERVAL,
+    CLIENT_CONNECT_TIMEOUT, ListToolsGatewaySettings, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler,
+    create_client, create_gateway_with_four_counters, create_ports,
+    mock_counter::{KNOWN_RESOURCE_URIS, RESOURCE_UPDATE_NOTIFY_INTERVAL},
+    plaintext_config,
 };
 
-const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// The mocks notify continuously, so this is just the threshold proving delivery works.
 const MIN_UPDATES_PER_BACKEND: usize = 4;
 
@@ -50,15 +48,6 @@ impl ClientHandler for RecordingClient {
         _context: NotificationContext<RoleClient>,
     ) {
         self.resource_updates.lock().expect("resource update lock poisoned").push(params);
-    }
-}
-
-fn plaintext_config(gateway_port: u16) -> Config {
-    Config {
-        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
-        upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
     }
 }
 
@@ -101,7 +90,7 @@ async fn plaintext_subscribe_to_unrouted_resource_errors() -> Result<()> {
 async fn assert_two_backend_subscribe_roundtrips(gateway_url: String, client: reqwest::Client) -> Result<()> {
     let recording_client = RecordingClient::default();
     let resource_updates = Arc::clone(&recording_client.resource_updates);
-    let running_service = connect_recording_client(gateway_url, client, recording_client).await?;
+    let running_service = connect_client_with_handler(gateway_url, client, recording_client).await?;
 
     let resources = running_service.list_resources(None).await?;
     let mut selected_backends = HashSet::new();
@@ -166,30 +155,6 @@ async fn assert_unrouted_subscribe_errors(gateway_url: String, client: reqwest::
     Ok(())
 }
 
-async fn connect_recording_client(
-    gateway_url: String,
-    client: reqwest::Client,
-    recording_client: RecordingClient,
-) -> Result<RunningService<RoleClient, RecordingClient>> {
-    let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
-    loop {
-        let config = StreamableHttpClientTransportConfig::with_uri(gateway_url.clone());
-        let transport = StreamableHttpClientTransport::with_client(client.clone(), config);
-
-        match recording_client.clone().serve(transport).await {
-            Ok(running_service) => return Ok(running_service),
-            Err(error) if Instant::now() < deadline => {
-                warn!("No Service {error:?}");
-                tokio::time::sleep(TEST_POLL_INTERVAL).await;
-            },
-            Err(error) => {
-                warn!("No Service {error:?}");
-                return Err("Couldn't get a service".into());
-            },
-        }
-    }
-}
-
 async fn wait_for_resource_updates(
     resource_updates: &StdMutex<Vec<ResourceUpdatedNotificationParam>>,
     expected_uris: &[String],
@@ -222,6 +187,12 @@ async fn wait_for_resource_updates(
     }
 }
 
+/// Extracts the backend prefix from a namespaced mock resource URI; the suffixes are the
+/// backend-local URIs the mock owns, so this stays in lockstep with the mock's list.
 fn mock_backend_name(uri: &str) -> Option<String> {
-    uri.strip_suffix("-str:////Users/to/some/path/").or_else(|| uri.strip_suffix("-memo://insights")).map(str::to_owned)
+    KNOWN_RESOURCE_URIS
+        .iter()
+        .find_map(|known| uri.strip_suffix(known))
+        .and_then(|prefix| prefix.strip_suffix('-'))
+        .map(str::to_owned)
 }

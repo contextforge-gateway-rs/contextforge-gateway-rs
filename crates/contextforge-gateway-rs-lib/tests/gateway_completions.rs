@@ -1,20 +1,12 @@
 mod support;
 
-use contextforge_gateway_rs_lib::{Config, Result, UpstreamConnectionMode};
+use contextforge_gateway_rs_lib::Result;
 use tracing::info;
 
 use support::{
     ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
+    plaintext_config,
 };
-
-fn plaintext_config(gateway_port: u16) -> Config {
-    Config {
-        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
-        upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
-    }
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]

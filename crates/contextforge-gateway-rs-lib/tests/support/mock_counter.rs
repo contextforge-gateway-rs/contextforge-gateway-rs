@@ -339,8 +339,10 @@ impl ServerHandler for Counter {
 
 /// The backend-local resource URIs this mock owns; subscribe/unsubscribe only succeed for these,
 /// so a successful gateway call proves the namespace prefix was stripped before forwarding.
+pub const KNOWN_RESOURCE_URIS: [&str; 2] = ["str:////Users/to/some/path/", "memo://insights"];
+
 fn is_known_resource_uri(uri: &str) -> bool {
-    matches!(uri, "str:////Users/to/some/path/" | "memo://insights")
+    KNOWN_RESOURCE_URIS.contains(&uri)
 }
 
 /// Interval between the resource-update notifications sent after a subscribe is accepted.
