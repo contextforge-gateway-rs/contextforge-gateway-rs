@@ -28,8 +28,9 @@ Authentication is bearer-JWT only:
   `UserConfig`; the path selects one virtual host inside it. A caller can
   never reach a backend that is not in their own config, and unknown virtual
   hosts return `404` before MCP handling.
-- `teams`, `user`, and `scopes` claims are carried but not yet enforced;
-  fine-grained permissions are future policy work.
+- `jti`, `token_use`, `iat`, `teams`, `user`, and `scopes` are carried but not
+  yet enforced; `token_use`, `iat`, `teams`, and `scopes` are optional, as is
+  `user.full_name`. Fine-grained permissions are future policy work.
 
 ## What Compromise Means
 

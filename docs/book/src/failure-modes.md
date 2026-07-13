@@ -33,7 +33,7 @@ healthy stack the middleware has already established the context.
 
 | Failure | Behavior |
 | --- | --- |
-| Prefixed name does not start with a configured backend name plus `-` | Internal error (`wrong tool name` / `wrong resource name` / `wrong prompt name`). |
+| Prefixed name or completion reference does not start with a configured backend name plus `-` | Internal error (`wrong tool name` / `wrong resource name` / `wrong prompt name` / `wrong completion reference`). |
 | No backend entry matches the split name | Internal error (`got no responses from backends`). |
 | Backend entry exists but has no running service | Internal error. Happens when that backend failed during `initialize`. |
 | More than one backend entry matches | `INVALID_REQUEST`, and the session's backend entries are removed via `cleanup_backends`. |

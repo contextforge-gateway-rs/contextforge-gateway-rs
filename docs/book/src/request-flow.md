@@ -130,7 +130,7 @@ creates a `DownstreamSessionId` and places it in the request context.
 7. It stores each backend service in `BackendTransports` keyed by principal,
    backend name, and downstream session id.
 8. It returns `InitializeResult` with the gateway's current fixed capability
-   set: prompts, resources, and tools enabled.
+   set: completions, prompts, resources, and tools enabled.
 
 Backend initialization is concurrent through `futures::future::join_all`.
 
@@ -159,6 +159,7 @@ Current routed method families:
 | `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Borrow all configured backend services, call every available backend concurrently with `fan_out_list`, namespace results with the backend name, sort merged output, and return one list. |
 | `call_tool` | Split `{backend_name}-{tool_name}`, resolve one backend, optionally run `before_tool_call`, apply argument/name changes, track the downstream progress token, call the backend, optionally run `after_tool_call`, and return the backend result. |
 | `read_resource`, `get_prompt` | Split the prefixed resource or prompt name, resolve one backend, strip the gateway prefix, call the backend, and return the backend result. |
+| `complete` | Split the backend-prefixed prompt name or resource URI in `ref`, resolve one backend, strip the gateway prefix, and return the backend completion result. |
 
 `GatewayBackendClient` handles backend progress notifications for `call_tool`.
 If a progress token matches an in-flight downstream tool call, it optionally
@@ -178,7 +179,6 @@ backend-routed:
 | --- | --- |
 | `ping` | Returns success. |
 | `subscribe`, `unsubscribe` | Mutate the local subscription set. |
-| `complete` | Returns local completion examples. |
 
 These paths still pass through the same HTTP middleware, but they do not use the
 backend fanout or prefixed routing path today.

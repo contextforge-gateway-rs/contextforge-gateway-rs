@@ -48,13 +48,14 @@ gateway-one-increment
   -> upstream tool name = increment
 ```
 
-`call_tool`, `read_resource`, and `get_prompt` all share the same splitter.
-Backend names can themselves contain `-` (as in `gateway-one`), so the splitter
-does not cut on the first `-`. Instead it walks the configured backend names,
-takes the first one the prefixed name starts with, and then requires a `-`
-immediately after that name. That is why `gateway-one-increment` resolves to
-backend `gateway-one` and tool `increment`, while a malformed name such as
-`gateway-oneincrement` is rejected.
+`call_tool`, `read_resource`, `get_prompt`, and `complete` all share the same
+splitter. For `complete`, the routed value is the prompt name or resource URI
+inside its `ref`. Backend names can themselves contain `-` (as in
+`gateway-one`), so the splitter does not cut on the first `-`. Instead it walks
+the configured backend names, takes the first one the prefixed name starts
+with, and then requires a `-` immediately after that name. That is why
+`gateway-one-increment` resolves to backend `gateway-one` and tool `increment`,
+while a malformed name such as `gateway-oneincrement` is rejected.
 
 After the split, the gateway resolves exactly one connected backend service for
 the principal and downstream session. Missing backends fail the call. Duplicate
