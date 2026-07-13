@@ -171,10 +171,10 @@
     <text x="1130" y="764" text-anchor="middle" class="mini">backend call -> response</text>
 
     <rect x="966" y="780" width="328" height="48" rx="8" class="box" />
-    <text x="1130" y="801" text-anchor="middle" class="body">read_resource / get_prompt</text>
+    <text x="1130" y="801" text-anchor="middle" class="body">read_resource / get_prompt / complete</text>
     <text x="1130" y="821" text-anchor="middle" class="mini">split prefix -> resolve backend -> strip prefix -> call</text>
 
-    <text x="1130" y="844" text-anchor="middle" class="mini">ping, subscribe, complete are local today</text>
+    <text x="1130" y="844" text-anchor="middle" class="mini">ping, subscribe, unsubscribe are local today</text>
   </g>
 
   <g>

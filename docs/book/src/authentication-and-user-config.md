@@ -47,11 +47,11 @@ important to routing are:
 | --- | --- |
 | `sub` | Becomes the user config key and the principal for backend session lookup. |
 | `iss`, `aud`, `exp` | Authentication checks only. |
-| `teams`, `user`, `scopes` | Carried in claims for future policy use; not currently used by MCP routing. `teams` and `scopes` are optional, so tokens without them still validate. |
+| `jti`, `token_use`, `iat`, `teams`, `user`, `scopes` | Carried in claims for future policy use; not currently used by MCP routing. `token_use`, `iat`, `teams`, and `scopes` are optional, as is `user.full_name`, so tokens without those fields still validate. |
 
 A concrete decoded payload for the local `admin@example.com` subject looks like
 this (timestamps shown as example Unix seconds). Of everything here, MCP routing
-depends only on `sub` today:
+depends only on `sub` today. The optional fields are included for illustration:
 
 ```json
 {

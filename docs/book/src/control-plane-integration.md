@@ -16,7 +16,7 @@ These are the values both sides currently rely on:
 | Client-facing route | `/servers/{virtual_host_id}/mcp` behaves like the legacy ContextForge MCP endpoint. The front door rewrites it to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the dataplane. |
 | Unknown virtual host | `404` with body `{"detail":"Server not found"}`, matching the control-plane response shape. |
 | Token issuer and audience | `iss = mcpgateway`, `aud = mcpgateway-api` — the values the control plane mints. |
-| Claims shape | `sub`, `jti`, `token_use`, `exp`, and `user` are required; `iat`, `teams`, and `scopes` are optional. The dataplane routes on `sub` only. |
+| Claims shape | `sub`, `jti`, `iss`, `aud`, `exp`, and `user` are required. `token_use`, `iat`, `teams`, and `scopes` are optional, as is `user.full_name`. The dataplane routes on `sub` only. |
 | User config key | MessagePack-encoded `User::new(jwt_subject)` (key type plus subject). |
 | User config value | MessagePack-encoded `UserConfig`; the JSON schema is generated into `schemas/user_config.json`. |
 | Plugin config key | `ContextForgeGatewayRuntimePluginConfig`, JSON or MessagePack, `version: 1` with a `cpex` section. |
