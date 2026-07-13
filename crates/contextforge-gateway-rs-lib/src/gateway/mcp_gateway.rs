@@ -784,7 +784,7 @@ mod tests {
     fn test_control_plane_alias_is_advertised_and_routes_to_original_name() {
         let config_json = serde_json::json!({
             "backends": {
-                "compliance-reference": {
+                "79fabb70-2188-4de8-95ed-dc1e976e14d4": {
                     "name": "compliance_reference",
                     "url": "http://upstream:9000/mcp",
                     "transport": "STREAMABLEHTTP",
@@ -800,12 +800,15 @@ mod tests {
             }
         });
         let virtual_host: VirtualHost = serde_json::from_value(config_json).expect("valid virtual host");
-        let backend_names = vec!["compliance-reference"];
+        let backend_ids = vec!["79fabb70-2188-4de8-95ed-dc1e976e14d4"];
 
-        assert_eq!("Public.Tool", exposed_tool_name(&virtual_host, "compliance-reference", "get_stats"));
         assert_eq!(
-            Some(("compliance-reference", "get_stats")),
-            resolve_tool_route(&virtual_host, "Public.Tool", &backend_names)
+            "Public.Tool",
+            exposed_tool_name(&virtual_host, "79fabb70-2188-4de8-95ed-dc1e976e14d4", "get_stats")
+        );
+        assert_eq!(
+            Some(("79fabb70-2188-4de8-95ed-dc1e976e14d4", "get_stats")),
+            resolve_tool_route(&virtual_host, "Public.Tool", &backend_ids)
         );
     }
 
