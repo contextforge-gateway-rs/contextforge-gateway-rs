@@ -19,6 +19,7 @@ use super::mcp_gateway::prefixed_name;
 #[derive(Clone)]
 pub(crate) struct GatewayBackendClient {
     backend_name: String,
+    namespace_identifiers: bool,
     initialize_request: InitializeRequestParams,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     in_flight_calls: Arc<Mutex<HashMap<ProgressToken, Arc<InFlightToolCall>>>>,
@@ -36,11 +37,13 @@ struct InFlightToolCall {
 impl GatewayBackendClient {
     pub(crate) fn new(
         backend_name: String,
+        namespace_identifiers: bool,
         initialize_request: InitializeRequestParams,
         plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     ) -> Self {
         Self {
             backend_name,
+            namespace_identifiers,
             initialize_request,
             plugin_runtime,
             in_flight_calls: Arc::default(),
@@ -155,11 +158,15 @@ impl ClientHandler for GatewayBackendClient {
             return;
         };
 
-        params.uri = prefixed_name(&self.backend_name, &params.uri);
+        params.uri = resource_uri_for_downstream(&self.backend_name, params.uri, self.namespace_identifiers);
         if let Err(error) = downstream.notify_resource_updated(params).await {
             warn!("resource_updated: unable to forward backend notification downstream: {error:?}");
         }
     }
+}
+
+fn resource_uri_for_downstream(backend_name: &str, uri: String, namespace_identifiers: bool) -> String {
+    if namespace_identifiers { prefixed_name(backend_name, &uri) } else { uri }
 }
 
 /// Calls the tool on the backend, keeping the downstream progress token on
@@ -194,5 +201,23 @@ pub(crate) async fn call_backend_tool(
     match response.map_err(|_| ServiceError::TransportClosed)?? {
         ServerResult::CallToolResult(result) => Ok(result),
         _ => Err(ServiceError::UnexpectedResponse),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resource_uri_for_downstream;
+
+    #[test]
+    fn single_backend_resource_update_preserves_uri() {
+        assert_eq!("test://resource", resource_uri_for_downstream("backend-id", "test://resource".to_owned(), false));
+    }
+
+    #[test]
+    fn multi_backend_resource_update_prefixes_uri() {
+        assert_eq!(
+            "backend-id-test://resource",
+            resource_uri_for_downstream("backend-id", "test://resource".to_owned(), true)
+        );
     }
 }

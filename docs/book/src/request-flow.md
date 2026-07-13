@@ -156,10 +156,10 @@ Current routed method families:
 
 | Method family | Flow |
 | --- | --- |
-| `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Borrow all configured backend services, call every available backend concurrently with `fan_out_list`, namespace results with the backend name, sort merged output, and return one list. |
-| `call_tool` | Split `{backend_name}-{tool_name}`, resolve one backend, optionally run `before_tool_call`, apply argument/name changes, track the downstream progress token, call the backend, optionally run `after_tool_call`, and return the backend result. |
-| `read_resource`, `get_prompt` | Split the prefixed resource or prompt name, resolve one backend, strip the gateway prefix, call the backend, and return the backend result. |
-| `complete` | Split the backend-prefixed prompt name or resource URI in `ref`, resolve one backend, strip the gateway prefix, and return the backend completion result. |
+| `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Borrow all configured backend services, call every available backend concurrently with `fan_out_list`, preserve identifiers for one backend or namespace them for multiple backends, sort merged output, and return one list. Explicit tool aliases are preserved exactly. |
+| `call_tool` | Resolve an exact tool alias first; otherwise preserve the name for one backend or split `{backend_name}-{tool_name}` for multiple backends. Resolve one backend, run the optional tool hooks, track progress, call the backend, and return the result. |
+| `read_resource`, `subscribe`, `unsubscribe`, `get_prompt` | Select the only backend and forward the identifier unchanged, or split and strip the prefix for a multi-backend host, then call the resolved backend. |
+| `complete` | Apply the same conditional routing to the prompt name or resource URI in `ref`, then return the selected backend's completion result. |
 
 `GatewayBackendClient` handles backend progress notifications for `call_tool`.
 If a progress token matches an in-flight downstream tool call, it optionally
@@ -178,17 +178,15 @@ backend-routed:
 | Method | Current behavior |
 | --- | --- |
 | `ping` | Returns success. |
-| `subscribe`, `unsubscribe` | Mutate the local subscription set. |
 
-These paths still pass through the same HTTP middleware, but they do not use the
-backend fanout or prefixed routing path today.
+This path still passes through the same HTTP middleware, but it does not use
+backend fanout or identifier routing.
 
 ## Response Path
 
 Backend responses return to `McpService` first. `call_tool` may run response
-plugin hooks before returning. List calls merge and namespace backend output
-before returning. Single-backend calls return the selected backend result after
-gateway prefix removal.
+plugin hooks before returning. List calls merge backend output, preserving
+single-backend identifiers and namespacing multi-backend identifiers as needed.
 
 The HTTP response then unwinds through `virtual_host_config_layer`,
 `user_config_store_layer`, `session_id_layer`, `claims_layer`,

@@ -73,7 +73,7 @@ These words appear on almost every page. It is worth pinning them down once.
 | Downstream | The client side of the gateway: the calling MCP client and its requests. |
 | Upstream | The backend side of the gateway: the configured backend MCP servers. |
 | Virtual host | A named routing group inside the caller's config. The URL path selects exactly one. |
-| Backend | One configured MCP server behind the gateway. Its name prefixes every tool, resource, and prompt it exposes. |
+| Backend | One configured MCP server behind the gateway. Its map key becomes a routing prefix when a virtual host has multiple backends. |
 | Principal | The authenticated caller identity, taken from the JWT `sub` claim. |
 | Session | An initialized MCP session, tracked by `Mcp-session-id`, that owns the per-caller backend client sessions. |
 
@@ -85,8 +85,8 @@ set of configured backend MCP servers.
 On `initialize`, the gateway validates the caller, resolves the requested
 virtual host, and creates upstream MCP client sessions for that virtual host's
 backends. On list calls, it fans out to those backends and merges the result. On
-targeted calls, it uses the backend prefix in the public tool, resource, or
-prompt name to route to exactly one backend.
+targeted calls, it uses an explicit tool alias, the only configured backend, or
+a multi-backend prefix to route to exactly one backend.
 
 For a stateful MCP call to work, five facts must line up:
 
@@ -112,9 +112,9 @@ not become the admin UI, tenant management API, policy authoring system,
 credential store, or durable observability backend.
 
 It also should not expose backend topology as more than the MCP routing
-contract requires. Backend names are visible in prefixed tool, resource, and
-prompt names, but clients should still experience one gateway endpoint and one
-logical MCP server.
+contract requires. Backend map keys are visible when multi-backend identifiers
+need prefixes, but clients should still experience one gateway endpoint and
+one logical MCP server.
 
 ## Where to go next
 

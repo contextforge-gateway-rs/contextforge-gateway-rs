@@ -54,9 +54,10 @@ That is why request code should stay behind `UserConfigStore`. Redis key
 encoding, MessagePack, cache expiry, and retry settings belong in the adapter,
 not in MCP method handling.
 
-## Backend Names Are Public
+## Backend Names Are Conditionally Public
 
-Backend names are visible in the MCP namespace:
+Backend map keys are visible in the MCP namespace when multiple backends need
+disambiguation:
 
 ```text
 backend map key: gateway-one
@@ -64,9 +65,10 @@ backend tool: increment
 gateway tool: gateway-one-increment
 ```
 
-The map key, not `BackendMCPGateway.name`, is the namespace used by current
-routing. Any future aliasing, filtering, or prettier naming scheme needs a
-migration plan because clients may already refer to these prefixed names.
+For a single backend, upstream identifiers pass through unchanged. Explicit
+`tool_name_aliases` published by the control plane take precedence in either
+case. Otherwise the map key, not `BackendMCPGateway.name`, is the namespace
+used by multi-backend routing.
 
 ## Session State Is Local Today
 
@@ -92,8 +94,8 @@ client
   -> merged tools/resources/prompts
 ```
 
-Backend identity appears through namespaced objects, but clients should not
-need to know transport details, Redis storage, fanout mechanics, or plugin
+Backend identity appears only when namespacing is needed, and clients should
+not need to know transport details, Redis storage, fanout mechanics, or plugin
 runtime internals.
 
 This choice leaves room for filtering, policy, and route changes without

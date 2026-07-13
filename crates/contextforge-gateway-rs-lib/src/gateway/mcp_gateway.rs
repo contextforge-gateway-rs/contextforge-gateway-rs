@@ -140,13 +140,18 @@ where
             });
         };
 
+        let namespace_identifiers = virtual_host.backends.len() > 1;
         let tasks: Vec<_> = virtual_host
             .backends
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
-                let backend_client =
-                    GatewayBackendClient::new(name.clone(), request.clone(), self.plugin_runtime.clone());
+                let backend_client = GatewayBackendClient::new(
+                    name.clone(),
+                    namespace_identifiers,
+                    request.clone(),
+                    self.plugin_runtime.clone(),
+                );
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
@@ -242,7 +247,6 @@ where
     ) -> Result<ListToolsResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("list_tools", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
-
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
@@ -318,6 +322,7 @@ where
     ) -> Result<ListResourcesResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("list_resources", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let namespace_identifiers = virtual_host.backends.len() > 1;
 
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
@@ -333,7 +338,11 @@ where
         )
         .await;
 
-        Ok(ListResourcesResult { meta: None, resources: merge_resources(responses), next_cursor: None })
+        Ok(ListResourcesResult {
+            meta: None,
+            resources: merge_resources(responses, namespace_identifiers),
+            next_cursor: None,
+        })
     }
 
     async fn read_resource(
@@ -345,7 +354,7 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let (service_name, service, resource_uri) = route_prefixed_name(
+        let (service_name, service, resource_uri) = route_identifier_to_backend(
             &session_manager,
             "read_resource",
             &request.uri,
@@ -370,6 +379,7 @@ where
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("list_resource_templates", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let namespace_identifiers = virtual_host.backends.len() > 1;
 
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
@@ -387,7 +397,7 @@ where
 
         Ok(ListResourceTemplatesResult {
             meta: None,
-            resource_templates: merge_resource_templates(responses),
+            resource_templates: merge_resource_templates(responses, namespace_identifiers),
             next_cursor: None,
         })
     }
@@ -401,9 +411,13 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let (service_name, service, resource_uri) =
-            route_prefixed_name(&session_manager, "subscribe", &request.uri, "Routing problem... wrong resource name")
-                .await?;
+        let (service_name, service, resource_uri) = route_identifier_to_backend(
+            &session_manager,
+            "subscribe",
+            &request.uri,
+            "Routing problem... wrong resource name",
+        )
+        .await?;
 
         let mut routed_request = request;
         routed_request.uri = resource_uri.clone();
@@ -426,7 +440,7 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let (service_name, service, resource_uri) = route_prefixed_name(
+        let (service_name, service, resource_uri) = route_identifier_to_backend(
             &session_manager,
             "unsubscribe",
             &request.uri,
@@ -452,6 +466,7 @@ where
     ) -> Result<ListPromptsResult, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("list_prompts", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let namespace_identifiers = virtual_host.backends.len() > 1;
 
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
         let backend_transports: Vec<_> = session_manager.borrow_transports().await;
@@ -467,7 +482,11 @@ where
         )
         .await;
 
-        Ok(ListPromptsResult { meta: None, prompts: merge_prompts(responses), next_cursor: None })
+        Ok(ListPromptsResult {
+            meta: None,
+            prompts: merge_prompts(responses, namespace_identifiers),
+            next_cursor: None,
+        })
     }
 
     async fn get_prompt(
@@ -479,9 +498,13 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let (service_name, service, prompt_name) =
-            route_prefixed_name(&session_manager, "get_prompt", &request.name, "Routing problem... wrong prompt name")
-                .await?;
+        let (service_name, service, prompt_name) = route_identifier_to_backend(
+            &session_manager,
+            "get_prompt",
+            &request.name,
+            "Routing problem... wrong prompt name",
+        )
+        .await?;
 
         let mut routed_request = request;
         routed_request.name = prompt_name;
@@ -502,24 +525,23 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        // The reference carries a namespaced prompt name or resource URI; route on that.
-        let namespaced = match &request.r#ref {
+        let identifier = match &request.r#ref {
             Reference::Prompt(prompt) => prompt.name.as_str(),
             Reference::Resource(resource) => resource.uri.as_str(),
         };
 
-        let (service_name, service, stripped) = route_prefixed_name(
+        let (service_name, service, routed_identifier) = route_identifier_to_backend(
             &session_manager,
             "complete",
-            namespaced,
+            identifier,
             "Routing problem... wrong completion reference",
         )
         .await?;
 
         let mut routed_request = request;
         match &mut routed_request.r#ref {
-            Reference::Prompt(prompt) => prompt.name = stripped,
-            Reference::Resource(resource) => resource.uri = stripped,
+            Reference::Prompt(prompt) => prompt.name = routed_identifier,
+            Reference::Resource(resource) => resource.uri = routed_identifier,
         }
         let response = service
             .complete(routed_request)
@@ -530,23 +552,26 @@ where
     }
 }
 
-/// Splits a `{backend}-{rest}` routing name, returning `(backend_name, rest)` for the first
-/// backend whose name is a `-`-delimited prefix. Shared by tool, resource, and prompt routing.
-fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N]) -> Option<(&'a str, &'a str)> {
+/// Preserves identifiers for a single backend. For multiple backends, splits a
+/// `{backend}-{identifier}` namespace so duplicate identifiers remain routable.
+fn route_identifier<'a, N: AsRef<str>>(identifier: &'a str, backend_names: &'a [N]) -> Option<(&'a str, &'a str)> {
+    if let [backend] = backend_names {
+        return Some((backend.as_ref(), identifier));
+    }
+
     backend_names.iter().find_map(|backend| {
         let backend = backend.as_ref();
-        name.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
+        identifier.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
     })
 }
 
 /// Joins a backend name and a backend-local name into the namespaced `{backend}-{rest}` form.
-/// Inverse of [`split_prefixed_name`]; together they own the naming convention.
 pub(crate) fn prefixed_name(backend_name: &str, rest: &str) -> String {
     format!("{backend_name}-{rest}")
 }
 
-/// Resolves an exact control-plane alias to its backend and upstream name.
-/// Older configs without aliases retain the legacy `{backend}-{tool}` route.
+/// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
+/// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
 fn resolve_tool_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
@@ -561,11 +586,11 @@ fn resolve_tool_route<'a, N: AsRef<str>>(
     if aliases.next().is_some() {
         return None;
     }
-    alias.or_else(|| split_prefixed_name(name, backend_names))
+    alias.or_else(|| route_identifier(name, backend_names))
 }
 
-/// Returns the control-plane name for an upstream tool, with the legacy
-/// namespaced form as a fallback for configs published before aliases existed.
+/// Returns the control-plane alias for an upstream tool when configured. Without an alias,
+/// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
 fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, original_name: &str) -> String {
     virtual_host
         .backends
@@ -576,7 +601,13 @@ fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, original_na
                 .iter()
                 .find_map(|(alias, original)| (original == original_name).then(|| alias.clone()))
         })
-        .unwrap_or_else(|| prefixed_name(backend_name, original_name))
+        .unwrap_or_else(|| {
+            if virtual_host.backends.len() == 1 {
+                original_name.to_owned()
+            } else {
+                prefixed_name(backend_name, original_name)
+            }
+        })
 }
 
 /// Logs a backend forwarding failure and maps it to the routing error every handler returns.
@@ -627,22 +658,21 @@ where
         .collect()
 }
 
-/// Routes a namespaced `{backend}-{rest}` name: splits it against the session's backend names
-/// and resolves the owning backend, returning `(backend_name, service, rest)`. Shared by tool,
-/// resource, prompt, and completion routing.
-async fn route_prefixed_name(
+/// Routes an identifier to its backend, preserving it for a single backend and splitting the
+/// namespace for multiple backends. Returns `(backend_name, service, backend_local_identifier)`.
+async fn route_identifier_to_backend(
     session_manager: &SessionManager<'_>,
     op: &str,
-    namespaced: &str,
+    identifier: &str,
     no_route_message: &'static str,
 ) -> Result<(String, McpClientService, String), ErrorData> {
     let backend_names = session_manager.get_backend_names();
-    let Some((backend_name, rest)) = split_prefixed_name(namespaced, &backend_names) else {
+    let Some((backend_name, routed_identifier)) = route_identifier(identifier, &backend_names) else {
         return Err(ErrorData { code: ErrorCode::INTERNAL_ERROR, message: no_route_message.into(), data: None });
     };
-    let rest = rest.to_owned();
+    let routed_identifier = routed_identifier.to_owned();
     let (backend_name, service) = resolve_backend(session_manager, op, backend_name).await?;
-    Ok((backend_name, service, rest))
+    Ok((backend_name, service, routed_identifier))
 }
 
 /// Resolves the single connected backend named `backend_name` and takes its running service.
@@ -730,7 +760,7 @@ fn merge_tools(tools: Vec<(String, ListToolsResult)>, virtual_host: &VirtualHost
         .collect::<Vec<_>>()
 }
 
-fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resource> {
+fn merge_resources(resources: Vec<(String, ListResourcesResult)>, namespace_identifiers: bool) -> Vec<Resource> {
     resources
         .into_iter()
         .flat_map(|(backend_name, result)| {
@@ -738,8 +768,10 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
                 .resources
                 .into_iter()
                 .map(|mut t| {
-                    t.name = prefixed_name(&backend_name, &t.name);
-                    t.uri = prefixed_name(&backend_name, &t.uri);
+                    if namespace_identifiers {
+                        t.name = prefixed_name(&backend_name, &t.name);
+                        t.uri = prefixed_name(&backend_name, &t.uri);
+                    }
                     t
                 })
                 .collect::<Vec<_>>()
@@ -748,13 +780,18 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
         .collect::<Vec<_>>()
 }
 
-fn merge_resource_templates(templates: Vec<(String, ListResourceTemplatesResult)>) -> Vec<ResourceTemplate> {
+fn merge_resource_templates(
+    templates: Vec<(String, ListResourceTemplatesResult)>,
+    namespace_identifiers: bool,
+) -> Vec<ResourceTemplate> {
     templates
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.resource_templates.into_iter().map(move |mut template| {
-                template.name = prefixed_name(&backend_name, &template.name);
-                template.uri_template = prefixed_name(&backend_name, &template.uri_template);
+                if namespace_identifiers {
+                    template.name = prefixed_name(&backend_name, &template.name);
+                    template.uri_template = prefixed_name(&backend_name, &template.uri_template);
+                }
                 template
             })
         })
@@ -762,12 +799,14 @@ fn merge_resource_templates(templates: Vec<(String, ListResourceTemplatesResult)
         .collect::<Vec<_>>()
 }
 
-fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
+fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>, namespace_identifiers: bool) -> Vec<Prompt> {
     prompts
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.prompts.into_iter().map(move |mut prompt| {
-                prompt.name = prefixed_name(&backend_name, &prompt.name);
+                if namespace_identifiers {
+                    prompt.name = prefixed_name(&backend_name, &prompt.name);
+                }
                 prompt
             })
         })
@@ -779,24 +818,108 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use rmcp::model::{AnnotateAble, RawResource, RawResourceTemplate};
 
     #[test]
     fn test_splitting() {
         let backend_names = vec!["counter-on", "counter-oneee", "counter-one"];
-        assert_eq!(Some(("counter-one", "increment")), split_prefixed_name("counter-one-increment", &backend_names));
-        assert_eq!(None, split_prefixed_name("counter-oneincrement", &backend_names));
-        assert_eq!(None, split_prefixed_name("counteroneincrement", &backend_names));
-        assert_eq!(Some(("counter-one", "get-value")), split_prefixed_name("counter-one-get-value", &backend_names));
+        assert_eq!(Some(("counter-one", "increment")), route_identifier("counter-one-increment", &backend_names));
+        assert_eq!(None, route_identifier("counter-oneincrement", &backend_names));
+        assert_eq!(None, route_identifier("counteroneincrement", &backend_names));
+        assert_eq!(Some(("counter-one", "get-value")), route_identifier("counter-one-get-value", &backend_names));
 
         // Tool, resource, and prompt routing all share this splitter.
         assert_eq!(
             Some(("counter-one", "example-prompt")),
-            split_prefixed_name("counter-one-example-prompt", &backend_names)
+            route_identifier("counter-one-example-prompt", &backend_names)
         );
-        assert_eq!(None, split_prefixed_name("counter-oneexample-prompt", &backend_names));
+        assert_eq!(None, route_identifier("counter-oneexample-prompt", &backend_names));
 
         let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
-        assert_eq!(Some(("counter_one", "get-value")), split_prefixed_name("counter_one-get-value", &backend_names));
+        assert_eq!(Some(("counter_one", "get-value")), route_identifier("counter_one-get-value", &backend_names));
+    }
+
+    #[test]
+    fn single_backend_routes_unprefixed_identifier_unchanged() {
+        let backend_names = vec!["backend-id"];
+
+        assert_eq!(Some(("backend-id", "test_simple_text")), route_identifier("test_simple_text", &backend_names));
+        assert_eq!(Some(("backend-id", "backend-id-tool")), route_identifier("backend-id-tool", &backend_names));
+        assert_eq!(
+            Some(("backend-id", "test://template/123/data")),
+            route_identifier("test://template/123/data", &backend_names)
+        );
+    }
+
+    #[test]
+    fn single_backend_listings_preserve_identifiers() {
+        let config_json = serde_json::json!({
+            "backends": {
+                "backend-id": {
+                    "name": "backend",
+                    "url": "http://upstream:9000/mcp",
+                    "transport": "STREAMABLEHTTP",
+                    "passthrough_headers": [],
+                    "allowed_tool_names": ["test_simple_text"],
+                    "allowed_resource_names": [],
+                    "allowed_prompt_names": []
+                }
+            }
+        });
+        let virtual_host: VirtualHost = serde_json::from_value(config_json).expect("valid virtual host");
+        let tools = merge_tools(
+            vec![(
+                "backend-id".to_owned(),
+                ListToolsResult {
+                    tools: vec![Tool::new("test_simple_text", "", serde_json::Map::new())],
+                    next_cursor: None,
+                    meta: None,
+                },
+            )],
+            &virtual_host,
+        );
+        let prompts = merge_prompts(
+            vec![(
+                "backend-id".to_owned(),
+                ListPromptsResult {
+                    prompts: vec![Prompt::new("test_prompt", None::<String>, None)],
+                    next_cursor: None,
+                    meta: None,
+                },
+            )],
+            false,
+        );
+        let resources = merge_resources(
+            vec![(
+                "backend-id".to_owned(),
+                ListResourcesResult {
+                    resources: vec![RawResource::new("test://resource", "test_resource").no_annotation()],
+                    next_cursor: None,
+                    meta: None,
+                },
+            )],
+            false,
+        );
+        let templates = merge_resource_templates(
+            vec![(
+                "backend-id".to_owned(),
+                ListResourceTemplatesResult {
+                    resource_templates: vec![
+                        RawResourceTemplate::new("test://template/{id}/data", "test_template").no_annotation(),
+                    ],
+                    next_cursor: None,
+                    meta: None,
+                },
+            )],
+            false,
+        );
+
+        assert_eq!("test_simple_text", tools[0].name);
+        assert_eq!("test_prompt", prompts[0].name);
+        assert_eq!("test_resource", resources[0].name);
+        assert_eq!("test://resource", resources[0].uri);
+        assert_eq!("test_template", templates[0].name);
+        assert_eq!("test://template/{id}/data", templates[0].uri_template);
     }
 
     #[test]
@@ -832,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_routing_falls_back_to_legacy_prefixed_names() {
+    fn multi_backend_tool_routing_falls_back_to_legacy_prefixed_names() {
         let config_json = serde_json::json!({
             "backends": {
                 "compliance-reference": {
@@ -843,11 +966,20 @@ mod tests {
                     "allowed_tool_names": ["get_stats"],
                     "allowed_resource_names": [],
                     "allowed_prompt_names": []
+                },
+                "other": {
+                    "name": "other",
+                    "url": "http://other:9000/mcp",
+                    "transport": "STREAMABLEHTTP",
+                    "passthrough_headers": [],
+                    "allowed_tool_names": [],
+                    "allowed_resource_names": [],
+                    "allowed_prompt_names": []
                 }
             }
         });
         let virtual_host: VirtualHost = serde_json::from_value(config_json).expect("valid virtual host");
-        let backend_names = vec!["compliance-reference"];
+        let backend_names = vec!["compliance-reference", "other"];
 
         assert_eq!(
             "compliance-reference-get_stats",
