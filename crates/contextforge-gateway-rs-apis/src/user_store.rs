@@ -30,6 +30,8 @@ pub struct BackendMCPGateway {
     pub transport: Transport,
     pub passthrough_headers: Vec<String>,
     pub allowed_tool_names: Vec<String>,
+    #[serde(default)]
+    pub tool_name_aliases: HashMap<String, String>,
     pub allowed_resource_names: Vec<String>,
     pub allowed_prompt_names: Vec<String>,
 }

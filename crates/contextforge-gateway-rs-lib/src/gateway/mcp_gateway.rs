@@ -3,6 +3,19 @@ use std::{
     sync::Arc,
 };
 
+use super::{
+    backend_client::{GatewayBackendClient, call_backend_tool},
+    mcp_call_validator::AuthorizedCallValidator,
+};
+pub use crate::gateway::session_store::LocalUserSessionStore;
+use crate::{
+    SessionId,
+    gateway::{
+        mcp_call_validator::InitializeCallValidator,
+        session_manager::SessionManager,
+        session_store::{UserSession, UserSessionStore},
+    },
+};
 use contextforge_gateway_rs_apis::user_store::{UserConfig, VirtualHost};
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
 use http::request::Parts;
@@ -22,21 +35,6 @@ use rmcp::{
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
-use unicode_normalization::UnicodeNormalization;
-
-use super::{
-    backend_client::{GatewayBackendClient, call_backend_tool},
-    mcp_call_validator::AuthorizedCallValidator,
-};
-pub use crate::gateway::session_store::LocalUserSessionStore;
-use crate::{
-    SessionId,
-    gateway::{
-        mcp_call_validator::InitializeCallValidator,
-        session_manager::SessionManager,
-        session_store::{UserSession, UserSessionStore},
-    },
-};
 
 #[derive(Clone, Default)]
 pub struct BackendTransports(Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>);
@@ -263,7 +261,7 @@ where
         )
         .await;
 
-        Ok(ListToolsResult { meta: None, tools: merge_tools(responses), next_cursor: None })
+        Ok(ListToolsResult { meta: None, tools: merge_tools(responses, virtual_host), next_cursor: None })
     }
 
     async fn call_tool(
@@ -277,7 +275,7 @@ where
 
         let backend_names = session_manager.get_backend_names();
 
-        let Some((backend_name, tool_name)) = split_prefixed_name(&request.name, &backend_names) else {
+        let Some((backend_name, tool_name)) = resolve_tool_route(virtual_host, &request.name, &backend_names) else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... wrong tool name".into(),
@@ -285,7 +283,7 @@ where
             });
         };
         let backend_name = backend_name.to_owned();
-        let tool_name = original_tool_name(virtual_host, &backend_name, tool_name);
+        let tool_name = tool_name.to_owned();
 
         let (service_name, service) = resolve_backend(&session_manager, "call_tool", &backend_name).await?;
 
@@ -562,52 +560,38 @@ fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N])
     })
 }
 
-/// Mirrors the control plane's `mcpgateway.utils.create_slug.slugify`
-/// (same steps, same order) so both planes advertise identical federated
-/// tool names for the same virtual server.
-fn cp_slug(name: &str) -> String {
-    let lowered: Vec<char> = name.chars().flat_map(char::to_lowercase).collect();
-
-    let mut decontracted = String::with_capacity(lowered.len());
-    for (i, &c) in lowered.iter().enumerate() {
-        let is_apostrophe = c == '\'' || c == '\u{2019}';
-        if is_apostrophe
-            && i > 0
-            && lowered[i - 1].is_alphanumeric()
-            && lowered.get(i + 1).is_some_and(|next| next.is_alphanumeric())
-        {
-            continue;
-        }
-        decontracted.push(c);
+/// Resolves an exact control-plane alias to its backend and upstream name.
+/// Older configs without aliases retain the legacy `{backend}-{tool}` route.
+fn resolve_tool_route<'a, N: AsRef<str>>(
+    virtual_host: &'a VirtualHost,
+    name: &'a str,
+    backend_names: &'a [N],
+) -> Option<(&'a str, &'a str)> {
+    let mut aliases = backend_names.iter().filter_map(|backend_name| {
+        let backend_name = backend_name.as_ref();
+        let original_name = virtual_host.backends.get(backend_name)?.tool_name_aliases.get(name)?;
+        Some((backend_name, original_name.as_str()))
+    });
+    let alias = aliases.next();
+    if aliases.next().is_some() {
+        return None;
     }
-
-    let mut slug = String::with_capacity(decontracted.len());
-    let mut pending_hyphen = false;
-    for c in decontracted.chars() {
-        if c.is_alphanumeric() {
-            if pending_hyphen && !slug.is_empty() {
-                slug.push('-');
-            }
-            pending_hyphen = false;
-            slug.push(c);
-        } else {
-            pending_hyphen = true;
-        }
-    }
-
-    let slug = slug.replace('æ', "ae").replace('ß', "ss").replace('ø', "o");
-
-    slug.nfkd().filter(char::is_ascii).collect()
+    alias.or_else(|| split_prefixed_name(name, backend_names))
 }
 
-/// Maps a slugified tool name back to the upstream's original name via the
-/// backend's `allowed_tool_names`, falling back to the slug itself.
-fn original_tool_name(virtual_host: &VirtualHost, backend_name: &str, slugged: &str) -> String {
+/// Returns the control-plane name for an upstream tool, with the legacy
+/// namespaced form as a fallback for configs published before aliases existed.
+fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, original_name: &str) -> String {
     virtual_host
         .backends
         .get(backend_name)
-        .and_then(|backend| backend.allowed_tool_names.iter().find(|original| cp_slug(original) == slugged).cloned())
-        .unwrap_or_else(|| slugged.to_owned())
+        .and_then(|backend| {
+            backend
+                .tool_name_aliases
+                .iter()
+                .find_map(|(alias, original)| (original == original_name).then(|| alias.clone()))
+        })
+        .unwrap_or_else(|| format!("{backend_name}-{original_name}"))
 }
 
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
@@ -710,7 +694,7 @@ fn log_list_backend_response<T, E: std::fmt::Debug>(
     }
 }
 
-fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
+fn merge_tools(tools: Vec<(String, ListToolsResult)>, virtual_host: &VirtualHost) -> Vec<Tool> {
     tools
         .into_iter()
         .flat_map(|(backend_name, result)| {
@@ -718,7 +702,7 @@ fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
                 .tools
                 .into_iter()
                 .map(|mut t| {
-                    t.name = format!("{backend_name}-{}", cp_slug(&t.name)).into();
+                    t.name = exposed_tool_name(virtual_host, &backend_name, &t.name).into();
                     t
                 })
                 .collect::<Vec<_>>()
@@ -797,30 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cp_slug_matches_control_plane_naming() {
-        // Expected values generated with mcpgateway.utils.create_slug.slugify.
-        assert_eq!("get-stats", cp_slug("get_stats"));
-        assert_eq!("stub-073", cp_slug("stub_073"));
-        assert_eq!("echo", cp_slug("echo"));
-        assert_eq!("already-slugged", cp_slug("already-slugged"));
-        assert_eq!("mixed-case-name", cp_slug("Mixed Case__Name"));
-        assert_eq!("mixedcase-name", cp_slug("MixedCASE_Name"));
-        assert_eq!("multiple-spaces", cp_slug("Multiple   Spaces"));
-        assert_eq!("test", cp_slug("---test---"));
-        assert_eq!("user-example-com", cp_slug("user@example.com"));
-        assert_eq!("dont-stop", cp_slug("Don't Stop"));
-        assert_eq!("cafe-restaurant", cp_slug("Café & Restaurant"));
-        assert_eq!("naive-resume", cp_slug("Naïve résumé"));
-        assert_eq!("zurich", cp_slug("Zürich"));
-        assert_eq!("strasse", cp_slug("Straße"));
-        assert_eq!("soren", cp_slug("Søren"));
-        assert_eq!("aero", cp_slug("Ærø"));
-        assert_eq!("emoji-tool", cp_slug("emoji🚀tool"));
-        assert_eq!("-tool", cp_slug("日本語-tool"));
-    }
-
-    #[test]
-    fn test_original_tool_name_reverse_maps_slug() {
+    fn test_control_plane_alias_is_advertised_and_routes_to_original_name() {
         let config_json = serde_json::json!({
             "backends": {
                 "compliance-reference": {
@@ -829,15 +790,50 @@ mod tests {
                     "transport": "STREAMABLEHTTP",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats", "echo"],
+                    "tool_name_aliases": {
+                        "Public.Tool": "get_stats",
+                        "Echo_Tool": "echo"
+                    },
                     "allowed_resource_names": [],
                     "allowed_prompt_names": []
                 }
             }
         });
         let virtual_host: VirtualHost = serde_json::from_value(config_json).expect("valid virtual host");
-        assert_eq!("get_stats", original_tool_name(&virtual_host, "compliance-reference", "get-stats"));
-        assert_eq!("echo", original_tool_name(&virtual_host, "compliance-reference", "echo"));
-        // No matching entry: the slug passes through unchanged.
-        assert_eq!("unknown-tool", original_tool_name(&virtual_host, "compliance-reference", "unknown-tool"));
+        let backend_names = vec!["compliance-reference"];
+
+        assert_eq!("Public.Tool", exposed_tool_name(&virtual_host, "compliance-reference", "get_stats"));
+        assert_eq!(
+            Some(("compliance-reference", "get_stats")),
+            resolve_tool_route(&virtual_host, "Public.Tool", &backend_names)
+        );
+    }
+
+    #[test]
+    fn test_tool_routing_falls_back_to_legacy_prefixed_names() {
+        let config_json = serde_json::json!({
+            "backends": {
+                "compliance-reference": {
+                    "name": "compliance_reference",
+                    "url": "http://upstream:9000/mcp",
+                    "transport": "STREAMABLEHTTP",
+                    "passthrough_headers": [],
+                    "allowed_tool_names": ["get_stats"],
+                    "allowed_resource_names": [],
+                    "allowed_prompt_names": []
+                }
+            }
+        });
+        let virtual_host: VirtualHost = serde_json::from_value(config_json).expect("valid virtual host");
+        let backend_names = vec!["compliance-reference"];
+
+        assert_eq!(
+            "compliance-reference-get_stats",
+            exposed_tool_name(&virtual_host, "compliance-reference", "get_stats")
+        );
+        assert_eq!(
+            Some(("compliance-reference", "get_stats")),
+            resolve_tool_route(&virtual_host, "compliance-reference-get_stats", &backend_names)
+        );
     }
 }

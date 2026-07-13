@@ -12,7 +12,6 @@ keywords.workspace = true
 contextforge-gateway-rs-apis.workspace = true
 contextforge-gateway-rs-cpex.workspace = true
 rmcp.workspace = true
-unicode-normalization.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
