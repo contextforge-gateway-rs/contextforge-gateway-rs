@@ -58,7 +58,7 @@ async fn send_progress_sum(
     let progress = Arc::clone(&client.progress);
     let service = gateway.connect_with_handler(user, client).await;
     let token = ProgressToken(NumberOrString::String("package-progress".into()));
-    let handle = send_progress_call(&service, &format!("{}-progress_sum", gateway.backend_name), token).await;
+    let handle = send_progress_call(&service, "progress_sum", token).await;
 
     let ServerResult::CallToolResult(result) = handle.await_response().await.expect("progress_sum call succeeds")
     else {
@@ -232,10 +232,10 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
     let service = gateway.connect_with_handler("admin@example.com", client).await;
-    let tool_name = format!("{}-progress_sum", gateway.backend_name);
+    let tool_name = "progress_sum";
 
-    let first = send_progress_call(&service, &tool_name, ProgressToken(NumberOrString::Number(1))).await;
-    let second = send_progress_call(&service, &tool_name, ProgressToken(NumberOrString::Number(2))).await;
+    let first = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(1))).await;
+    let second = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(2))).await;
 
     let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         tokio::join!(first.await_response(), second.await_response())
@@ -272,11 +272,11 @@ async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins(
     let client = reqwest::Client::new();
     let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
 
-    let tool_name = format!("{}-progress_sum", gateway.backend_name);
+    let tool_name = "progress_sum";
     let first =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 2, 1));
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(tool_name, 2, 1));
     let second =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(&tool_name, 3, 2));
+        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(tool_name, 3, 2));
     let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
 
     assert_raw_progress_stream(&first_body, 2, 1);
@@ -290,8 +290,8 @@ async fn backend_generated_progress_tokens_are_dropped() {
     let progress = Arc::clone(&client.progress);
     let service = gateway.connect_with_handler("admin@example.com", client).await;
 
-    let tool_name = format!("{}-progress_counter_tokens", gateway.backend_name);
-    let handle = send_progress_call(&service, &tool_name, ProgressToken(NumberOrString::Number(10))).await;
+    let tool_name = "progress_counter_tokens";
+    let handle = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(10))).await;
 
     let ServerResult::CallToolResult(result) =
         handle.await_response().await.expect("progress_counter_tokens call succeeds")
@@ -318,7 +318,7 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 
     let gateway = start_gateway("admin@example.com", false, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("3", text(&result));
     assert_eq!(0, pre_observations.lock().expect("observations lock poisoned").pre_calls);
@@ -333,7 +333,7 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), text(&result));
     let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
@@ -355,7 +355,7 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("post:3", text(&result));
     let observations = observations.lock().expect("observations lock poisoned");
@@ -425,7 +425,7 @@ async fn downstream_cancellation_is_relayed_to_backend() {
     let gateway = start_gateway("admin@example.com", true, Arc::new(CpexRuntimeRegistry::default())).await;
     let service = gateway.connect("admin@example.com").await;
 
-    let request = CallToolRequestParams::new(format!("{}-wait_for_cancellation", gateway.backend_name));
+    let request = CallToolRequestParams::new("wait_for_cancellation");
     let handle = service
         .send_cancellable_request(
             ClientRequest::CallToolRequest(Request::new(request)),
@@ -446,7 +446,7 @@ async fn post_hook_can_return_raw_cmf_result_content() {
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("raw-post", text(&result));
 }
@@ -462,7 +462,7 @@ async fn pre_and_post_hooks_share_gateway_call_context() {
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("3", text(&result));
     assert_eq!(1, post_observations.lock().expect("observations lock poisoned").post_calls);
@@ -474,7 +474,7 @@ async fn pre_and_post_denials_return_plugin_error_codes() {
     let runtime = runtime_with_pre(pre_plugin).await;
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
+    let error = service.call_tool(sum_request("sum", 1, 2)).await.unwrap_err();
     assert_eq!(ErrorCode(PRE_DENY_ERROR_CODE), error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 
@@ -482,7 +482,7 @@ async fn pre_and_post_denials_return_plugin_error_codes() {
     let runtime = runtime_with_post(post_plugin).await;
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
+    let error = service.call_tool(sum_request("sum", 1, 2)).await.unwrap_err();
     assert_eq!(ErrorCode(POST_DENY_ERROR_CODE), error_code(error));
     assert_eq!(1, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
 }
@@ -494,7 +494,7 @@ async fn pre_hook_invalid_arguments_return_invalid_params() {
     let runtime = runtime_with_pre(plugin).await;
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
-    let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
+    let error = service.call_tool(sum_request("sum", 1, 2)).await.unwrap_err();
 
     assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());

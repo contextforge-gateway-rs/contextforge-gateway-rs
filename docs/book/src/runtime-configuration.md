@@ -62,12 +62,13 @@ but the distinction should stay explicit:
 | Config field | Current MCP dataplane behavior |
 | --- | --- |
 | `UserConfig.virtual_hosts` | Required. `VirtualHostId` from the path selects one entry. |
-| `VirtualHost.backends` map key | Required. This key is the public backend namespace used in tool/resource/prompt prefixes. |
+| `VirtualHost.backends` map key | Required. Selects backend session state and becomes the public prefix when a multi-backend identifier has no explicit alias. |
 | `BackendMCPGateway.url` | Required. Used to build the upstream `StreamableHttpClientTransport`. |
 | `BackendMCPGateway.name` | Present in the model. Current routing uses the backend map key, not this field, as the namespace. |
 | `transport` | Present in the model. Current upstream code always builds a streamable HTTP client transport. |
 | `passthrough_headers` | Present in the model. Current MCP routing does not apply header pass-through policy from this field. |
 | `allowed_tool_names` | Present in the model. Current list/call routing does not enforce it. |
+| `tool_name_aliases` | Optional exact `{downstream_alias: upstream_original}` mapping used by tool list/call routing before the single-versus-multi-backend fallback. |
 | `allowed_resource_names` | Present in the model. Current resource routing does not enforce it. |
 | `allowed_prompt_names` | Present in the model. Current prompt routing does not enforce it. |
 
