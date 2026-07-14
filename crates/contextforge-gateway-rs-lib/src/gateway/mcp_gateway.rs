@@ -6,10 +6,10 @@ use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, ErrorCode,
-        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResponse, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        Prompt, ReadResourceRequestParams, ReadResourceResult, Reference, Resource, ResourceTemplate,
+        Prompt, ReadResourceRequestParams, ReadResourceResponse, Reference, Resource, ResourceTemplate,
         ServerCapabilities, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
     service::{RequestContext, RunningService},
@@ -20,7 +20,7 @@ use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
 use super::{
-    backend_client::{GatewayBackendClient, call_backend_tool},
+    backend_client::{GatewayBackendClient, call_backend_tool, start_backend_tool_call},
     mcp_call_validator::AuthorizedCallValidator,
 };
 pub use crate::gateway::session_store::LocalUserSessionStore;
@@ -261,14 +261,14 @@ where
         )
         .await;
 
-        Ok(ListToolsResult { meta: None, tools: merge_tools(responses, virtual_host), next_cursor: None })
+        Ok(ListToolsResult::with_all_items(merge_tools(responses, virtual_host)))
     }
 
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
@@ -297,12 +297,22 @@ where
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let progress_token = cx.meta.get_progress_token();
+        let handle = start_backend_tool_call(service.peer(), routed_request)
+            .await
+            .map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
+        let backend_progress_token = handle.progress_token.clone();
         service
             .service()
-            .track_tool_call(tool_name.clone(), cx.peer.clone(), progress_token.clone(), post_state.clone())
+            .track_tool_call(
+                backend_progress_token.clone(),
+                progress_token,
+                tool_name.clone(),
+                cx.peer.clone(),
+                post_state.clone(),
+            )
             .await;
-        let response = call_backend_tool(service.peer(), routed_request, progress_token.clone(), cx.ct.clone()).await;
-        service.service().stop_tracking_tool_call(progress_token.clone()).await;
+        let response = call_backend_tool(handle, cx.ct.clone()).await;
+        service.service().stop_tracking_tool_call(&backend_progress_token).await;
 
         let response = response.map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
         let response = match (&self.plugin_runtime, post_state) {
@@ -312,7 +322,7 @@ where
             _ => response,
         };
         info!("call_tool: backend {service_name} completed");
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn list_resources(
@@ -338,18 +348,14 @@ where
         )
         .await;
 
-        Ok(ListResourcesResult {
-            meta: None,
-            resources: merge_resources(responses, namespace_identifiers),
-            next_cursor: None,
-        })
+        Ok(ListResourcesResult::with_all_items(merge_resources(responses, namespace_identifiers)))
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
@@ -369,7 +375,7 @@ where
             .await
             .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
         info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn list_resource_templates(
@@ -395,11 +401,7 @@ where
         )
         .await;
 
-        Ok(ListResourceTemplatesResult {
-            meta: None,
-            resource_templates: merge_resource_templates(responses, namespace_identifiers),
-            next_cursor: None,
-        })
+        Ok(ListResourceTemplatesResult::with_all_items(merge_resource_templates(responses, namespace_identifiers)))
     }
 
     async fn subscribe(
@@ -482,18 +484,14 @@ where
         )
         .await;
 
-        Ok(ListPromptsResult {
-            meta: None,
-            prompts: merge_prompts(responses, namespace_identifiers),
-            next_cursor: None,
-        })
+        Ok(ListPromptsResult::with_all_items(merge_prompts(responses, namespace_identifiers)))
     }
 
     async fn get_prompt(
         &self,
         request: GetPromptRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
+    ) -> Result<GetPromptResponse, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
@@ -513,7 +511,7 @@ where
             .await
             .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
         info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn complete(
@@ -528,6 +526,7 @@ where
         let identifier = match &request.r#ref {
             Reference::Prompt(prompt) => prompt.name.as_str(),
             Reference::Resource(resource) => resource.uri.as_str(),
+            _ => return Err(ErrorData::invalid_params("Unsupported completion reference", None)),
         };
 
         let (service_name, service, routed_identifier) = route_identifier_to_backend(
@@ -542,6 +541,7 @@ where
         match &mut routed_request.r#ref {
             Reference::Prompt(prompt) => prompt.name = routed_identifier,
             Reference::Resource(resource) => resource.uri = routed_identifier,
+            _ => return Err(ErrorData::invalid_params("Unsupported completion reference", None)),
         }
         let response = service
             .complete(routed_request)

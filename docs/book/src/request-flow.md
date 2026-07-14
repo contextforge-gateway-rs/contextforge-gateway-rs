@@ -162,9 +162,11 @@ Current routed method families:
 | `complete` | Apply the same conditional routing to the prompt name or resource URI in `ref`, then return the selected backend's completion result. |
 
 `GatewayBackendClient` handles backend progress notifications for `call_tool`.
-If a progress token matches an in-flight downstream tool call, it optionally
-runs the stream-event post hook and forwards the progress notification back to
-the downstream client.
+RMCP assigns a new progress token to each backend request, so the gateway maps
+that backend token to the corresponding downstream token. When a notification
+matches an in-flight backend token, the gateway restores the downstream token,
+optionally runs the stream-event post hook, and forwards the notification to the
+downstream client.
 
 `call_backend_tool` also watches the downstream cancellation token. If the
 downstream call is cancelled before the backend responds, the gateway sends a

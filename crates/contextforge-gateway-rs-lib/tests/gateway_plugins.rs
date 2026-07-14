@@ -9,7 +9,7 @@ use rmcp::{
     ClientHandler,
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
-        InitializeRequestParams, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request, ServerResult,
+        InitializeRequestParams, ProgressNotificationParam, Request, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
@@ -57,8 +57,7 @@ async fn send_progress_sum(
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
     let service = gateway.connect_with_handler(user, client).await;
-    let token = ProgressToken(NumberOrString::String("package-progress".into()));
-    let handle = send_progress_call(&service, "progress_sum", token).await;
+    let handle = send_progress_call(&service, "progress_sum").await;
 
     let ServerResult::CallToolResult(result) = handle.await_response().await.expect("progress_sum call succeeds")
     else {
@@ -72,13 +71,13 @@ async fn send_progress_sum(
 async fn send_progress_call(
     service: &RunningService<RoleClient, RecordingClient>,
     tool_name: &str,
-    progress_token: ProgressToken,
 ) -> RequestHandle<RoleClient> {
     let request = CallToolRequestParams::new(tool_name.to_owned());
-    let mut options = PeerRequestOptions::no_options();
-    options.meta = Some(Meta::with_progress_token(progress_token));
     service
-        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options)
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(Request::new(request)),
+            PeerRequestOptions::no_options(),
+        )
         .await
         .expect("progress request is sent")
 }
@@ -234,8 +233,11 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
     let service = gateway.connect_with_handler("admin@example.com", client).await;
     let tool_name = "progress_sum";
 
-    let first = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(1))).await;
-    let second = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(2))).await;
+    let first = send_progress_call(&service, tool_name).await;
+    let first_progress_token = first.progress_token.clone();
+    let second = send_progress_call(&service, tool_name).await;
+    let second_progress_token = second.progress_token.clone();
+    assert_ne!(first_progress_token, second_progress_token);
 
     let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         tokio::join!(first.await_response(), second.await_response())
@@ -254,14 +256,10 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
 
     wait_for_event_count(&progress, 8).await;
     let progress = progress.lock().expect("progress lock poisoned");
-    let first_count = progress
-        .iter()
-        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(1)))
-        .count();
-    let second_count = progress
-        .iter()
-        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(2)))
-        .count();
+    let first_count =
+        progress.iter().filter(|notification| notification.progress_token == first_progress_token).count();
+    let second_count =
+        progress.iter().filter(|notification| notification.progress_token == second_progress_token).count();
     assert_eq!(4, first_count);
     assert_eq!(4, second_count);
 }
@@ -291,7 +289,7 @@ async fn backend_generated_progress_tokens_are_dropped() {
     let service = gateway.connect_with_handler("admin@example.com", client).await;
 
     let tool_name = "progress_counter_tokens";
-    let handle = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(10))).await;
+    let handle = send_progress_call(&service, tool_name).await;
 
     let ServerResult::CallToolResult(result) =
         handle.await_response().await.expect("progress_counter_tokens call succeeds")

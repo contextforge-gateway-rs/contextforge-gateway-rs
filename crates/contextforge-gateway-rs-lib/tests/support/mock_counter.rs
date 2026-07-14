@@ -76,48 +76,48 @@ impl Counter {
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
-        RawResource::new(uri, name.to_owned()).no_annotation()
+        Resource::new(uri, name)
     }
 
     #[tool(description = "Increment the counter by 1")]
     async fn increment(&self) -> Result<CallToolResult, McpError> {
         let mut counter = self.counter.lock().await;
         *counter += 1;
-        Ok(CallToolResult::success(vec![Content::text(counter.to_string())]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(counter.to_string())]))
     }
 
     #[tool(description = "Decrement the counter by 1")]
     async fn decrement(&self) -> Result<CallToolResult, McpError> {
         let mut counter = self.counter.lock().await;
         *counter -= 1;
-        Ok(CallToolResult::success(vec![Content::text(counter.to_string())]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(counter.to_string())]))
     }
 
     #[tool(description = "Get the current counter value")]
     async fn get_value(&self) -> Result<CallToolResult, McpError> {
         let counter = self.counter.lock().await;
-        Ok(CallToolResult::success(vec![Content::text(counter.to_string())]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(counter.to_string())]))
     }
 
     #[tool(description = "Long running task example")]
     async fn long_task(&self) -> Result<CallToolResult, McpError> {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        Ok(CallToolResult::success(vec![Content::text("Long task completed")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text("Long task completed")]))
     }
 
     #[tool(description = "Say hello to the client")]
     fn say_hello(&self) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text("hello")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text("hello")]))
     }
 
     #[tool(description = "Repeat what you say")]
     fn echo(&self, Parameters(object): Parameters<JsonObject>) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text(serde_json::Value::Object(object).to_string())]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(serde_json::Value::Object(object).to_string())]))
     }
 
     #[tool(description = "Calculate the sum of two numbers")]
     fn sum(&self, Parameters(StructRequest { a, b }): Parameters<StructRequest>) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text((a + b).to_string())]))
+        Ok(CallToolResult::success(vec![ContentBlock::text((a + b).to_string())]))
     }
 
     /// Returns the `Mcp-Session-Id` of the current session (streamable HTTP only).
@@ -130,8 +130,10 @@ impl Counter {
             .map(|v| v.to_str().unwrap_or("(non-ascii)").to_owned());
 
         match session_id {
-            Some(id) => Ok(CallToolResult::success(vec![Content::text(id)])),
-            None => Ok(CallToolResult::success(vec![Content::text("no session (not running over streamable HTTP?)")])),
+            Some(id) => Ok(CallToolResult::success(vec![ContentBlock::text(id)])),
+            None => {
+                Ok(CallToolResult::success(vec![ContentBlock::text("no session (not running over streamable HTTP?)")]))
+            },
         }
     }
 }
@@ -149,7 +151,7 @@ impl Counter {
         _ctx: RequestContext<RoleServer>,
     ) -> Result<Vec<PromptMessage>, McpError> {
         let prompt = format!("This is an example prompt with your message here: '{}'", args.message);
-        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, prompt)])
+        Ok(vec![PromptMessage::new_text(Role::User, prompt)])
     }
 
     /// Analyze the current counter value and suggest next steps
@@ -165,11 +167,11 @@ impl Counter {
 
         let messages = vec![
             PromptMessage::new_text(
-                PromptMessageRole::Assistant,
+                Role::Assistant,
                 "I'll analyze the counter situation and suggest the best approach.",
             ),
             PromptMessage::new_text(
-                PromptMessageRole::User,
+                Role::User,
                 format!(
                     "Current counter value: {}\nGoal value: {}\nDifference: {}\nStrategy preference: {}\n\nPlease analyze the situation and suggest the best approach to reach the goal.",
                     current_value, args.goal, difference, strategy
@@ -204,30 +206,26 @@ impl ServerHandler for Counter {
         _request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        Ok(ListResourcesResult {
-            resources: vec![
-                self._create_resource_text("str:////Users/to/some/path/", "cwd"),
-                self._create_resource_text("memo://insights", "memo-name"),
-            ],
-            next_cursor: None,
-            meta: None,
-        })
+        Ok(ListResourcesResult::with_all_items(vec![
+            self._create_resource_text("str:////Users/to/some/path/", "cwd"),
+            self._create_resource_text("memo://insights", "memo-name"),
+        ]))
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
+    ) -> Result<ReadResourceResponse, McpError> {
         let uri = &request.uri;
         match uri.as_str() {
             "str:////Users/to/some/path/" => {
                 let cwd = "/Users/to/some/path/";
-                Ok(ReadResourceResult::new(vec![ResourceContents::text(cwd, uri.clone())]))
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(cwd, uri.clone())]).into())
             },
             "memo://insights" => {
                 let memo = "Business Intelligence Memo\n\nAnalysis has revealed 5 key insights ...";
-                Ok(ReadResourceResult::new(vec![ResourceContents::text(memo, uri.clone())]))
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(memo, uri.clone())]).into())
             },
             _ => Err(McpError::resource_not_found(
                 "resource_not_found",
@@ -301,26 +299,14 @@ impl ServerHandler for Counter {
         _: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, McpError> {
         let resource_templates = vec![
-            RawResourceTemplate {
-                uri_template: "str:////{path}".into(),
-                name: "filesystem".into(),
-                title: None,
-                description: Some("Read a file by absolute path".into()),
-                mime_type: Some("text/plain".into()),
-                icons: None,
-            }
-            .no_annotation(),
-            RawResourceTemplate {
-                uri_template: "memo://{id}".into(),
-                name: "memo".into(),
-                title: None,
-                description: Some("Read a memo by id".into()),
-                mime_type: Some("text/plain".into()),
-                icons: None,
-            }
-            .no_annotation(),
+            ResourceTemplate::new("str:////{path}", "filesystem")
+                .with_description("Read a file by absolute path")
+                .with_mime_type("text/plain"),
+            ResourceTemplate::new("memo://{id}", "memo")
+                .with_description("Read a memo by id")
+                .with_mime_type("text/plain"),
         ];
-        Ok(ListResourceTemplatesResult { next_cursor: None, resource_templates, meta: None })
+        Ok(ListResourceTemplatesResult::with_all_items(resource_templates))
     }
 
     async fn initialize(

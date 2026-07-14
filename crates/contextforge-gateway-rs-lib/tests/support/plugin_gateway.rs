@@ -15,8 +15,9 @@ use http::{HeaderMap, HeaderValue};
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, InitializeRequestParams,
-        InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken, ServerCapabilities,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation,
+        InitializeRequestParams, InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken,
+        ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -66,14 +67,14 @@ impl ServerHandler for TestBackend {
         &self,
         request: CallToolRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         self.state
             .calls
             .lock()
             .expect("backend calls lock poisoned")
             .push(BackendObservation { tool_name: request.name.to_string(), args: request.arguments.clone() });
 
-        match request.name.as_ref() {
+        let result: Result<CallToolResult, ErrorData> = match request.name.as_ref() {
             "sum" => {
                 let args = request
                     .arguments
@@ -87,7 +88,7 @@ impl ServerHandler for TestBackend {
                     .get("b")
                     .and_then(Value::as_i64)
                     .ok_or_else(|| ErrorData::invalid_params("sum requires numeric b", None))?;
-                Ok(CallToolResult::success(vec![Content::text((a + b).to_string())]))
+                Ok(CallToolResult::success(vec![ContentBlock::text((a + b).to_string())]))
             },
             "progress_sum" => {
                 if let Some(progress_token) = cx.meta.get_progress_token() {
@@ -105,7 +106,7 @@ impl ServerHandler for TestBackend {
                         tokio::time::sleep(Duration::from_millis(10)).await;
                     }
                 }
-                Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+                Ok(CallToolResult::success(vec![ContentBlock::text("completed 4 packages")]))
             },
             "progress_counter_tokens" => {
                 for package in 1..=4i32 {
@@ -124,7 +125,7 @@ impl ServerHandler for TestBackend {
                         })?;
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
-                Ok(CallToolResult::success(vec![Content::text("completed 4 packages")]))
+                Ok(CallToolResult::success(vec![ContentBlock::text("completed 4 packages")]))
             },
             "wait_for_cancellation" => {
                 cx.ct.cancelled().await;
@@ -133,14 +134,15 @@ impl ServerHandler for TestBackend {
                     .lock()
                     .expect("backend cancellations lock poisoned")
                     .push(request.name.to_string());
-                Ok(CallToolResult::success(vec![Content::text("cancelled")]))
+                Ok(CallToolResult::success(vec![ContentBlock::text("cancelled")]))
             },
             _ => Err(ErrorData {
                 code: ErrorCode::METHOD_NOT_FOUND,
                 message: format!("unknown tool {}", request.name).into(),
                 data: None,
             }),
-        }
+        };
+        result.map(Into::into)
     }
 }
 

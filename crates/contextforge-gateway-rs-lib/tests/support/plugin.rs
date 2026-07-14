@@ -12,7 +12,7 @@ use cpex::cpex_core::{
     hooks::{Extensions, HookHandler, PluginResult, TypedHandlerAdapter, types::cmf_hook_names},
     plugin::{Plugin, PluginConfig},
 };
-use rmcp::model::{CallToolResult, Content, ProgressNotificationParam};
+use rmcp::model::{CallToolResult, ContentBlock, ProgressNotificationParam};
 use serde_json::{Value, json};
 
 use super::tool::text;
@@ -192,9 +192,9 @@ impl HookHandler<CmfHook> for TestPlugin {
                         if !is_tool_result_content(&content.content) {
                             return PluginResult::allow();
                         }
-                        content.content = serde_json::to_value(CallToolResult::success(vec![Content::text(format!(
-                            "post:{result_text}"
-                        ))]))
+                        content.content = serde_json::to_value(CallToolResult::success(vec![ContentBlock::text(
+                            format!("post:{result_text}"),
+                        )]))
                         .expect("tool result serializes");
                     }
                     PluginResult::modify_payload(modified)

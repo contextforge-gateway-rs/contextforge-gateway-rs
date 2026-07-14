@@ -1,5 +1,5 @@
 use cpex::cpex_core::cmf::{ContentPart, Message, MessagePayload, Role, ToolCall, ToolResult};
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde_json::{Map, Value};
 
 pub(crate) fn tool_call_payload(
@@ -88,7 +88,7 @@ pub(crate) fn tool_result_response(original: CallToolResult, payload: &MessagePa
 
     let text = payload.message.get_text_content();
     if !text.is_empty() {
-        result.content.push(Content::text(text));
+        result.content.push(ContentBlock::text(text));
     }
 
     result
@@ -96,7 +96,7 @@ pub(crate) fn tool_result_response(original: CallToolResult, payload: &MessagePa
 
 fn raw_success_tool_result(value: Value) -> CallToolResult {
     if let Value::String(text) = value {
-        CallToolResult::success(vec![Content::text(text)])
+        CallToolResult::success(vec![ContentBlock::text(text)])
     } else {
         CallToolResult::structured(value)
     }
@@ -104,7 +104,7 @@ fn raw_success_tool_result(value: Value) -> CallToolResult {
 
 fn raw_error_tool_result(value: Value) -> CallToolResult {
     if let Value::String(text) = value {
-        CallToolResult::error(vec![Content::text(text)])
+        CallToolResult::error(vec![ContentBlock::text(text)])
     } else {
         CallToolResult::structured_error(value)
     }
@@ -116,8 +116,8 @@ mod tests {
 
     #[test]
     fn tool_result_response_uses_cmf_error_flag_for_nested_mcp_result() {
-        let original = CallToolResult::success(vec![Content::text("original")]);
-        let nested = CallToolResult::success(vec![Content::text("changed")]);
+        let original = CallToolResult::success(vec![ContentBlock::text("original")]);
+        let nested = CallToolResult::success(vec![ContentBlock::text("changed")]);
         let mut payload = tool_result_payload("sum", &nested, "call-1");
         let ContentPart::ToolResult { content } = &mut payload.message.content[0] else {
             panic!("expected tool result");

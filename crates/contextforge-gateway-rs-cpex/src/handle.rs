@@ -319,7 +319,7 @@ mod tests {
         registry::AnyHookHandler,
     };
     use rmcp::model::{
-        CallToolRequestParams, CallToolResult, Content, NumberOrString, ProgressNotificationParam, ProgressToken,
+        CallToolRequestParams, CallToolResult, ContentBlock, NumberOrString, ProgressNotificationParam, ProgressToken,
     };
     use serde_json::{Value, json};
     use tokio::sync::Mutex as TokioMutex;
@@ -822,7 +822,7 @@ mod tests {
         let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
         config_store.set_config(config_document(json!({ "plugins": [] }))).await;
         runtime.reload().await.expect("runtime reloads");
-        let response = CallToolResult::success(vec![Content::text("3")]);
+        let response = CallToolResult::success(vec![ContentBlock::text("3")]);
         runtime.after_tool_call("sum", response, pre.state).await.expect("post hook runs");
 
         let observations = observations.lock().expect("observations lock poisoned");
@@ -844,7 +844,7 @@ mod tests {
         let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook skips");
         config_store.set_config(plugin_config(&[Arc::clone(&plugin)])).await;
         runtime.reload().await.expect("runtime reloads");
-        let response = CallToolResult::success(vec![Content::text("3")]);
+        let response = CallToolResult::success(vec![ContentBlock::text("3")]);
         runtime.after_tool_call("sum", response, pre.state).await.expect("post hook skips");
 
         assert_eq!(0, observations.lock().expect("observations lock poisoned").post_calls);

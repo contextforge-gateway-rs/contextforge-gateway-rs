@@ -2872,8 +2872,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "1.7.0"
-source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=0d0c3513ec84b3786db1ca62f13604b71f10da83#0d0c3513ec84b3786db1ca62f13604b71f10da83"
+version = "2.2.0"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=a283444bd0d50395633dd5df39a706d99cf2479c#a283444bd0d50395633dd5df39a706d99cf2479c"
 dependencies = [
  "async-trait",
  "base64",
@@ -2905,8 +2905,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "1.7.0"
-source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=0d0c3513ec84b3786db1ca62f13604b71f10da83#0d0c3513ec84b3786db1ca62f13604b71f10da83"
+version = "2.2.0"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=a283444bd0d50395633dd5df39a706d99cf2479c#a283444bd0d50395633dd5df39a706d99cf2479c"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3400,9 +3400,9 @@ dependencies = [
 
 [[package]]
 name = "sse-stream"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3962b63f038885f15bce2c6e02c0e7925c072f1ac86bb60fd44c5c6b762fb72"
+checksum = "39f24a9b78c40b90817bbcd1821c74ddfd74916aadd29403d001532a9195532d"
 dependencies = [
  "bytes",
  "futures-util",

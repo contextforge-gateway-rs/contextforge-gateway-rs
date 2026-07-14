@@ -23,7 +23,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib" }
 contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}
-rmcp = { version = "1.7.0", features = [
+rmcp = { version = "2.2.0", features = [
     "server",
     "client",
     "auth",
@@ -31,7 +31,7 @@ rmcp = { version = "1.7.0", features = [
     "reqwest",
     "transport-streamable-http-client-reqwest",
     "elicitation",
-], git = "https://github.com/contextforge-gateway-rs/mcp-rust-sdk", rev = "0d0c3513ec84b3786db1ca62f13604b71f10da83" }
+], git = "https://github.com/contextforge-gateway-rs/mcp-rust-sdk", rev = "a283444bd0d50395633dd5df39a706d99cf2479c" }
 serde = {version= "1.0"}
 serde_json = "1.0"
 tracing = "0.1"
