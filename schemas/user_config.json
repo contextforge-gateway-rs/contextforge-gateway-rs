@@ -53,6 +53,13 @@
             "type": "string"
           }
         },
+        "tool_name_aliases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
         "allowed_resource_names": {
           "type": "array",
           "items": {

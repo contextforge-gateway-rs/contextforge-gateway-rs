@@ -260,6 +260,7 @@ async fn start_gateway_with_runtime(
                                 transport: Transport::default(),
                                 passthrough_headers: Vec::new(),
                                 allowed_tool_names: Vec::new(),
+                                tool_name_aliases: HashMap::new(),
                                 allowed_resource_names: Vec::new(),
                                 allowed_prompt_names: Vec::new(),
                             },

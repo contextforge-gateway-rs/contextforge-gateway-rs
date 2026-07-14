@@ -209,15 +209,19 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                 format!("http://127.0.0.1:{port}/mcp").parse().expect("This should work")
             };
 
-            let name = format!("backend-{port}");
+            let backend_id = backend_id(*port);
             (
-                name.clone(),
+                backend_id,
                 BackendMCPGateway {
-                    name,
+                    name: format!("backend-{port}"),
                     url,
                     transport: Transport::default(),
                     passthrough_headers: Vec::new(),
                     allowed_tool_names: Vec::new(),
+                    tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
+                        .iter()
+                        .map(|tool_name| (format!("backend-{port}.{tool_name}"), (*tool_name).to_owned()))
+                        .collect(),
                     allowed_resource_names: Vec::new(),
                     allowed_prompt_names: Vec::new(),
                 },
@@ -226,31 +230,44 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
         .collect()
 }
 
+fn backend_id(port: u16) -> String {
+    format!("00000000-0000-0000-0000-{port:012}")
+}
+
 fn create_tool_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
+        .flat_map(|port| MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}.{name}")))
         .collect()
 }
 
 fn create_prompt_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_PROMPT_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
+        .flat_map(|port| {
+            let backend_id = backend_id(*port);
+            MOCK_COUNTER_PROMPT_NAMES.iter().map(move |name| format!("{backend_id}-{name}"))
+        })
         .collect()
 }
 
 fn create_resource_template_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_RESOURCE_TEMPLATE_NAMES.iter().map(move |name| format!("backend-{port}-{name}")))
+        .flat_map(|port| {
+            let backend_id = backend_id(*port);
+            MOCK_COUNTER_RESOURCE_TEMPLATE_NAMES.iter().map(move |name| format!("{backend_id}-{name}"))
+        })
         .collect()
 }
 
 fn create_resource_template_uris(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_RESOURCE_TEMPLATE_URIS.iter().map(move |uri| format!("backend-{port}-{uri}")))
+        .flat_map(|port| {
+            let backend_id = backend_id(*port);
+            MOCK_COUNTER_RESOURCE_TEMPLATE_URIS.iter().map(move |uri| format!("{backend_id}-{uri}"))
+        })
         .collect()
 }
 
