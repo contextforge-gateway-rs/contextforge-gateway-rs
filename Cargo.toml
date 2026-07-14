@@ -20,12 +20,9 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 
 [workspace.dependencies]
+# Keep dependencies here only when at least two workspace members inherit them.
 contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
-contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib" }
 contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}
-cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd" }
-cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd" }
-cpex-tool-namespace = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd" }
 rmcp = { version = "2.2.0", features = [
     "server",
     "client",
@@ -38,22 +35,8 @@ rmcp = { version = "2.2.0", features = [
 serde = {version= "1.0"}
 serde_json = "1.0"
 tracing = "0.1"
-tracing-appender = "0.2.3"
-tracing-opentelemetry = "0.33.0"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.48.0", features = ["full"] }
-tokio-util = "0.7"
-axum = "0.8"
-axum-otel-metrics = "0.14"
-axum-server = { version = "0.8.0", features = ["tls-rustls"] }
-tower-http = { version = "0.7.0", features = ["full"] }
-tower = "0.5.3"
 http = "1.4.0"
-hyper = "1.4.0"
-hyper-util = "0.1.20"
-futures = { version = "0.3", features = ["std", "alloc"] }
-jsonwebtoken = {version= "10.3.0", features=["rust_crypto"]}
-chrono = "0.4.44"
 redis = { version = "1.2.1", features = [
     "default",
     "tokio-rustls-comp",
@@ -62,28 +45,11 @@ redis = { version = "1.2.1", features = [
 ] }
 clap = { version = "4.5.60", features = ["derive", "env"] }
 thiserror = "2.0.18"
-url = "2.5.8"
 rmp-serde = "1.3.1"
 async-trait = "0.1.89"
-arc-swap = "1.7"
 reqwest = "0.13"
-typed-builder = "0.23.2"
 rustls = { version = "0.23", features = ["ring"] }
-rustls-pki-types = { version = "1.14.1", features = ["std", "alloc"] }
-tokio-rustls = "0.26.4"
 cpex = "0.2.0"
-goose = { git = "https://github.com/tag1consulting/goose" }
-lru_time_cache = "0.11.11"
-num_cpus = "1.17.0"
-opentelemetry = "0.32"
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "http-proto", "reqwest-blocking-client", "metrics"] }
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
-openport = { version = "0.4.0", features = ["rand"] }
-schemars = { version = "1.2.1", features = ["url2", "preserve_order"] }
-secret-string = "0.0.2"
-test-log = "0.2.20"
-tikv-jemallocator = "0.7.0"
-tonic = "0.14"
 uuid = { version = "1.23.1", features = ["v4"] }
 
 [profile.release]

@@ -12,7 +12,7 @@ repository.workspace = true
 
 
 [dependencies]
-goose.workspace = true
+goose = { git = "https://github.com/tag1consulting/goose" }
 tokio.workspace = true
 http.workspace = true
 reqwest.workspace = true
