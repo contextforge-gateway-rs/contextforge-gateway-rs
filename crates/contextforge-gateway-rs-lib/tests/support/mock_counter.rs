@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 #![allow(dead_code)]
 
-use std::{any::Any, sync::Arc};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -259,6 +259,42 @@ impl ServerHandler for Counter {
         Ok(CompleteResult::new(CompletionInfo::new(values).map_err(|e| McpError::internal_error(e, None))?))
     }
 
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        if is_known_resource_uri(&request.uri) {
+            let uri = request.uri.clone();
+            let peer = context.peer;
+            // Keeps notifying even after unsubscribe (a rude backend): the gateway must stop
+            // forwarding updates for unsubscribed URIs itself, and tests assert exactly that.
+            tokio::spawn(async move {
+                for _ in 0..MAX_RESOURCE_UPDATE_NOTIFICATIONS {
+                    if peer.notify_resource_updated(ResourceUpdatedNotificationParam::new(uri.clone())).await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(RESOURCE_UPDATE_NOTIFY_INTERVAL).await;
+                }
+            });
+            Ok(())
+        } else {
+            Err(McpError::resource_not_found("resource_not_found", Some(json!({ "uri": request.uri }))))
+        }
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        if is_known_resource_uri(&request.uri) {
+            Ok(())
+        } else {
+            Err(McpError::resource_not_found("resource_not_found", Some(json!({ "uri": request.uri }))))
+        }
+    }
+
     async fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParams>,
@@ -300,3 +336,17 @@ impl ServerHandler for Counter {
         Ok(self.get_info())
     }
 }
+
+/// The backend-local resource URIs this mock owns; subscribe/unsubscribe only succeed for these,
+/// so a successful gateway call proves the namespace prefix was stripped before forwarding.
+pub const KNOWN_RESOURCE_URIS: [&str; 2] = ["str:////Users/to/some/path/", "memo://insights"];
+
+fn is_known_resource_uri(uri: &str) -> bool {
+    KNOWN_RESOURCE_URIS.contains(&uri)
+}
+
+/// Interval between the resource-update notifications sent after a subscribe is accepted.
+pub const RESOURCE_UPDATE_NOTIFY_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Safety cap so notify loops can't outlive a hung test run.
+const MAX_RESOURCE_UPDATE_NOTIFICATIONS: usize = 1000;

@@ -11,8 +11,8 @@ use tracing::warn;
 
 use super::auth::token;
 
-const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
+pub(crate) const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 pub(crate) fn create_client(user: &str) -> reqwest::Client {
     reqwest::Client::builder().default_headers(auth_headers(user)).build().expect("This should work")
@@ -41,13 +41,24 @@ pub(crate) async fn connect_client(
     gateway_url: String,
     client: reqwest::Client,
 ) -> Result<rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams>> {
+    connect_client_with_handler(gateway_url, client, InitializeRequestParams::default()).await
+}
+
+/// Connects any `ClientHandler` to the gateway, retrying until `CLIENT_CONNECT_TIMEOUT`.
+pub(crate) async fn connect_client_with_handler<H>(
+    gateway_url: String,
+    client: reqwest::Client,
+    handler: H,
+) -> Result<rmcp::service::RunningService<rmcp::RoleClient, H>>
+where
+    H: rmcp::ClientHandler + Clone,
+{
     let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
     loop {
         let config = StreamableHttpClientTransportConfig::with_uri(gateway_url.clone());
         let transport = StreamableHttpClientTransport::with_client(client.clone(), config);
-        let request = InitializeRequestParams::default();
 
-        match request.serve(transport).await {
+        match handler.clone().serve(transport).await {
             Ok(running_service) => return Ok(running_service),
             Err(error) if Instant::now() < deadline => {
                 warn!("No Service {error:?}");

@@ -1,0 +1,10 @@
+[book]
+authors = ["ContextForge Gateway maintainers"]
+language = "en"
+src = "src"
+title = "The ContextForge Gateway Book"
+description = "Architecture, configuration, and operations guide for contextforge-gateway-rs, the Rust MCP dataplane that presents many backend MCP servers as one gateway endpoint."
+
+[output.html]
+git-repository-url = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
+edit-url-template = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs/edit/main/docs/book/{path}"

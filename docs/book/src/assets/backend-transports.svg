@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
+  <title id="title">Backend connections and transports</title>
+  <desc id="desc">The gateway separates downstream TCP or TLS listener transport, upstream reqwest and RMCP streamable HTTP backend transport, and Redis config-store transport.</desc>
+
+  <rect x="0" y="0" width="1120" height="520" rx="18" fill="#ffffff" />
+  <rect x="1" y="1" width="1118" height="518" rx="18" fill="none" stroke="#d7dde5" />
+
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1f2933; }
+    .title { font-size: 18px; font-weight: 700; }
+    .section { font-size: 16px; font-weight: 700; }
+    .body { font-size: 13px; fill: #4b5563; }
+    .mini { font-size: 12px; fill: #5f6b7a; }
+    .label { font-size: 12px; font-weight: 700; }
+    .client { fill: #eef7ff; stroke: #4b8bbe; stroke-width: 2; }
+    .gateway { fill: #f1fbf5; stroke: #3f9b6d; stroke-width: 2; }
+    .backend { fill: #fff8e7; stroke: #c28a25; stroke-width: 2; }
+    .config { fill: #f7f4ff; stroke: #7b68b4; stroke-width: 2; }
+    .box { fill: #ffffff; stroke: #cfd8e3; stroke-width: 1.5; }
+    .blue { stroke: #3d75a8; stroke-width: 2.6; fill: none; }
+    .green { stroke: #2f8f6b; stroke-width: 2.6; fill: none; }
+    .amber { stroke: #c28a25; stroke-width: 2.6; fill: none; }
+    .purple { stroke: #7b68b4; stroke-width: 2.6; fill: none; }
+    .dash { stroke-dasharray: 5 5; }
+    .blue-fill { fill: #3d75a8; }
+    .green-fill { fill: #2f8f6b; }
+    .amber-fill { fill: #c28a25; }
+    .purple-fill { fill: #7b68b4; }
+    .blue-text { fill: #315f87; }
+    .green-text { fill: #2f6b50; }
+    .amber-text { fill: #8a621b; }
+    .purple-text { fill: #5d4fa0; }
+  </style>
+
+  <g>
+    <rect x="42" y="190" width="178" height="104" rx="14" class="client" />
+    <text x="131" y="226" text-anchor="middle" class="title">MCP client</text>
+    <text x="131" y="256" text-anchor="middle" class="body">streamable HTTP</text>
+    <text x="131" y="278" text-anchor="middle" class="mini">front door or direct caller</text>
+  </g>
+
+  <g>
+    <rect x="292" y="70" width="300" height="378" rx="16" class="gateway" />
+    <text x="442" y="108" text-anchor="middle" class="section">Gateway dataplane</text>
+
+    <rect x="326" y="142" width="232" height="58" rx="9" class="box" />
+    <text x="442" y="166" text-anchor="middle" class="body">downstream listeners</text>
+    <text x="442" y="187" text-anchor="middle" class="mini">TCP and optional Rustls TLS</text>
+
+    <rect x="326" y="230" width="232" height="58" rx="9" class="box" />
+    <text x="442" y="254" text-anchor="middle" class="body">Axum + RMCP service</text>
+    <text x="442" y="275" text-anchor="middle" class="mini">middleware, validators, routing</text>
+
+    <rect x="326" y="318" width="232" height="58" rx="9" class="box" />
+    <text x="442" y="342" text-anchor="middle" class="body">upstream client boundary</text>
+    <text x="442" y="363" text-anchor="middle" class="mini">reqwest + streamable HTTP</text>
+  </g>
+
+  <g>
+    <rect x="724" y="72" width="264" height="112" rx="14" class="config" />
+    <text x="856" y="108" text-anchor="middle" class="title">Redis config store</text>
+    <text x="856" y="138" text-anchor="middle" class="body">plain, TLS, or mTLS</text>
+    <text x="856" y="160" text-anchor="middle" class="mini">UserConfig and plugin config</text>
+
+    <rect x="724" y="258" width="264" height="126" rx="14" class="backend" />
+    <text x="856" y="294" text-anchor="middle" class="title">Backend MCP servers</text>
+    <text x="856" y="324" text-anchor="middle" class="body">streamable HTTP today</text>
+    <text x="856" y="347" text-anchor="middle" class="mini">HTTPS-only by default</text>
+    <text x="856" y="367" text-anchor="middle" class="mini">mTLS supported by process config</text>
+  </g>
+
+  <g>
+    <line x1="220" y1="242" x2="316" y2="172" class="blue" />
+    <polygon points="316,172 304,171 311,161" class="blue-fill" />
+    <text x="270" y="189" text-anchor="middle" class="label blue-text">TCP/TLS</text>
+
+    <line x1="558" y1="259" x2="704" y2="128" class="purple dash" />
+    <polygon points="704,128 692,132 700,140" class="purple-fill" />
+    <text x="638" y="177" text-anchor="middle" class="label purple-text">config lookup</text>
+
+    <line x1="724" y1="146" x2="568" y2="250" class="purple dash" />
+    <polygon points="568,250 581,250 574,240" class="purple-fill" />
+    <text x="658" y="223" text-anchor="middle" class="label purple-text">UserConfig</text>
+
+    <line x1="558" y1="347" x2="714" y2="321" class="amber" />
+    <polygon points="714,321 702,316 704,328" class="amber-fill" />
+    <text x="632" y="321" text-anchor="middle" class="label amber-text">reqwest client</text>
+
+    <line x1="724" y1="344" x2="568" y2="360" class="green" />
+    <polygon points="568,360 580,365 579,353" class="green-fill" />
+    <text x="642" y="374" text-anchor="middle" class="label green-text">MCP response</text>
+  </g>
+
+  <g>
+    <rect x="60" y="420" width="1000" height="56" rx="10" fill="#fbfcfe" stroke="#d7dde5" />
+    <text x="90" y="452" class="mini">Boundary rule:</text>
+    <text x="184" y="452" class="mini">listener setup, backend transport creation, and Redis config access should stay in separate modules.</text>
+  </g>
+</svg>

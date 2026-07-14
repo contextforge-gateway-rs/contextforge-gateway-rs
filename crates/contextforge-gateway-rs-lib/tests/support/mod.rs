@@ -11,10 +11,13 @@ mod tool;
 mod user_config_store;
 
 pub(crate) use auth::token;
-pub(crate) use client::{connect_client, create_client, create_tls_client};
+pub(crate) use client::{
+    CLIENT_CONNECT_TIMEOUT, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler, create_client,
+    create_tls_client,
+};
 pub(crate) use list_tools_gateway::{
     ListToolsGatewaySettings, create_gateway_with_four_counters, create_ports,
-    create_tls_gateway_with_four_tls_counters,
+    create_tls_gateway_with_four_tls_counters, plaintext_config,
 };
 pub(crate) use plugin::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, TestPlugin, TestPluginFactory,

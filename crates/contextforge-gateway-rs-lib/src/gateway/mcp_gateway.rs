@@ -1,24 +1,7 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use super::{
-    backend_client::{GatewayBackendClient, call_backend_tool},
-    mcp_call_validator::AuthorizedCallValidator,
-};
-pub use crate::gateway::session_store::LocalUserSessionStore;
-use crate::{
-    SessionId,
-    gateway::{
-        mcp_call_validator::InitializeCallValidator,
-        session_manager::SessionManager,
-        session_store::{UserSession, UserSessionStore},
-    },
-};
-use contextforge_gateway_rs_apis::user_store::{UserConfig, VirtualHost};
+use contextforge_gateway_rs_apis::user_store::VirtualHost;
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
-use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
@@ -35,6 +18,20 @@ use rmcp::{
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
+
+use super::{
+    backend_client::{GatewayBackendClient, call_backend_tool},
+    mcp_call_validator::AuthorizedCallValidator,
+};
+pub use crate::gateway::session_store::LocalUserSessionStore;
+use crate::{
+    SessionId,
+    gateway::{
+        mcp_call_validator::InitializeCallValidator,
+        session_manager::SessionManager,
+        session_store::{UserSession, UserSessionStore},
+    },
+};
 
 #[derive(Clone, Default)]
 pub struct BackendTransports(Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>);
@@ -56,8 +53,6 @@ pub struct McpService<T>
 where
     T: UserSessionStore,
 {
-    #[builder(default = Arc::new(Mutex::new(HashSet::new())))]
-    subscriptions: Arc<Mutex<HashSet<String>>>,
     #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
     http_client: reqwest::Client,
@@ -150,7 +145,8 @@ where
             .iter()
             .map(|(name, backend)| {
                 let client = self.http_client.clone();
-                let backend_client = GatewayBackendClient::new(request.clone(), self.plugin_runtime.clone());
+                let backend_client =
+                    GatewayBackendClient::new(name.clone(), request.clone(), self.plugin_runtime.clone());
                 let backend_url = backend.url.clone();
                 let downstream_session_id = downstream_session_id.clone();
 
@@ -288,7 +284,7 @@ where
         let (service_name, service) = resolve_backend(&session_manager, "call_tool", &backend_name).await?;
 
         let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
+            plugin_runtime.before_tool_call(&request, &tool_name, &service_name).await?
         } else {
             ToolPreCallResult::unchanged()
         };
@@ -304,14 +300,7 @@ where
         let response = call_backend_tool(service.peer(), routed_request, progress_token.clone(), cx.ct.clone()).await;
         service.service().stop_tracking_tool_call(progress_token.clone()).await;
 
-        let response = response.map_err(|error| {
-            warn!("call_tool: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = response.map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
         let response = match (&self.plugin_runtime, post_state) {
             (Some(plugin_runtime), Some(post_state)) => {
                 plugin_runtime.after_tool_call(&tool_name, response, Some(post_state)).await?
@@ -356,29 +345,20 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
-        let Some((backend_name, resource_uri)) = split_prefixed_name(&request.uri, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong resource name".into(),
-                data: None,
-            });
-        };
-        let resource_uri = resource_uri.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "read_resource", backend_name).await?;
+        let (service_name, service, resource_uri) = route_prefixed_name(
+            &session_manager,
+            "read_resource",
+            &request.uri,
+            "Routing problem... wrong resource name",
+        )
+        .await?;
 
         let mut routed_request = request;
         routed_request.uri = resource_uri;
-        let response = service.read_resource(routed_request).await.map_err(|error| {
-            warn!("read_resource: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = service
+            .read_resource(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
         info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
         Ok(response)
     }
@@ -417,13 +397,23 @@ where
         request: SubscribeRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("subscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mcp_call_validator = AuthorizedCallValidator::new("subscribe", &cx);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let mut subs = self.subscriptions.lock().await;
-        subs.insert(request.uri.clone());
+        let (service_name, service, resource_uri) =
+            route_prefixed_name(&session_manager, "subscribe", &request.uri, "Routing problem... wrong resource name")
+                .await?;
+
+        let mut routed_request = request;
+        routed_request.uri = resource_uri.clone();
+        service.service().track_resource_subscription(&resource_uri, cx.peer.clone()).await;
+
+        if let Err(error) = service.subscribe(routed_request).await {
+            service.service().stop_tracking_resource_subscription(&resource_uri).await;
+            return Err(backend_forward_error("subscribe", &service_name, &error));
+        }
+        info!("subscribe: backend {service_name} completed");
         Ok(())
     }
 
@@ -432,13 +422,26 @@ where
         request: UnsubscribeRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("unsubscribe user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mcp_call_validator = AuthorizedCallValidator::new("unsubscribe", &cx);
+        let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let mut subs = self.subscriptions.lock().await;
-        subs.remove(request.uri.as_str());
+        let (service_name, service, resource_uri) = route_prefixed_name(
+            &session_manager,
+            "unsubscribe",
+            &request.uri,
+            "Routing problem... wrong resource name",
+        )
+        .await?;
+
+        let mut routed_request = request;
+        routed_request.uri = resource_uri.clone();
+        service
+            .unsubscribe(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
+        service.service().stop_tracking_resource_subscription(&resource_uri).await;
+        info!("unsubscribe: backend {service_name} completed");
         Ok(())
     }
 
@@ -476,30 +479,16 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
-        let Some((backend_name, prompt_name)) = split_prefixed_name(&request.name, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong prompt name".into(),
-                data: None,
-            });
-        };
-        let backend_name = backend_name.to_owned();
-        let prompt_name = prompt_name.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "get_prompt", &backend_name).await?;
+        let (service_name, service, prompt_name) =
+            route_prefixed_name(&session_manager, "get_prompt", &request.name, "Routing problem... wrong prompt name")
+                .await?;
 
         let mut routed_request = request;
         routed_request.name = prompt_name;
-        let response = service.get_prompt(routed_request).await.map_err(|_| {
-            warn!("get_prompt: backend {service_name} returned an error");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = service
+            .get_prompt(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
         info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
         Ok(response)
     }
@@ -513,39 +502,29 @@ where
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
 
-        let backend_names = session_manager.get_backend_names();
-
         // The reference carries a namespaced prompt name or resource URI; route on that.
         let namespaced = match &request.r#ref {
             Reference::Prompt(prompt) => prompt.name.as_str(),
             Reference::Resource(resource) => resource.uri.as_str(),
         };
 
-        let Some((backend_name, stripped)) = split_prefixed_name(namespaced, &backend_names) else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... wrong completion reference".into(),
-                data: None,
-            });
-        };
-        let backend_name = backend_name.to_owned();
-        let stripped = stripped.to_owned();
-
-        let (service_name, service) = resolve_backend(&session_manager, "complete", &backend_name).await?;
+        let (service_name, service, stripped) = route_prefixed_name(
+            &session_manager,
+            "complete",
+            namespaced,
+            "Routing problem... wrong completion reference",
+        )
+        .await?;
 
         let mut routed_request = request;
         match &mut routed_request.r#ref {
             Reference::Prompt(prompt) => prompt.name = stripped,
             Reference::Resource(resource) => resource.uri = stripped,
         }
-        let response = service.complete(routed_request).await.map_err(|error| {
-            warn!("complete: backend {service_name} {error:?}");
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... got no responses from backends".into(),
-                data: None,
-            }
-        })?;
+        let response = service
+            .complete(routed_request)
+            .await
+            .map_err(|error| backend_forward_error("complete", &service_name, &error))?;
         info!("complete: backend {service_name} returned {} values", response.completion.values.len());
         Ok(response)
     }
@@ -558,6 +537,12 @@ fn split_prefixed_name<'a, N: AsRef<str>>(name: &'a str, backend_names: &'a [N])
         let backend = backend.as_ref();
         name.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
     })
+}
+
+/// Joins a backend name and a backend-local name into the namespaced `{backend}-{rest}` form.
+/// Inverse of [`split_prefixed_name`]; together they own the naming convention.
+pub(crate) fn prefixed_name(backend_name: &str, rest: &str) -> String {
+    format!("{backend_name}-{rest}")
 }
 
 /// Resolves an exact control-plane alias to its backend and upstream name.
@@ -591,7 +576,17 @@ fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, original_na
                 .iter()
                 .find_map(|(alias, original)| (original == original_name).then(|| alias.clone()))
         })
-        .unwrap_or_else(|| format!("{backend_name}-{original_name}"))
+        .unwrap_or_else(|| prefixed_name(backend_name, original_name))
+}
+
+/// Logs a backend forwarding failure and maps it to the routing error every handler returns.
+fn backend_forward_error(op: &str, backend_name: &str, error: &impl std::fmt::Debug) -> ErrorData {
+    warn!("{op}: backend {backend_name} {error:?}");
+    ErrorData {
+        code: ErrorCode::INTERNAL_ERROR,
+        message: "Routing problem... got no responses from backends".into(),
+        data: None,
+    }
 }
 
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
@@ -630,6 +625,24 @@ where
             }
         })
         .collect()
+}
+
+/// Routes a namespaced `{backend}-{rest}` name: splits it against the session's backend names
+/// and resolves the owning backend, returning `(backend_name, service, rest)`. Shared by tool,
+/// resource, prompt, and completion routing.
+async fn route_prefixed_name(
+    session_manager: &SessionManager<'_>,
+    op: &str,
+    namespaced: &str,
+    no_route_message: &'static str,
+) -> Result<(String, McpClientService, String), ErrorData> {
+    let backend_names = session_manager.get_backend_names();
+    let Some((backend_name, rest)) = split_prefixed_name(namespaced, &backend_names) else {
+        return Err(ErrorData { code: ErrorCode::INTERNAL_ERROR, message: no_route_message.into(), data: None });
+    };
+    let rest = rest.to_owned();
+    let (backend_name, service) = resolve_backend(session_manager, op, backend_name).await?;
+    Ok((backend_name, service, rest))
 }
 
 /// Resolves the single connected backend named `backend_name` and takes its running service.
@@ -678,7 +691,13 @@ async fn resolve_backend(
 }
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
-    ServerCapabilities::builder().enable_completions().enable_prompts().enable_resources().enable_tools().build()
+    ServerCapabilities::builder()
+        .enable_completions()
+        .enable_prompts()
+        .enable_resources()
+        .enable_resources_subscribe()
+        .enable_tools()
+        .build()
 }
 
 fn log_list_backend_response<T, E: std::fmt::Debug>(
@@ -719,8 +738,8 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
                 .resources
                 .into_iter()
                 .map(|mut t| {
-                    t.name = format!("{backend_name}-{}", t.name);
-                    t.uri = format!("{backend_name}-{}", t.uri);
+                    t.name = prefixed_name(&backend_name, &t.name);
+                    t.uri = prefixed_name(&backend_name, &t.uri);
                     t
                 })
                 .collect::<Vec<_>>()
@@ -734,8 +753,8 @@ fn merge_resource_templates(templates: Vec<(String, ListResourceTemplatesResult)
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.resource_templates.into_iter().map(move |mut template| {
-                template.name = format!("{backend_name}-{}", template.name);
-                template.uri_template = format!("{backend_name}-{}", template.uri_template);
+                template.name = prefixed_name(&backend_name, &template.name);
+                template.uri_template = prefixed_name(&backend_name, &template.uri_template);
                 template
             })
         })
@@ -748,7 +767,7 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.prompts.into_iter().map(move |mut prompt| {
-                prompt.name = format!("{backend_name}-{}", prompt.name);
+                prompt.name = prefixed_name(&backend_name, &prompt.name);
                 prompt
             })
         })

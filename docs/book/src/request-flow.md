@@ -1,0 +1,196 @@
+# Request Flow
+
+> 🎯 **Flow invariant:** Axum builds request context before RMCP handlers route MCP
+> methods. MCP handlers should read typed extensions, not parse headers, paths,
+> or Redis keys directly.
+
+![Request flow](assets/request-flow.svg)
+
+## Graph Legend
+
+The graph uses color only to separate paths:
+
+| Color | Meaning |
+| --- | --- |
+| Blue | Request direction: listener, middleware, RMCP dispatch, and backend calls. |
+| Green | Response direction: backend result, response unwind, and client response. |
+| Amber | `initialize`, where backend MCP client sessions are created. |
+| Purple | Authorized MCP calls after `Mcp-session-id` exists. |
+| Red | Layer-local HTTP rejection before MCP method handling. |
+
+This page follows a normal streamable HTTP MCP request through the code. The
+shape below is based on the current `main.rs`, `runtime.rs`, `Gateway::run_gateway`,
+the request layers, and `McpService`. To watch the same flow with real requests,
+follow [Run the Gateway Locally](running-the-gateway.md) alongside this page.
+
+## Startup Path
+
+Startup begins in `crates/contextforge-gateway-rs/src/main.rs`:
+
+```text
+install rustls crypto provider
+  -> Config::parse()
+  -> logging::init_tracing_logging(&config)
+  -> Runtime::from(&config)
+  -> optional CpexRuntimeRegistry
+  -> Gateway::builder()
+       .with_config(config)
+       .with_user_config_store_type(UserConfigStoreType::Redis)
+       .with_session_manager(LocalSessionManager::default())
+       .with_plugin_runtime(...)
+       .build()
+  -> runtime.execute(gateway, plugin_registry)
+```
+
+`runtime.execute` either runs one multi-thread Tokio runtime or starts multiple
+current-thread runtimes. In both modes it initializes the optional CPEX runtime
+and then calls `gateway.run_gateway()`.
+
+## HTTP Stack Order
+
+`Gateway::run_gateway` builds the service stack in `crates/contextforge-gateway-rs-lib/src/lib.rs`.
+Tower layers execute from the outside in, so a normal MCP request reaches the
+handler in this order:
+
+```text
+TCP/TLS listener
+  -> HttpMetricsLayer
+  -> TraceLayer
+  -> /contextforge-rs nested router
+  -> CORS layer
+  -> virtual_host_id_layer
+  -> claims_layer
+  -> session_id_layer
+  -> user_config_store_layer
+  -> virtual_host_config_layer
+  -> /servers/{virtual_host_name}/mcp RMCP service
+```
+
+The inner Axum route is:
+
+```text
+/servers/{virtual_host_name}/mcp
+```
+
+The public route is nested under:
+
+```text
+/contextforge-rs/servers/{virtual_host_name}/mcp
+```
+
+The route segment is named `virtual_host_name`, but the layer stores the value
+as `VirtualHostId`.
+
+## Flow Checkpoints
+
+| Checkpoint | Established fact | Next dependency |
+| --- | --- | --- |
+| Listener | The request reached the Rust dataplane over TCP or TLS. | Metrics, tracing, and nested routing can observe it. |
+| Path extraction | The inner path matched `/servers/{virtual_host_id}/mcp`. | MCP handlers can resolve a `VirtualHost`. |
+| Claims validation | The bearer token was accepted and `ContextForgeClaims` exists. | Config lookup can use `claims.sub`. |
+| User config lookup | A `UserConfig` exists for the authenticated subject. | The virtual host check can run against that config. |
+| Virtual host check | The path's virtual host id exists in the caller's config. | MCP validators can resolve the selected `VirtualHost`. |
+| RMCP dispatch | The streamable HTTP request is mapped to an MCP method. | The handler chooses initialize, routed backend calls, or local behavior. |
+
+## Middleware Context
+
+The request layers insert the context used later by RMCP handlers:
+
+| Layer | Request behavior | Failure behavior |
+| --- | --- | --- |
+| `virtual_host_id_layer` | Extracts `/servers/{virtual_host_id}/mcp` and inserts `VirtualHostId`. | Returns `400` when the inner path does not match. |
+| `claims_layer` | Validates `Authorization: Bearer ...` with configured RS/HMAC decoder, issuer, audience, and expiration. Inserts `ContextForgeClaims`. | Returns `401` for missing or invalid bearer auth. |
+| `session_id_layer` | Reads `Mcp-session-id` and inserts `SessionId` when present. | Missing session id is allowed here; authorized MCP handlers reject it later when required. |
+| `user_config_store_layer` | Uses `claims.sub` as `User::new(subject)`, loads `UserConfig`, and inserts it. | Returns `400` for missing config, `500` for other store failures, and `400` if claims are absent. |
+| `virtual_host_config_layer` | Checks that the path's virtual host id exists in the loaded `UserConfig`. | Returns `404` with body `{"detail":"Server not found"}` when the virtual host is not in the caller's config. |
+
+For `DELETE`, `session_id_layer` also has response-side behavior. It lets RMCP
+handle the request first. If the RMCP response succeeds and a session id exists,
+it removes the local user session mapping and removes backend transports for
+`principal + session_id`.
+
+## Initialize Flow
+
+`initialize` does not require the downstream `Mcp-session-id` header. RMCP
+creates a `DownstreamSessionId` and places it in the request context.
+
+`McpService::initialize` runs this sequence:
+
+1. `InitializeCallValidator` reads `DownstreamSessionId`, `UserConfig`,
+   `VirtualHostId`, and `ContextForgeClaims`.
+2. It resolves `user_config.virtual_hosts[virtual_host_id]`.
+3. It reads the local user session mapping for `claims.sub + downstream_session_id`.
+4. For every backend in the selected virtual host, it concurrently builds a
+   `StreamableHttpClientTransport` with the configured backend URL and serves a
+   `GatewayBackendClient` over that transport.
+5. It collects backend capabilities and running RMCP client services. The
+   capabilities are stored with backend transport state for future routing, but
+   they do not shape the downstream initialize response yet.
+6. It writes the local user session mapping.
+7. It stores each backend service in `BackendTransports` keyed by principal,
+   backend name, and downstream session id.
+8. It returns `InitializeResult` with the gateway's current fixed capability
+   set: completions, prompts, resources, and tools enabled.
+
+Backend initialization is concurrent through `futures::future::join_all`.
+
+## Authorized MCP Calls
+
+Routed MCP calls after initialization use `AuthorizedCallValidator`. It requires:
+
+```text
+SessionId
+UserConfig
+VirtualHostId
+ContextForgeClaims
+```
+
+The validator resolves the same virtual host from the authenticated user's
+config, then `SessionManager` locates backend services for:
+
+```text
+principal + backend_name + session_id
+```
+
+Current routed method families:
+
+| Method family | Flow |
+| --- | --- |
+| `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Borrow all configured backend services, call every available backend concurrently with `fan_out_list`, namespace results with the backend name, sort merged output, and return one list. |
+| `call_tool` | Split `{backend_name}-{tool_name}`, resolve one backend, optionally run `before_tool_call`, apply argument/name changes, track the downstream progress token, call the backend, optionally run `after_tool_call`, and return the backend result. |
+| `read_resource`, `get_prompt` | Split the prefixed resource or prompt name, resolve one backend, strip the gateway prefix, call the backend, and return the backend result. |
+| `complete` | Split the backend-prefixed prompt name or resource URI in `ref`, resolve one backend, strip the gateway prefix, and return the backend completion result. |
+
+`GatewayBackendClient` handles backend progress notifications for `call_tool`.
+If a progress token matches an in-flight downstream tool call, it optionally
+runs the stream-event post hook and forwards the progress notification back to
+the downstream client.
+
+`call_backend_tool` also watches the downstream cancellation token. If the
+downstream call is cancelled before the backend responds, the gateway sends a
+cancel request to the backend handle.
+
+## Local MCP Methods
+
+Some MCP methods are currently local to the gateway implementation rather than
+backend-routed:
+
+| Method | Current behavior |
+| --- | --- |
+| `ping` | Returns success. |
+| `subscribe`, `unsubscribe` | Mutate the local subscription set. |
+
+These paths still pass through the same HTTP middleware, but they do not use the
+backend fanout or prefixed routing path today.
+
+## Response Path
+
+Backend responses return to `McpService` first. `call_tool` may run response
+plugin hooks before returning. List calls merge and namespace backend output
+before returning. Single-backend calls return the selected backend result after
+gateway prefix removal.
+
+The HTTP response then unwinds through `virtual_host_config_layer`,
+`user_config_store_layer`, `session_id_layer`, `claims_layer`,
+`virtual_host_id_layer`, CORS, trace, and metrics. On successful `DELETE`, `session_id_layer` performs local session and
+backend transport cleanup during this unwind.

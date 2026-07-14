@@ -5,7 +5,7 @@ use rmcp::{
     ClientHandler, Peer, RoleClient, RoleServer,
     model::{
         CallToolRequestParams, CallToolResult, ClientRequest, InitializeRequestParams, Meta, ProgressNotificationParam,
-        ProgressToken, Request, ServerResult,
+        ProgressToken, Request, ResourceUpdatedNotificationParam, ServerResult,
     },
     serde::{Serialize, de::DeserializeOwned},
     service::{NotificationContext, PeerRequestOptions, ServiceError},
@@ -14,11 +14,15 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+use super::mcp_gateway::prefixed_name;
+
 #[derive(Clone)]
 pub(crate) struct GatewayBackendClient {
+    backend_name: String,
     initialize_request: InitializeRequestParams,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     in_flight_calls: Arc<Mutex<HashMap<ProgressToken, Arc<InFlightToolCall>>>>,
+    resource_subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
 }
 
 #[derive(Debug)]
@@ -31,10 +35,17 @@ struct InFlightToolCall {
 
 impl GatewayBackendClient {
     pub(crate) fn new(
+        backend_name: String,
         initialize_request: InitializeRequestParams,
         plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     ) -> Self {
-        Self { initialize_request, plugin_runtime, in_flight_calls: Arc::default() }
+        Self {
+            backend_name,
+            initialize_request,
+            plugin_runtime,
+            in_flight_calls: Arc::default(),
+            resource_subscriptions: Arc::default(),
+        }
     }
 
     pub(crate) async fn track_tool_call(
@@ -68,6 +79,23 @@ impl GatewayBackendClient {
     async fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
         let calls = self.in_flight_calls.lock().await;
         calls.get(progress_token).cloned()
+    }
+
+    pub(crate) async fn track_resource_subscription(&self, resource_uri: &str, downstream: Peer<RoleServer>) {
+        debug!("track_resource_subscription backend {} uri {resource_uri}", self.backend_name);
+        let mut subscriptions = self.resource_subscriptions.lock().await;
+        subscriptions.insert(resource_uri.to_owned(), downstream);
+    }
+
+    pub(crate) async fn stop_tracking_resource_subscription(&self, resource_uri: &str) {
+        debug!("stop_tracking_resource_subscription backend {} uri {resource_uri}", self.backend_name);
+        let mut subscriptions = self.resource_subscriptions.lock().await;
+        subscriptions.remove(resource_uri);
+    }
+
+    async fn resource_subscription(&self, resource_uri: &str) -> Option<Peer<RoleServer>> {
+        let subscriptions = self.resource_subscriptions.lock().await;
+        subscriptions.get(resource_uri).cloned()
     }
 
     async fn stream_event_post_hook<T>(&self, call: &InFlightToolCall, event: T) -> Option<T>
@@ -114,6 +142,22 @@ impl ClientHandler for GatewayBackendClient {
         };
         if let Err(error) = call.downstream.notify_progress(progress).await {
             warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
+        }
+    }
+
+    async fn on_resource_updated(
+        &self,
+        mut params: ResourceUpdatedNotificationParam,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        let Some(downstream) = self.resource_subscription(&params.uri).await else {
+            debug!("resource_updated: dropping backend notification for unsubscribed uri {}", params.uri);
+            return;
+        };
+
+        params.uri = prefixed_name(&self.backend_name, &params.uri);
+        if let Err(error) = downstream.notify_resource_updated(params).await {
+            warn!("resource_updated: unable to forward backend notification downstream: {error:?}");
         }
     }
 }
