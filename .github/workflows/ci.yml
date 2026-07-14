@@ -42,7 +42,7 @@ jobs:
       - uses: taiki-e/install-action@v2.75.27
         with:
           tool: cargo-deny
-      - run: cargo deny check advisories licenses
+      - run: cargo deny check advisories bans licenses
 
   cargo-shear:
     runs-on: ubuntu-latest
