@@ -1,7 +1,7 @@
 mod support;
 
 use contextforge_gateway_rs_lib::{Config, Result, UpstreamConnectionMode};
-use rmcp::model::{GetPromptRequestParams, PromptMessageContent};
+use rmcp::model::GetPromptRequestParams;
 use serde_json::json;
 use tracing::{info, warn};
 
@@ -103,7 +103,7 @@ async fn assert_get_prompt(gateway_url: String, client: reqwest::Client, prompt_
     let Some(message) = result.messages.first() else {
         return Err("Expected prompt message".into());
     };
-    let PromptMessageContent::Text { text } = &message.content else {
+    let Some(text) = message.content.as_text().map(|content| &content.text) else {
         return Err("Expected text prompt message".into());
     };
 

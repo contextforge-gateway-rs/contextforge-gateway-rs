@@ -16,7 +16,7 @@ goose = { git = "https://github.com/tag1consulting/goose" }
 tokio.workspace = true
 http.workspace = true
 reqwest.workspace = true
-uuid = { version = "1.23.1", features = ["v4"] }
+uuid.workspace = true
 
 
 [lints]

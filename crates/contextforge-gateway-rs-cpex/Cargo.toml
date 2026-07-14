@@ -10,7 +10,7 @@ keywords.workspace = true
 doctest = false
 
 [dependencies]
-arc-swap.workspace = true
+arc-swap = "1.7"
 async-trait.workspace = true
 contextforge-gateway-rs-apis.workspace = true
 cpex.workspace = true

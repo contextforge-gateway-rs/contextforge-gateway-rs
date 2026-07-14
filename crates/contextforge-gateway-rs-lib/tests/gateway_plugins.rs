@@ -9,7 +9,7 @@ use rmcp::{
     ClientHandler,
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
-        InitializeRequestParams, Meta, NumberOrString, ProgressNotificationParam, ProgressToken, Request, ServerResult,
+        InitializeRequestParams, ProgressNotificationParam, Request, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
@@ -57,8 +57,7 @@ async fn send_progress_sum(
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
     let service = gateway.connect_with_handler(user, client).await;
-    let token = ProgressToken(NumberOrString::String("package-progress".into()));
-    let handle = send_progress_call(&service, "progress_sum", token).await;
+    let handle = send_progress_call(&service, "progress_sum").await;
 
     let ServerResult::CallToolResult(result) = handle.await_response().await.expect("progress_sum call succeeds")
     else {
@@ -67,18 +66,18 @@ async fn send_progress_sum(
     (result, progress)
 }
 
-/// Sends a `tools/call` carrying `progress_token` and returns the in-flight
-/// request handle without awaiting it.
+/// Starts a `tools/call` and returns the in-flight request handle without
+/// awaiting it.
 async fn send_progress_call(
     service: &RunningService<RoleClient, RecordingClient>,
     tool_name: &str,
-    progress_token: ProgressToken,
 ) -> RequestHandle<RoleClient> {
     let request = CallToolRequestParams::new(tool_name.to_owned());
-    let mut options = PeerRequestOptions::no_options();
-    options.meta = Some(Meta::with_progress_token(progress_token));
     service
-        .send_cancellable_request(ClientRequest::CallToolRequest(Request::new(request)), options)
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(Request::new(request)),
+            PeerRequestOptions::no_options(),
+        )
         .await
         .expect("progress request is sent")
 }
@@ -112,7 +111,7 @@ fn raw_mcp_request(
     request
 }
 
-fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: i64) -> Value {
+fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Value {
     serde_json::json!({
         "method": "tools/call",
         "params": {
@@ -140,7 +139,7 @@ fn sse_data_values(body: &str) -> Vec<Value> {
     if body.is_empty() { Vec::new() } else { vec![serde_json::from_str(body).expect("JSON response body")] }
 }
 
-fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64) {
+fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: &str) {
     let messages = sse_data_values(body);
     let progress = messages
         .iter()
@@ -150,7 +149,7 @@ fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64)
     assert!(
         progress
             .iter()
-            .all(|message| message.pointer("/params/progressToken").and_then(Value::as_i64) == Some(progress_token)),
+            .all(|message| message.pointer("/params/progressToken").and_then(Value::as_str) == Some(progress_token)),
         "progress events with foreign tokens in body: {body}"
     );
     let result = messages
@@ -234,8 +233,11 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
     let service = gateway.connect_with_handler("admin@example.com", client).await;
     let tool_name = "progress_sum";
 
-    let first = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(1))).await;
-    let second = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(2))).await;
+    let first = send_progress_call(&service, tool_name).await;
+    let first_progress_token = first.progress_token.clone();
+    let second = send_progress_call(&service, tool_name).await;
+    let second_progress_token = second.progress_token.clone();
+    assert_ne!(first_progress_token, second_progress_token);
 
     let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         tokio::join!(first.await_response(), second.await_response())
@@ -254,14 +256,10 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
 
     wait_for_event_count(&progress, 8).await;
     let progress = progress.lock().expect("progress lock poisoned");
-    let first_count = progress
-        .iter()
-        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(1)))
-        .count();
-    let second_count = progress
-        .iter()
-        .filter(|notification| notification.progress_token == ProgressToken(NumberOrString::Number(2)))
-        .count();
+    let first_count =
+        progress.iter().filter(|notification| notification.progress_token == first_progress_token).count();
+    let second_count =
+        progress.iter().filter(|notification| notification.progress_token == second_progress_token).count();
     assert_eq!(4, first_count);
     assert_eq!(4, second_count);
 }
@@ -273,14 +271,24 @@ async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins(
     let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
 
     let tool_name = "progress_sum";
-    let first =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(tool_name, 2, 1));
-    let second =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(tool_name, 3, 2));
+    let first = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &raw_tool_call(tool_name, 2, "downstream-first"),
+    );
+    let second = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &raw_tool_call(tool_name, 3, "downstream-second"),
+    );
     let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
 
-    assert_raw_progress_stream(&first_body, 2, 1);
-    assert_raw_progress_stream(&second_body, 3, 2);
+    assert_raw_progress_stream(&first_body, 2, "downstream-first");
+    assert_raw_progress_stream(&second_body, 3, "downstream-second");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -291,7 +299,7 @@ async fn backend_generated_progress_tokens_are_dropped() {
     let service = gateway.connect_with_handler("admin@example.com", client).await;
 
     let tool_name = "progress_counter_tokens";
-    let handle = send_progress_call(&service, tool_name, ProgressToken(NumberOrString::Number(10))).await;
+    let handle = send_progress_call(&service, tool_name).await;
 
     let ServerResult::CallToolResult(result) =
         handle.await_response().await.expect("progress_counter_tokens call succeeds")

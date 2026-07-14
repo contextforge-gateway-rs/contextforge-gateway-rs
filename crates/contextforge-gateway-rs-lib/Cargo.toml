@@ -17,29 +17,28 @@ serde_json.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 tokio-util = "0.7"
-axum.workspace = true
-axum-otel-metrics.workspace = true
-tower-http.workspace = true
-tower.workspace = true
+axum = "0.8"
+axum-otel-metrics = "0.14"
+tower-http = { version = "0.7.0", features = ["full"] }
+tower = "0.5.3"
 http.workspace = true
-futures.workspace = true
-jsonwebtoken.workspace = true
-chrono.workspace = true
+futures = { version = "0.3", features = ["std", "alloc"] }
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
+chrono = "0.4.44"
 redis.workspace = true
 clap.workspace = true
 thiserror.workspace = true
 rmp-serde.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true
-itertools.workspace = true
-uuid = { version = "1.23", features = ["v4"] }
+uuid.workspace = true
 lru_time_cache = "0.11.11"
 hyper-util = "0.1.20"
-hyper = { version = "1.4.0" }
+hyper = "1.4.0"
 rustls.workspace = true
-rustls-pki-types = { version = "1.14.1", features = ["std","alloc"] }
+rustls-pki-types = { version = "1.14.1", features = ["std", "alloc"] }
 tokio-rustls = "0.26.4"
-typed-builder.workspace = true
+typed-builder = "0.23.2"
 secret-string = "0.0.2"
 
 
@@ -50,10 +49,9 @@ with_tools = []
 
 [dev-dependencies]
 cpex.workspace = true
-openport = { version = "0.1.1", features = ["rand"] }
+openport = { version = "0.4.0", features = ["rand"] }
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
-futures.workspace = true
 
 [lints]
 workspace = true

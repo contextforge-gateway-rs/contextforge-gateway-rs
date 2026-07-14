@@ -2,14 +2,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use contextforge_gateway_rs_apis::user_store::VirtualHost;
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
-use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, ErrorCode,
-        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResponse, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        Prompt, ReadResourceRequestParams, ReadResourceResult, Reference, Resource, ResourceTemplate,
+        Prompt, ReadResourceRequestParams, ReadResourceResponse, Reference, Resource, ResourceTemplate,
         ServerCapabilities, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
     service::{RequestContext, RunningService},
@@ -261,14 +260,14 @@ where
         )
         .await;
 
-        Ok(ListToolsResult { meta: None, tools: merge_tools(responses, virtual_host), next_cursor: None })
+        Ok(ListToolsResult::with_all_items(merge_tools(responses, virtual_host)))
     }
 
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
@@ -297,12 +296,21 @@ where
         pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let progress_token = cx.meta.get_progress_token();
-        service
+        let handle = service
             .service()
-            .track_tool_call(tool_name.clone(), cx.peer.clone(), progress_token.clone(), post_state.clone())
-            .await;
-        let response = call_backend_tool(service.peer(), routed_request, progress_token.clone(), cx.ct.clone()).await;
-        service.service().stop_tracking_tool_call(progress_token.clone()).await;
+            .start_tool_call(
+                service.peer(),
+                routed_request,
+                progress_token,
+                tool_name.clone(),
+                cx.peer.clone(),
+                post_state.clone(),
+            )
+            .await
+            .map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
+        let backend_progress_token = handle.progress_token.clone();
+        let response = call_backend_tool(handle, cx.ct.clone()).await;
+        service.service().stop_tracking_tool_call(&backend_progress_token).await;
 
         let response = response.map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
         let response = match (&self.plugin_runtime, post_state) {
@@ -312,7 +320,7 @@ where
             _ => response,
         };
         info!("call_tool: backend {service_name} completed");
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn list_resources(
@@ -338,18 +346,14 @@ where
         )
         .await;
 
-        Ok(ListResourcesResult {
-            meta: None,
-            resources: merge_resources(responses, namespace_identifiers),
-            next_cursor: None,
-        })
+        Ok(ListResourcesResult::with_all_items(merge_resources(responses, namespace_identifiers)))
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
@@ -369,7 +373,7 @@ where
             .await
             .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
         info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn list_resource_templates(
@@ -395,11 +399,7 @@ where
         )
         .await;
 
-        Ok(ListResourceTemplatesResult {
-            meta: None,
-            resource_templates: merge_resource_templates(responses, namespace_identifiers),
-            next_cursor: None,
-        })
+        Ok(ListResourceTemplatesResult::with_all_items(merge_resource_templates(responses, namespace_identifiers)))
     }
 
     async fn subscribe(
@@ -482,18 +482,14 @@ where
         )
         .await;
 
-        Ok(ListPromptsResult {
-            meta: None,
-            prompts: merge_prompts(responses, namespace_identifiers),
-            next_cursor: None,
-        })
+        Ok(ListPromptsResult::with_all_items(merge_prompts(responses, namespace_identifiers)))
     }
 
     async fn get_prompt(
         &self,
         request: GetPromptRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
+    ) -> Result<GetPromptResponse, ErrorData> {
         let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
         let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
         let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &self.transports);
@@ -513,7 +509,7 @@ where
             .await
             .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
         info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn complete(
@@ -528,6 +524,7 @@ where
         let identifier = match &request.r#ref {
             Reference::Prompt(prompt) => prompt.name.as_str(),
             Reference::Resource(resource) => resource.uri.as_str(),
+            _ => return Err(ErrorData::invalid_params("Unsupported completion reference", None)),
         };
 
         let (service_name, service, routed_identifier) = route_identifier_to_backend(
@@ -542,6 +539,7 @@ where
         match &mut routed_request.r#ref {
             Reference::Prompt(prompt) => prompt.name = routed_identifier,
             Reference::Resource(resource) => resource.uri = routed_identifier,
+            _ => return Err(ErrorData::invalid_params("Unsupported completion reference", None)),
         }
         let response = service
             .complete(routed_request)
@@ -744,7 +742,7 @@ fn log_list_backend_response<T, E: std::fmt::Debug>(
 }
 
 fn merge_tools(tools: Vec<(String, ListToolsResult)>, virtual_host: &VirtualHost) -> Vec<Tool> {
-    tools
+    let mut tools = tools
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result
@@ -756,12 +754,13 @@ fn merge_tools(tools: Vec<(String, ListToolsResult)>, virtual_host: &VirtualHost
                 })
                 .collect::<Vec<_>>()
         })
-        .sorted_by(|t, o| t.name.cmp(&o.name))
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    tools.sort_unstable_by(|tool, other| tool.name.cmp(&other.name));
+    tools
 }
 
 fn merge_resources(resources: Vec<(String, ListResourcesResult)>, namespace_identifiers: bool) -> Vec<Resource> {
-    resources
+    let mut resources = resources
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result
@@ -776,15 +775,16 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>, namespace_iden
                 })
                 .collect::<Vec<_>>()
         })
-        .sorted_by(|t, o| t.name.cmp(&o.name))
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    resources.sort_unstable_by(|resource, other| resource.name.cmp(&other.name));
+    resources
 }
 
 fn merge_resource_templates(
     templates: Vec<(String, ListResourceTemplatesResult)>,
     namespace_identifiers: bool,
 ) -> Vec<ResourceTemplate> {
-    templates
+    let mut templates = templates
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.resource_templates.into_iter().map(move |mut template| {
@@ -795,12 +795,13 @@ fn merge_resource_templates(
                 template
             })
         })
-        .sorted_by(|template, other| template.name.cmp(&other.name))
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    templates.sort_unstable_by(|template, other| template.name.cmp(&other.name));
+    templates
 }
 
 fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>, namespace_identifiers: bool) -> Vec<Prompt> {
-    prompts
+    let mut prompts = prompts
         .into_iter()
         .flat_map(|(backend_name, result)| {
             result.prompts.into_iter().map(move |mut prompt| {
@@ -810,15 +811,15 @@ fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>, namespace_identifier
                 prompt
             })
         })
-        .sorted_by(|prompt, other| prompt.name.cmp(&other.name))
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    prompts.sort_unstable_by(|prompt, other| prompt.name.cmp(&other.name));
+    prompts
 }
 
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
-    use rmcp::model::{AnnotateAble, RawResource, RawResourceTemplate};
 
     #[test]
     fn test_splitting() {
@@ -870,46 +871,31 @@ mod tests {
         let tools = merge_tools(
             vec![(
                 "backend-id".to_owned(),
-                ListToolsResult {
-                    tools: vec![Tool::new("test_simple_text", "", serde_json::Map::new())],
-                    next_cursor: None,
-                    meta: None,
-                },
+                ListToolsResult::with_all_items(vec![Tool::new("test_simple_text", "", serde_json::Map::new())]),
             )],
             &virtual_host,
         );
         let prompts = merge_prompts(
             vec![(
                 "backend-id".to_owned(),
-                ListPromptsResult {
-                    prompts: vec![Prompt::new("test_prompt", None::<String>, None)],
-                    next_cursor: None,
-                    meta: None,
-                },
+                ListPromptsResult::with_all_items(vec![Prompt::new("test_prompt", None::<String>, None)]),
             )],
             false,
         );
         let resources = merge_resources(
             vec![(
                 "backend-id".to_owned(),
-                ListResourcesResult {
-                    resources: vec![RawResource::new("test://resource", "test_resource").no_annotation()],
-                    next_cursor: None,
-                    meta: None,
-                },
+                ListResourcesResult::with_all_items(vec![Resource::new("test://resource", "test_resource")]),
             )],
             false,
         );
         let templates = merge_resource_templates(
             vec![(
                 "backend-id".to_owned(),
-                ListResourceTemplatesResult {
-                    resource_templates: vec![
-                        RawResourceTemplate::new("test://template/{id}/data", "test_template").no_annotation(),
-                    ],
-                    next_cursor: None,
-                    meta: None,
-                },
+                ListResourceTemplatesResult::with_all_items(vec![ResourceTemplate::new(
+                    "test://template/{id}/data",
+                    "test_template",
+                )]),
             )],
             false,
         );
