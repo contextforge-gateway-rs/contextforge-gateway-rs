@@ -163,10 +163,12 @@ Current routed method families:
 
 `GatewayBackendClient` handles backend progress notifications for `call_tool`.
 RMCP assigns a new progress token to each backend request, so the gateway maps
-that backend token to the corresponding downstream token. When a notification
-matches an in-flight backend token, the gateway restores the downstream token,
-optionally runs the stream-event post hook, and forwards the notification to the
-downstream client.
+that backend token to the corresponding downstream token. Request enqueue and
+mapping publication are serialized against progress lookup so an immediate
+backend notification cannot overtake registration. When a notification matches
+an in-flight backend token, the gateway restores the downstream token, optionally
+runs the stream-event post hook, and forwards the notification to the downstream
+client.
 
 `call_backend_tool` also watches the downstream cancellation token. If the
 downstream call is cancelled before the backend responds, the gateway sends a

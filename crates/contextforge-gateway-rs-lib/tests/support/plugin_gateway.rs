@@ -113,7 +113,7 @@ impl ServerHandler for TestBackend {
                     cx.peer
                         .notify_progress(
                             ProgressNotificationParam::new(
-                                ProgressToken(NumberOrString::Number(i64::from(package))),
+                                ProgressToken(NumberOrString::String(format!("unexpected-backend-{package}").into())),
                                 f64::from(package),
                             )
                             .with_total(4.0)

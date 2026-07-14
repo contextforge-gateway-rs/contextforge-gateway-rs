@@ -10,7 +10,7 @@ use rmcp::{
     serde::{Serialize, de::DeserializeOwned},
     service::{NotificationContext, PeerRequestOptions, RequestHandle, ServiceError},
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
@@ -22,7 +22,7 @@ pub(crate) struct GatewayBackendClient {
     namespace_identifiers: bool,
     initialize_request: InitializeRequestParams,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
-    in_flight_calls: Arc<Mutex<HashMap<ProgressToken, Arc<InFlightToolCall>>>>,
+    in_flight_calls: Arc<RwLock<HashMap<ProgressToken, Arc<InFlightToolCall>>>>,
     resource_subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
 }
 
@@ -51,35 +51,42 @@ impl GatewayBackendClient {
         }
     }
 
-    #[expect(clippy::too_many_arguments, reason = "tracking requires both token identities and the call metadata")]
-    pub(crate) async fn track_tool_call(
+    /// Starts a backend tool call while preventing an immediate progress
+    /// notification from overtaking publication of its token mapping.
+    #[expect(clippy::too_many_arguments, reason = "tracking requires the request and its downstream call metadata")]
+    pub(crate) async fn start_tool_call(
         &self,
-        backend_progress_token: ProgressToken,
+        peer: &Peer<RoleClient>,
+        request: CallToolRequestParams,
         downstream_progress_token: Option<ProgressToken>,
         tool_name: String,
         downstream: Peer<RoleServer>,
         post_state: Option<RuntimeHookState>,
-    ) {
+    ) -> Result<RequestHandle<RoleClient>, ServiceError> {
+        debug!("track_tool_call {tool_name} {downstream_progress_token:?} {post_state:?}");
         let Some(downstream_progress_token) = downstream_progress_token else {
-            debug!("track_tool_call - no downstream progress token tool_name = {tool_name}");
-            return;
+            return start_backend_tool_call(peer, request).await;
         };
-        debug!(
-            "track_tool_call - tracking tool call tool_name = {tool_name} backend_progress_token = {backend_progress_token:?} downstream_progress_token = {downstream_progress_token:?} post_state = {post_state:?}"
-        );
+
+        // RMCP publishes the request before returning its generated progress
+        // token. Holding the write guard across that enqueue makes progress
+        // lookups wait until the generated-to-downstream mapping is visible.
+        let mut calls = self.in_flight_calls.write().await;
+        let handle = start_backend_tool_call(peer, request).await?;
+        let backend_progress_token = handle.progress_token.clone();
         let call = Arc::new(InFlightToolCall { downstream_progress_token, tool_name, post_state, downstream });
-        let mut calls = self.in_flight_calls.lock().await;
         calls.insert(backend_progress_token, call);
+        Ok(handle)
     }
 
     pub(crate) async fn stop_tracking_tool_call(&self, backend_progress_token: &ProgressToken) {
-        debug!("stop_tracking_tool_call - stopping tool call backend_progress_token = {backend_progress_token:?}");
-        let mut calls = self.in_flight_calls.lock().await;
+        debug!("stop_tracking_tool_call {backend_progress_token:?}");
+        let mut calls = self.in_flight_calls.write().await;
         calls.remove(backend_progress_token);
     }
 
     async fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
-        let calls = self.in_flight_calls.lock().await;
+        let calls = self.in_flight_calls.read().await;
         calls.get(progress_token).cloned()
     }
 

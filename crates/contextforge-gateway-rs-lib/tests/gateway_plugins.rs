@@ -66,8 +66,8 @@ async fn send_progress_sum(
     (result, progress)
 }
 
-/// Sends a `tools/call` carrying `progress_token` and returns the in-flight
-/// request handle without awaiting it.
+/// Starts a `tools/call` and returns the in-flight request handle without
+/// awaiting it.
 async fn send_progress_call(
     service: &RunningService<RoleClient, RecordingClient>,
     tool_name: &str,
@@ -111,7 +111,7 @@ fn raw_mcp_request(
     request
 }
 
-fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: i64) -> Value {
+fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Value {
     serde_json::json!({
         "method": "tools/call",
         "params": {
@@ -139,7 +139,7 @@ fn sse_data_values(body: &str) -> Vec<Value> {
     if body.is_empty() { Vec::new() } else { vec![serde_json::from_str(body).expect("JSON response body")] }
 }
 
-fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64) {
+fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: &str) {
     let messages = sse_data_values(body);
     let progress = messages
         .iter()
@@ -149,7 +149,7 @@ fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: i64)
     assert!(
         progress
             .iter()
-            .all(|message| message.pointer("/params/progressToken").and_then(Value::as_i64) == Some(progress_token)),
+            .all(|message| message.pointer("/params/progressToken").and_then(Value::as_str) == Some(progress_token)),
         "progress events with foreign tokens in body: {body}"
     );
     let result = messages
@@ -271,14 +271,24 @@ async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins(
     let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
 
     let tool_name = "progress_sum";
-    let first =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(tool_name, 2, 1));
-    let second =
-        raw_mcp_request(&client, &gateway, "admin@example.com", Some(&session_id), &raw_tool_call(tool_name, 3, 2));
+    let first = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &raw_tool_call(tool_name, 2, "downstream-first"),
+    );
+    let second = raw_mcp_request(
+        &client,
+        &gateway,
+        "admin@example.com",
+        Some(&session_id),
+        &raw_tool_call(tool_name, 3, "downstream-second"),
+    );
     let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
 
-    assert_raw_progress_stream(&first_body, 2, 1);
-    assert_raw_progress_stream(&second_body, 3, 2);
+    assert_raw_progress_stream(&first_body, 2, "downstream-first");
+    assert_raw_progress_stream(&second_body, 3, "downstream-second");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

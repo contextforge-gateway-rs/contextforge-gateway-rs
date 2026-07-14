@@ -16,7 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tokio.workspace = true
-tokio-util = "0.7"
+tokio-util.workspace = true
 axum.workspace = true
 axum-otel-metrics.workspace = true
 tower-http.workspace = true
@@ -31,16 +31,15 @@ thiserror.workspace = true
 rmp-serde.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true
-itertools.workspace = true
-uuid = { version = "1.23", features = ["v4"] }
-lru_time_cache = "0.11.11"
-hyper-util = "0.1.20"
-hyper = { version = "1.4.0" }
+uuid.workspace = true
+lru_time_cache.workspace = true
+hyper-util.workspace = true
+hyper.workspace = true
 rustls.workspace = true
-rustls-pki-types = { version = "1.14.1", features = ["std","alloc"] }
-tokio-rustls = "0.26.4"
+rustls-pki-types.workspace = true
+tokio-rustls.workspace = true
 typed-builder.workspace = true
-secret-string = "0.0.2"
+secret-string.workspace = true
 
 
 [features]
@@ -50,9 +49,9 @@ with_tools = []
 
 [dev-dependencies]
 cpex.workspace = true
-openport = { version = "0.4.0", features = ["rand"] }
-test-log = "0.2.20"
-axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+openport.workspace = true
+test-log.workspace = true
+axum-server.workspace = true
 futures.workspace = true
 
 [lints]
