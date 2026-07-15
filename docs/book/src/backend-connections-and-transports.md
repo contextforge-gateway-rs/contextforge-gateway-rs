@@ -15,7 +15,7 @@ architecture roles.
 | Transport class | Current implementation | Main owner | Purpose |
 | --- | --- | --- | --- |
 | Downstream listener | Axum/Hyper over TCP and optional Rustls TLS. | `transports/` and `Gateway::run_gateway`. | Accept MCP streamable HTTP traffic from clients or the front door. |
-| Upstream backend | Shared `reqwest::Client` plus RMCP `StreamableHttpClientTransport`. | `common.rs`, `gateway/mcp_service.rs`, and `gateway/backend_transports.rs`. | Open MCP client sessions to configured backend MCP servers. |
+| Upstream backend | Shared `reqwest::Client` plus RMCP `StreamableHttpClientTransport`. | `common.rs`, `gateway/mcp_service/initialization.rs`, and `gateway/backend_transports.rs`. | Open MCP client sessions to configured backend MCP servers. |
 | Config store | Redis plain, TLS, or mTLS connection manager. | `common.rs` and `user_config_store/`. | Load `UserConfig` and plugin runtime config from control-plane authored storage. |
 
 The current MCP dataplane only uses streamable HTTP for backend MCP traffic.
