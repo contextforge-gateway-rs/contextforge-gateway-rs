@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use super::mcp_gateway::prefixed_name;
+use super::identifier_routing::prefixed_name;
 
 #[derive(Clone)]
 pub(crate) struct GatewayBackendClient {

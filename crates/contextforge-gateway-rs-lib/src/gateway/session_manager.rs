@@ -1,7 +1,7 @@
 use contextforge_gateway_rs_apis::user_store::VirtualHost;
 use tracing::{debug, info};
 
-use super::mcp_gateway::{BackendTransportKey, BackendTransports, ServiceHolder};
+use super::backend_transports::{BackendTransportKey, BackendTransports, ServiceHolder};
 use crate::layers::session_id::SessionId;
 
 pub struct SessionManager<'a> {
