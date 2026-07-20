@@ -49,15 +49,16 @@ important to routing are:
 | `iss`, `aud`, `exp` | Authentication checks only. |
 | `jti`, `token_use`, `iat`, `teams`, `user`, `scopes` | Carried in claims for future policy use; not currently used by MCP routing. `token_use`, `iat`, `teams`, and `scopes` are optional, as is `user.full_name`, so tokens without those fields still validate. |
 
-A concrete decoded payload for the local `admin@example.com` subject looks like
-this (timestamps shown as example Unix seconds). Of everything here, MCP routing
-depends only on `sub` today. The optional fields are included for illustration:
+A concrete decoded payload for a local UUID subject looks like this (timestamps
+shown as example Unix seconds). Of everything here, MCP routing depends only on
+`sub` today; the email remains human-readable metadata. The optional fields are
+included for illustration:
 
 ```json
 {
   "iss": "mcpgateway",
   "aud": "mcpgateway-api",
-  "sub": "admin@example.com",
+  "sub": "11111111-1111-1111-1111-111111111111",
   "exp": 1717180800,
   "iat": 1717177200,
   "jti": "example-token",

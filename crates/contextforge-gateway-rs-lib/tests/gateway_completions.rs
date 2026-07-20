@@ -4,15 +4,15 @@ use contextforge_gateway_rs_lib::Result;
 use tracing::info;
 
 use support::{
-    ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
-    plaintext_config,
+    ListToolsGatewaySettings, TEST_USER_ID, connect_client, create_client, create_gateway_with_four_counters,
+    create_ports, plaintext_config,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
 async fn plaintext_completes_prompt_argument_through_prefixed_backend() -> Result<()> {
     let gateway_port = create_ports(1)[0];
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
         create_gateway_with_four_counters(user, plaintext_config(gateway_port)).await
     else {
@@ -30,7 +30,7 @@ async fn plaintext_completes_prompt_argument_through_prefixed_backend() -> Resul
 #[test_log::test]
 async fn plaintext_completes_resource_argument_through_prefixed_backend() -> Result<()> {
     let gateway_port = create_ports(1)[0];
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
         create_gateway_with_four_counters(user, plaintext_config(gateway_port)).await
     else {
@@ -48,7 +48,7 @@ async fn plaintext_completes_resource_argument_through_prefixed_backend() -> Res
 #[test_log::test]
 async fn plaintext_complete_for_unrouted_reference_errors() -> Result<()> {
     let gateway_port = create_ports(1)[0];
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
         create_gateway_with_four_counters(user, plaintext_config(gateway_port)).await
     else {

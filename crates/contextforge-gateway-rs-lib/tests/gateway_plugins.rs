@@ -16,8 +16,8 @@ use rmcp::{
 use serde_json::Value;
 
 use support::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TestPlugin,
-    error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID,
+    TestPlugin, error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
     start_gateway_with_json_backend_responses, sum_request, text, token,
 };
 
@@ -227,10 +227,10 @@ async fn read_concurrent_raw_progress_streams(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_progress_calls_forward_each_token_without_plugins() {
-    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
-    let service = gateway.connect_with_handler("admin@example.com", client).await;
+    let service = gateway.connect_with_handler(TEST_USER_ID, client).await;
     let tool_name = "progress_sum";
 
     let first = send_progress_call(&service, tool_name).await;
@@ -266,22 +266,22 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins() {
-    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = reqwest::Client::new();
-    let session_id = start_raw_mcp_session(&client, &gateway, "admin@example.com").await;
+    let session_id = start_raw_mcp_session(&client, &gateway, TEST_USER_ID).await;
 
     let tool_name = "progress_sum";
     let first = raw_mcp_request(
         &client,
         &gateway,
-        "admin@example.com",
+        TEST_USER_ID,
         Some(&session_id),
         &raw_tool_call(tool_name, 2, "downstream-first"),
     );
     let second = raw_mcp_request(
         &client,
         &gateway,
-        "admin@example.com",
+        TEST_USER_ID,
         Some(&session_id),
         &raw_tool_call(tool_name, 3, "downstream-second"),
     );
@@ -293,10 +293,10 @@ async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn backend_generated_progress_tokens_are_dropped() {
-    let gateway = start_gateway("admin@example.com", false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
-    let service = gateway.connect_with_handler("admin@example.com", client).await;
+    let service = gateway.connect_with_handler(TEST_USER_ID, client).await;
 
     let tool_name = "progress_counter_tokens";
     let handle = send_progress_call(&service, tool_name).await;
@@ -324,8 +324,8 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
     let post_observations = post_plugin.observations();
     let runtime = runtime_with_pre_and_post(pre_plugin, post_plugin).await;
 
-    let gateway = start_gateway("admin@example.com", false, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, false, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("3", text(&result));
@@ -339,8 +339,8 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
     let observations = plugin.observations();
     let runtime = runtime_with_pre(plugin).await;
 
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), text(&result));
@@ -361,8 +361,8 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
     let observations = plugin.observations();
     let runtime = runtime_with_post(plugin).await;
 
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("post:3", text(&result));
@@ -379,8 +379,8 @@ async fn post_hook_can_modify_stream_progress_notifications() {
     let observations = plugin.observations();
     let runtime = runtime_with_post(plugin).await;
 
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let (result, progress) = call_progress_sum(&gateway, "admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let (result, progress) = call_progress_sum(&gateway, TEST_USER_ID).await;
 
     assert_eq!("completed 4 packages", text(&result));
     let progress = progress.lock().expect("progress lock poisoned");
@@ -398,8 +398,8 @@ async fn json_response_mode_forwards_backend_progress_notifications() {
     let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
     let runtime = runtime_with_post(plugin).await;
 
-    let gateway = start_gateway_with_json_backend_responses("admin@example.com", true, runtime).await;
-    let (result, progress) = call_progress_sum(&gateway, "admin@example.com").await;
+    let gateway = start_gateway_with_json_backend_responses(TEST_USER_ID, true, runtime).await;
+    let (result, progress) = call_progress_sum(&gateway, TEST_USER_ID).await;
 
     assert_eq!("post:completed 4 packages", text(&result));
     assert_eq!(4, progress.lock().expect("progress lock poisoned").len());
@@ -412,8 +412,8 @@ async fn post_hook_deny_drops_progress_notifications_without_failing_call() {
     let observations = plugin.observations();
     let runtime = runtime_with_post(plugin).await;
 
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let (result, progress) = send_progress_sum(&gateway, "admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let (result, progress) = send_progress_sum(&gateway, TEST_USER_ID).await;
 
     assert_eq!("completed 4 packages", text(&result));
     // four denied progress notifications plus the final tool result
@@ -430,8 +430,8 @@ async fn post_hook_deny_drops_progress_notifications_without_failing_call() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn downstream_cancellation_is_relayed_to_backend() {
-    let gateway = start_gateway("admin@example.com", true, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = gateway.connect(TEST_USER_ID).await;
 
     let request = CallToolRequestParams::new("wait_for_cancellation");
     let handle = service
@@ -452,8 +452,8 @@ async fn post_hook_can_return_raw_cmf_result_content() {
     let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_raw_post_rewrite());
     let runtime = runtime_with_post(plugin).await;
 
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("raw-post", text(&result));
@@ -468,8 +468,8 @@ async fn pre_and_post_hooks_share_gateway_call_context() {
     let post_observations = post_plugin.observations();
     let runtime = runtime_with_pre_and_post(pre_plugin, post_plugin).await;
 
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
     assert_eq!("3", text(&result));
@@ -480,16 +480,16 @@ async fn pre_and_post_hooks_share_gateway_call_context() {
 async fn pre_and_post_denials_return_plugin_error_codes() {
     let pre_plugin = Arc::new(TestPlugin::new("pre-deny", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_deny());
     let runtime = runtime_with_pre(pre_plugin).await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let error = service.call_tool(sum_request("sum", 1, 2)).await.unwrap_err();
     assert_eq!(ErrorCode(PRE_DENY_ERROR_CODE), error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 
     let post_plugin = Arc::new(TestPlugin::new("post-deny", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_deny());
     let runtime = runtime_with_post(post_plugin).await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let error = service.call_tool(sum_request("sum", 1, 2)).await.unwrap_err();
     assert_eq!(ErrorCode(POST_DENY_ERROR_CODE), error_code(error));
     assert_eq!(1, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
@@ -500,8 +500,8 @@ async fn pre_hook_invalid_arguments_return_invalid_params() {
     let plugin =
         Arc::new(TestPlugin::new("invalid-args", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_invalid_pre_args());
     let runtime = runtime_with_pre(plugin).await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
     let error = service.call_tool(sum_request("sum", 1, 2)).await.unwrap_err();
 
     assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));

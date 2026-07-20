@@ -10,6 +10,8 @@ mod runtime;
 mod tool;
 mod user_config_store;
 
+pub(crate) const TEST_USER_ID: &str = "11111111-1111-1111-1111-111111111111";
+
 pub(crate) use auth::token;
 pub(crate) use client::{
     CLIENT_CONNECT_TIMEOUT, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler, create_client,

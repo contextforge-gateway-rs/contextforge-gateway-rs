@@ -104,9 +104,11 @@ The `Authorization` header is Basic auth for the seeded Langfuse project keys
 ### 3. Generate traffic
 
 ```bash
+USER_ID=11111111-1111-1111-1111-111111111111
+
 for i in {1..10}; do
   curl -s -o /dev/null -w "%{http_code}\n" \
-    http://127.0.0.1:8001/contextforge-rs/admin/tokens/admin@example.com
+    "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}"
 done
 ```
 

@@ -8,8 +8,8 @@ use rustls::crypto;
 use tracing::{info, warn};
 
 use support::{
-    ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
-    create_tls_client, create_tls_gateway_with_four_tls_counters,
+    ListToolsGatewaySettings, TEST_USER_ID, connect_client, create_client, create_gateway_with_four_counters,
+    create_ports, create_tls_client, create_tls_gateway_with_four_tls_counters,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -24,7 +24,7 @@ async fn plaintext_lists_prefixed_backend_tools() -> Result<()> {
         ..Default::default()
     };
 
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
 
     let Ok(ListToolsGatewaySettings { handle, gateway_url, expected_tool_names, .. }) =
         create_gateway_with_four_counters(user, config).await
@@ -65,7 +65,7 @@ async fn tls_lists_prefixed_backend_tools() -> Result<()> {
         ..Default::default()
     };
 
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
 
     let Ok(ListToolsGatewaySettings { handle, gateway_url, expected_tool_names, .. }) =
         create_tls_gateway_with_four_tls_counters(user, config).await

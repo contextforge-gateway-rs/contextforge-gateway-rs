@@ -6,7 +6,8 @@ use serde_json::json;
 use tracing::{info, warn};
 
 use support::{
-    ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
+    ListToolsGatewaySettings, TEST_USER_ID, connect_client, create_client, create_gateway_with_four_counters,
+    create_ports,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -21,7 +22,7 @@ async fn plaintext_lists_prefixed_backend_prompts() -> Result<()> {
         ..Default::default()
     };
 
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, expected_prompt_names, .. }) =
         create_gateway_with_four_counters(user, config).await
     else {
@@ -47,7 +48,7 @@ async fn plaintext_gets_prompt_from_prefixed_backend_name() -> Result<()> {
         ..Default::default()
     };
 
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, expected_prompt_names, .. }) =
         create_gateway_with_four_counters(user, config).await
     else {

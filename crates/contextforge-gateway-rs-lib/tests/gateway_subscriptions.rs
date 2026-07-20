@@ -18,8 +18,8 @@ use rmcp::{
 };
 
 use support::{
-    CLIENT_CONNECT_TIMEOUT, ListToolsGatewaySettings, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler,
-    create_client, create_gateway_with_four_counters, create_ports,
+    CLIENT_CONNECT_TIMEOUT, ListToolsGatewaySettings, TEST_POLL_INTERVAL, TEST_USER_ID, connect_client,
+    connect_client_with_handler, create_client, create_gateway_with_four_counters, create_ports,
     mock_counter::{KNOWN_RESOURCE_URIS, RESOURCE_UPDATE_NOTIFY_INTERVAL},
     plaintext_config,
 };
@@ -55,7 +55,7 @@ impl ClientHandler for RecordingClient {
 #[test_log::test]
 async fn plaintext_subscribes_and_unsubscribes_through_two_prefixed_backends() -> Result<()> {
     let gateway_port = create_ports(1)[0];
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
         create_gateway_with_four_counters(user, plaintext_config(gateway_port)).await
     else {
@@ -73,7 +73,7 @@ async fn plaintext_subscribes_and_unsubscribes_through_two_prefixed_backends() -
 #[test_log::test]
 async fn plaintext_subscribe_to_unrouted_resource_errors() -> Result<()> {
     let gateway_port = create_ports(1)[0];
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
         create_gateway_with_four_counters(user, plaintext_config(gateway_port)).await
     else {

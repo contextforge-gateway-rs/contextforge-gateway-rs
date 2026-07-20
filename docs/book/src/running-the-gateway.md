@@ -90,14 +90,17 @@ upstream client is HTTPS-only.
 In another terminal, request a JWT for the test subject:
 
 ```bash
+USER_ID=11111111-1111-1111-1111-111111111111
+
 TOKEN=$(curl --silent --show-error \
-  --url http://127.0.0.1:8001/contextforge-rs/admin/tokens/admin@example.com)
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}")
 
 printf '%s\n' "${TOKEN}"
 ```
 
-The token's `sub` claim is `admin@example.com`. The gateway uses that subject
-as the Redis user-config key.
+The token's `sub` claim is the UUID in `USER_ID`. The gateway uses that subject
+as the Redis user-config key; email metadata, when present, is not used for MCP
+routing.
 
 ## 4. Write User Config
 
@@ -105,7 +108,7 @@ Seed Redis with one virtual host and two backend MCP servers:
 
 ```bash
 curl --silent --show-error --request POST \
-  --url http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/admin@example.com \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/${USER_ID}" \
   --header 'content-type: application/json' \
   --data '{
     "virtual_hosts": {
@@ -138,7 +141,7 @@ curl --silent --show-error --request POST \
 The important relationship is:
 
 ```text
-JWT subject admin@example.com
+JWT subject 11111111-1111-1111-1111-111111111111
   -> Redis user config
   -> virtual host c0ffee00f001f00lf00ldeadbeefdead
   -> backend MCP URLs
