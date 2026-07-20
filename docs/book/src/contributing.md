@@ -37,6 +37,16 @@ streaming, and telemetry attribution before they land on the hot path — see
 [Plugins And Policy](plugins-and-policy.md). Avoid ad hoc plugin calls in the
 middle of routing code.
 
+## Branch And Pull Request Workflow
+
+Name contribution branches `user/<user>/<pr-branch>`, where `<user>` is the
+contributor's GitHub username and `<pr-branch>` is a short, kebab-case summary
+of the change. For example: `user/alice/fix-session-cleanup`.
+
+Open pull requests as drafts while work or validation is still in progress.
+Mark a pull request ready for review only after its implementation,
+documentation, tests, and required checks are complete.
+
 ## Validation
 
 The pre-commit hooks run these local gates:
