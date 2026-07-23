@@ -59,7 +59,7 @@ where
         &session_manager,
         "get_prompt",
         &request.name,
-        "Routing problem... wrong prompt name",
+        "Routing problem... invalid prompt name",
     )
     .await?;
 
