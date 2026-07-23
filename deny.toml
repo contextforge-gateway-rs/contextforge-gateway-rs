@@ -1,6 +1,7 @@
 [advisories]
 ignore = [
-    {id="RUSTSEC-2023-0071" , reason = "1. For time being not in production. 2. Workaround would be to force customers to use EC keys instead of RSA" }
+    {id="RUSTSEC-2023-0071" , reason = "1. For time being not in production. 2. Workaround would be to force customers to use EC keys instead of RSA" },
+    {id="RUSTSEC-2026-0214" , reason = "1. gumdrop is used by goose which is a dev tool only" }
 ]
 
 [[licenses.exceptions]]
