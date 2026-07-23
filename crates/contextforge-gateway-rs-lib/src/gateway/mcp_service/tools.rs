@@ -59,8 +59,8 @@ where
 
     let Some((backend_name, tool_name)) = resolve_tool_route(virtual_host, &request.name, &backend_names) else {
         return Err(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Routing problem... wrong tool name".into(),
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... tool not found".into(),
             data: None,
         });
     };

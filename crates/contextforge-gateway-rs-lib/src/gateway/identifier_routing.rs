@@ -1,5 +1,5 @@
 use contextforge_gateway_rs_apis::user_store::VirtualHost;
-use rmcp::{ErrorData, model::ErrorCode};
+use rmcp::{ErrorData, model::ErrorCode, service::ServiceError};
 use tracing::{debug, warn};
 
 use super::{
@@ -65,13 +65,16 @@ pub(super) fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, 
         })
 }
 
-/// Logs a backend forwarding failure and maps it to the routing error every handler returns.
-pub(super) fn backend_forward_error(op: &str, backend_name: &str, error: &impl std::fmt::Debug) -> ErrorData {
-    warn!("{op}: backend {backend_name} {error:?}");
-    ErrorData {
-        code: ErrorCode::INTERNAL_ERROR,
-        message: "Routing problem... got no responses from backends".into(),
-        data: None,
+pub(super) fn backend_forward_error(op: &str, backend_name: &str, error: &ServiceError) -> ErrorData {
+    warn!("{op}: backend {backend_name} error = {error:?}");
+
+    match error {
+        ServiceError::McpError(mcp_error) => mcp_error.to_owned(),
+        _ => ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... got no responses from backends".into(),
+            data: None,
+        },
     }
 }
 
@@ -85,7 +88,7 @@ pub(super) async fn route_identifier_to_backend(
 ) -> Result<(String, McpClientService, String), ErrorData> {
     let backend_names = session_manager.get_backend_names();
     let Some((backend_name, routed_identifier)) = route_identifier(identifier, &backend_names) else {
-        return Err(ErrorData { code: ErrorCode::INTERNAL_ERROR, message: no_route_message.into(), data: None });
+        return Err(ErrorData { code: ErrorCode::INVALID_PARAMS, message: no_route_message.into(), data: None });
     };
     let routed_identifier = routed_identifier.to_owned();
     let (backend_name, service) = resolve_backend(session_manager, op, backend_name).await?;
