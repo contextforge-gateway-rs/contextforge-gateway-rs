@@ -1,14 +1,12 @@
 FROM rust:1.96.1 AS builder
-WORKDIR /tmp/
+WORKDIR /app
 
 RUN <<EOF
 apt update
-apt install -y git ca-certificates protobuf-compiler
-git config --global http.sslVerify false
-git clone https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
+apt install -y ca-certificates protobuf-compiler
 EOF
-WORKDIR /tmp/contextforge-gateway-rs
-COPY .cargo/config.toml ./.cargo/config.toml
+
+COPY . .
 RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
     cargo fetch --locked
@@ -24,7 +22,7 @@ apt install -y python3
 EOF
 
 WORKDIR /
-COPY --from=builder /tmp/contextforge-gateway-rs/target/release/contextforge-gateway-rs /contextforge-gateway-rs
+COPY --from=builder /app/target/release/contextforge-gateway-rs /contextforge-gateway-rs
 LABEL org.opencontainers.image.source=https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 LABEL org.opencontainers.image.description="contextforge-gateway-rs - open source highly experimental dataplane for Contextforge Gateway."
 ENTRYPOINT ["/contextforge-gateway-rs"]
