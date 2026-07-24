@@ -73,6 +73,7 @@ services:
       - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
       - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
       - CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE=plain-text
+      - CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE=plain-text-or-tls
       - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
       - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
@@ -139,6 +140,7 @@ services:
       - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
       - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
       - CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE=plain-text
+      - CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE=plain-text-or-tls
       - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
       - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
@@ -182,6 +184,7 @@ services:
       - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
       - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
       - CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE=plain-text
+      - CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE=plain-text-or-tls
       - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
       - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
@@ -359,6 +362,9 @@ services:
       - PORT=4444
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@pgbouncer:6432/mcp
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-devsecret-change-me}
+      - JWT_ALGORITHM=RS256
+      - JWT_PUBLIC_KEY_PATH=/keys/jwt.key.pub
+      - JWT_PRIVATE_KEY_PATH=/keys/jwt.key
       - AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:-devencryption-change-me}
       - BASIC_AUTH_USER=${BASIC_AUTH_USER:-admin}
       - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-changeme}
@@ -370,6 +376,11 @@ services:
       - MCPGATEWAY_UI_ENABLED=true
       - MCPGATEWAY_ADMIN_API_ENABLED=true
       - SSRF_ALLOW_PRIVATE_NETWORKS=true
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TYPE=redis
+      - DATAPLANE_PUBLISHER=true
+    volumes:
+      - ../assets/:/keys:z
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -569,7 +580,11 @@ services:
       fast_time_server:
         condition: service_healthy
     environment:
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-devsecret-change-me}
+      - JWT_ALGORITHM=RS256
+      - JWT_PUBLIC_KEY_PATH=/keys/jwt.key.pub
+      - JWT_PRIVATE_KEY_PATH=/keys/jwt.key
+    volumes:
+      - ../assets/:/keys:z
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -577,7 +592,7 @@ services:
         set -e
         echo "Registering fast_time_server with control-plane..."
 
-        export MCPGATEWAY_BEARER_TOKEN=$$(python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --admin --exp 10080 --secret $$JWT_SECRET_KEY --algo HS256 2>/dev/null)
+        export MCPGATEWAY_BEARER_TOKEN=$$(python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --admin --exp 10080 2>/dev/null)
 
         python3 -c "
         import json
