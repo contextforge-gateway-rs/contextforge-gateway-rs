@@ -23,6 +23,7 @@
   - [Telemetry And Diagnostics](telemetry-and-diagnostics.md)
   - [Failure Modes](failure-modes.md)
   - [Testing](testing.md)
+    - [Local Docker Stack](local-docker-stack.md)
   - [Performance](performance.md)
   - [Deployment Notes](deployment-notes.md)
 - [🛠️ Project](project.md)
