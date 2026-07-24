@@ -50,11 +50,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 1G
+          cpus: '0.5'
+          memory: 256M
         reservations:
-          cpus: '2'
-          memory: 512M
+          cpus: '0.25'
+          memory: 128M
 
   # ──────────────────────────────────────────────────────────────────────
   # mcp-gateway-rs
@@ -116,11 +116,11 @@ services:
       replicas: ${GATEWAY_REPLICAS:-1}
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
     # ──────────────────────────────────────────────────────────────────────
     # Volume Mounts
@@ -160,11 +160,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
     # ──────────────────────────────────────────────────────────────────────
     # Volume Mounts
@@ -204,11 +204,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
     # ──────────────────────────────────────────────────────────────────────
     # Volume Mounts
@@ -241,11 +241,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
   mcp-counter-tool-two:
     image: ghcr.io/mcp-counter-tool:latest
@@ -271,11 +271,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
   ###############################################################################
   #  CACHE
@@ -314,11 +314,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
           cpus: '1'
           memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   ###############################################################################
   #  MIGRATION - one-shot Alembic upgrade + bootstrap, runs before control-plane
@@ -470,11 +470,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 8G
-        reservations:
           cpus: '2'
           memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
@@ -522,10 +522,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: '0.5'
           memory: 256M
         reservations:
-          cpus: '0.5'
+          cpus: '0.25'
           memory: 128M
   ###############################################################################
   # TEST MCP SERVER - Fast Time Server
@@ -560,11 +560,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 2G
-        reservations:
           cpus: '1'
           memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
     profiles: ["testing", "monitoring", "sso"]
 
   ###############################################################################
