@@ -2,9 +2,13 @@
 name: mcp-gateway-rs
 
 networks:
-  mcp-gateway-net:
+  contextforge-gateway-net:
     # Single user-defined bridge network keeps traffic private
     driver: bridge
+
+volumes:
+  pgdata:
+    name: pgdata
 
 ###############################################################################
 #  CORE SERVICE - ContextForge
@@ -16,6 +20,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   nginx:
     image: nginx:latest
+    container_name: nginx
     restart: unless-stopped
 
     ports:
@@ -45,11 +50,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 1G
+          cpus: '0.5'
+          memory: 256M
         reservations:
-          cpus: '2'
-          memory: 512M
+          cpus: '0.25'
+          memory: 128M
 
   # ──────────────────────────────────────────────────────────────────────
   # mcp-gateway-rs
@@ -57,16 +62,20 @@ services:
   #
   # ──────────────────────────────────────────────────────────────────────
 
-  contextforge-gateway-rs:
-    image: ghcr.io/contextforge-gateway-rs:latest
+  data-plane:
+    labels:
+      name: dataplane
+    image: ${IMAGE_LOCAL:-dataplane:latest}
     networks: [contextforge-gateway-net]
 
     environment:
       - CONTEXTFORGE_GATEWAY_RS_ADDRESS=0.0.0.0:4445
       - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
       - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
-      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
-      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE=plain-text
+      - CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE=plain-text-or-tls
+      - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
+      - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
 
     sysctls:
@@ -79,7 +88,9 @@ services:
 
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
 
     healthcheck:
       ## Uncomment for HTTP healthcheck
@@ -89,8 +100,8 @@ services:
           "python3",
           "-c",
           "import urllib.request; import json; resp =
-            urllib.request.urlopen('http://localhost:4445/contextforge-rs/healt\
-            h', timeout=5); data = json.loads(resp.read());
+            urllib.request.urlopen('http://localhost:4445/contextforge-rs/health',
+            timeout=5); data = json.loads(resp.read());
             print(data.get('status') == 'healthy'); exit(0 if data.get('status')
             == 'healthy' else 1)",
         ]
@@ -102,14 +113,14 @@ services:
 
     deploy:
       mode: replicated
-      replicas: ${GATEWAY_REPLICAS:-2}
+      replicas: ${GATEWAY_REPLICAS:-1}
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
     # ──────────────────────────────────────────────────────────────────────
     # Volume Mounts
@@ -119,7 +130,8 @@ services:
       - ../assets/:/keys:z # mount catalog configuration
 
   contextforge-gateway-one:
-    image: ghcr.io/contextforge-gateway-rs:latest
+    image: ${IMAGE_LOCAL:-dataplane:latest}
+    container_name: contextforge-gateway-one
     networks: [contextforge-gateway-net]
     ports: [5551:4445]
 
@@ -127,8 +139,10 @@ services:
       - CONTEXTFORGE_GATEWAY_RS_ADDRESS=0.0.0.0:4445
       - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
       - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
-      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
-      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE=plain-text
+      - CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE=plain-text-or-tls
+      - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
+      - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
 
     sysctls:
@@ -146,11 +160,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
     # ──────────────────────────────────────────────────────────────────────
     # Volume Mounts
@@ -160,7 +174,8 @@ services:
       - ../assets/:/keys:z # mount catalog configuration
 
   contextforge-gateway-two:
-    image: ghcr.io/contextforge-gateway-rs:latest
+    image: ${IMAGE_LOCAL:-dataplane:latest}
+    container_name: contextforge-gateway-two
     networks: [contextforge-gateway-net]
     ports: [5552:4445]
 
@@ -168,8 +183,10 @@ services:
       - CONTEXTFORGE_GATEWAY_RS_ADDRESS=0.0.0.0:4445
       - CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME=redis
       - CONTEXTFORGE_GATEWAY_RS_REDIS_PORT=6379
-      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
-      - CONTEXTFORGE_GATEWAY_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
+      - CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE=plain-text
+      - CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE=plain-text-or-tls
+      - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY=/keys/jwt.key.pub
+      - CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY=/keys/jwt.key
       - RUST_LOG=debug
 
     sysctls:
@@ -187,11 +204,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
     # ──────────────────────────────────────────────────────────────────────
     # Volume Mounts
@@ -202,7 +219,8 @@ services:
 
   mcp-counter-tool-one:
     image: ghcr.io/mcp-counter-tool:latest
-    networks: [mcp-gateway-net]
+    container_name: mcp-counter-tool-one
+    networks: [contextforge-gateway-net]
     ports: [5601:5555]
 
     environment:
@@ -223,15 +241,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
   mcp-counter-tool-two:
     image: ghcr.io/mcp-counter-tool:latest
-    networks: [mcp-gateway-net]
+    container_name: mcp-counter-tool-two
+    networks: [contextforge-gateway-net]
     ports: [5602:5555]
 
     environment:
@@ -252,17 +271,18 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GATEWAY_CPU_LIMIT:-8}'
-          memory: ${GATEWAY_MEM_LIMIT:-8G}
+          cpus: '${GATEWAY_CPU_LIMIT:-2}'
+          memory: ${GATEWAY_MEM_LIMIT:-2G}
         reservations:
-          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
-          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+          cpus: '${GATEWAY_CPU_RESERVATION:-1}'
+          memory: ${GATEWAY_MEM_RESERVATION:-512M}
 
   ###############################################################################
   #  CACHE
   ###############################################################################
   redis:
     image: redis:latest
+    container_name: redis
     ulimits:
       nofile:
         soft: 65536
@@ -282,9 +302,99 @@ services:
       - "300"
       - "--maxclients"
       - "10000"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     ports:
       - "6379:6379" # expose only if you want host access
-    networks: [mcp-gateway-net]
+    networks: [contextforge-gateway-net]
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  ###############################################################################
+  #  MIGRATION - one-shot Alembic upgrade + bootstrap, runs before control-plane
+  ###############################################################################
+  migration:
+    # One-shot init container: runs alembic upgrade head + bootstrap before any gateway replica starts.
+    # Uses Postgres directly (port 5432) — advisory locks are session-scoped, must bypass PgBouncer.
+    image: ghcr.io/ibm/mcp-context-forge:d24df05e7985787bfa3264ab45cee411e308a111
+    container_name: migration
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/mcp
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-devsecret-change-me}
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER:-admin}
+      - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-changeme}
+      - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-admin@example.com}
+      - AUTH_REQUIRED=${AUTH_REQUIRED:-true}
+      - AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:-devencryption-change-me}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCPGATEWAY_SKIP_MIGRATIONS=false
+    command: ["python", "-m", "mcpgateway.bootstrap_db"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [contextforge-gateway-net]
+    restart: "no"
+
+  ###############################################################################
+  #  CONTROL PLANE - ContextForge (Python) - config, policy and identity owner
+  ###############################################################################
+  control-plane:
+    labels:
+      name: controlplane
+    image: ghcr.io/ibm/mcp-context-forge:d24df05e7985787bfa3264ab45cee411e308a111
+    container_name: control-plane
+    restart: unless-stopped
+    networks: [contextforge-gateway-net]
+    ports:
+      - "4444:4444"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4444
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@pgbouncer:6432/mcp
+      - DB_PREPARE_THRESHOLD=0  # PgBouncer runs POOL_MODE=transaction; server-side prepared statements don't survive connection handoff between transactions
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-devsecret-change-me}
+      - JWT_ALGORITHM=RS256
+      - JWT_PUBLIC_KEY_PATH=/keys/jwt.key.pub
+      - JWT_PRIVATE_KEY_PATH=/keys/jwt.key
+      - AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:-devencryption-change-me}
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER:-admin}
+      - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-changeme}
+      - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-admin@example.com}
+      - AUTH_REQUIRED=${AUTH_REQUIRED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCPGATEWAY_SKIP_MIGRATIONS=true
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+      - MCPGATEWAY_UI_ENABLED=true
+      - MCPGATEWAY_ADMIN_API_ENABLED=true
+      - SSRF_ALLOW_PRIVATE_NETWORKS=true
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TYPE=redis
+      - DATAPLANE_PUBLISHER=true
+    volumes:
+      - ../assets/:/keys:z
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -293,3 +403,318 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+
+  ###############################################################################
+  #  DATABASE - control plane storage
+  ###############################################################################
+  postgres:
+    image: postgres:18
+    container_name: postgres
+    restart: unless-stopped
+    shm_size: 256m  # Increase from 64MB default to prevent shared memory exhaustion under load
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+      nproc:
+        soft: 5000
+        hard: 5000
+    ports:
+      - "5433:5432"      # Expose for local inspection (5433 to avoid conflict with local postgres)
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=800"     # Must exceed PgBouncer MAX_DB_CONNECTIONS (700) + overhead
+      - "-c"
+      - "shared_buffers=512MB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "effective_cache_size=1536MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "max_worker_processes=8"
+      - "-c"
+      - "max_parallel_workers_per_gather=4"
+      - "-c"
+      - "max_parallel_workers=8"
+      - "-c"
+      - "idle_in_transaction_session_timeout=300s"  # Safety net; app closes transactions on commit
+      - "-c"
+      - "statement_timeout=120s"
+      - "-c"
+      - "synchronous_commit=off"    # Async WAL writes (2-10x faster commits)
+      - "-c"
+      - "commit_delay=100"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mysecretpassword}
+      - POSTGRES_DB=mcp
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks: [contextforge-gateway-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer
+    restart: unless-stopped
+    networks: [contextforge-gateway-net]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc:
+        soft: 5000
+        hard: 5000
+    ports:
+      - "6432:6432"    # PgBouncer port (optional external access)
+    environment:
+      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/mcp
+      - LISTEN_PORT=6432
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=5000
+      - DEFAULT_POOL_SIZE=600
+      - MIN_POOL_SIZE=100
+      - RESERVE_POOL_SIZE=150
+      - RESERVE_POOL_TIMEOUT=2
+      - MAX_DB_CONNECTIONS=700         # Must be < postgres max_connections
+      - MAX_USER_CONNECTIONS=700
+      - SERVER_LIFETIME=3600
+      - SERVER_IDLE_TIMEOUT=600
+      - QUERY_WAIT_TIMEOUT=60
+      - CLIENT_IDLE_TIMEOUT=120
+      - SERVER_CONNECT_TIMEOUT=5
+      - SERVER_RESET_QUERY=DISCARD ALL
+      - SERVER_RESET_QUERY_ALWAYS=1
+      - IDLE_TRANSACTION_TIMEOUT=30
+      - AUTH_TYPE=scram-sha-256
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+  ###############################################################################
+  # TEST MCP SERVER - Fast Time Server
+  ###############################################################################
+  fast_time_server:
+    image: ghcr.io/ibm/cfex-mcp-fast-time-server:latest
+    container_name: fast_time_server
+    restart: unless-stopped
+    networks: [contextforge-gateway-net]
+    ports:
+      - "8880:8880"
+    environment:
+      - BIND_ADDRESS=0.0.0.0:8880
+      - RUST_LOG=info
+    sysctls:
+      - net.ipv4.tcp_fin_timeout=15
+      - net.ipv4.ip_local_port_range=1024 65535
+      - net.core.somaxconn=65535
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+      nproc:
+        soft: 5000
+        hard: 5000
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8880/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    profiles: ["testing", "monitoring", "sso"]
+
+  ###############################################################################
+  # AUTO-REGISTRATION - Register Fast Time Server with control-plane
+  ###############################################################################
+  register_fast_time:
+    image: ghcr.io/ibm/mcp-context-forge:d24df05e7985787bfa3264ab45cee411e308a111
+    container_name: register_fast_time
+    networks: [contextforge-gateway-net]
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      fast_time_server:
+        condition: service_healthy
+    environment:
+      - JWT_ALGORITHM=RS256
+      - JWT_PUBLIC_KEY_PATH=/keys/jwt.key.pub
+      - JWT_PRIVATE_KEY_PATH=/keys/jwt.key
+    volumes:
+      - ../assets/:/keys:z
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Registering fast_time_server with control-plane..."
+
+        export MCPGATEWAY_BEARER_TOKEN=$$(python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --admin --exp 10080 2>/dev/null)
+
+        python3 -c "
+        import json
+        import os
+        import time
+        import urllib.error
+        import urllib.request
+
+        token = os.environ.get('MCPGATEWAY_BEARER_TOKEN', '')
+
+        def api_request(method, path, data=None):
+            url = f'http://control-plane:4444{path}'
+            req = urllib.request.Request(url, method=method)
+            req.add_header('Authorization', f'Bearer {token}')
+            req.add_header('Content-Type', 'application/json')
+            if data:
+                req.data = json.dumps(data).encode('utf-8')
+            with urllib.request.urlopen(req, timeout=60) as response:
+                return json.loads(response.read().decode('utf-8'))
+
+        def api_request_with_retry(method, path, data=None, retries=30, delay=2, retry_statuses=(401, 403, 502, 503)):
+            for attempt in range(1, retries + 1):
+                try:
+                    return api_request(method, path, data)
+                except urllib.error.HTTPError as exc:
+                    if exc.code in retry_statuses and attempt < retries:
+                        print(f'Retrying {method} {path} after HTTP {exc.code} ({attempt}/{retries})')
+                        time.sleep(delay)
+                        continue
+                    raise
+                except Exception:
+                    if attempt < retries:
+                        print(f'Retrying {method} {path} after transient error ({attempt}/{retries})')
+                        time.sleep(delay)
+                        continue
+                    raise
+
+        print('Waiting for authenticated control-plane readiness...')
+        for i in range(1, 61):
+            try:
+                gateways = api_request('GET', '/gateways')
+                print(f'Authenticated control-plane readiness confirmed ({len(gateways)} gateways visible)')
+                break
+            except urllib.error.HTTPError as exc:
+                print(f'Authenticated readiness not ready yet ({i}/60): HTTP {exc.code}')
+            except Exception as exc:
+                print(f'Authenticated readiness not ready yet ({i}/60): {exc}')
+            time.sleep(2)
+        else:
+            print('Control-plane authenticated readiness check failed')
+            exit(1)
+
+        try:
+            gateways = api_request_with_retry('GET', '/gateways')
+            for gw in gateways:
+                if gw.get('name') == 'fast_time':
+                    print(f'Deleting existing gateway {gw[\"id\"]}...')
+                    api_request_with_retry('DELETE', f'/gateways/{gw[\"id\"]}')
+        except Exception as exc:
+            print(f'Note: {exc}')
+
+        VIRTUAL_SERVER_ID = 'b8e3f1a2c4d5e6f7a1b2c3d4e5f6a7b8'
+
+        try:
+            api_request_with_retry('DELETE', f'/servers/{VIRTUAL_SERVER_ID}')
+            print(f'Deleted existing virtual server {VIRTUAL_SERVER_ID}')
+        except Exception as exc:
+            print(f'Note: No existing virtual server to delete (or error: {exc})')
+
+        try:
+            result = api_request_with_retry('POST', '/gateways', {
+                'name': 'fast_time',
+                'url': 'http://fast_time_server:8880/mcp',
+                'transport': 'STREAMABLEHTTP'
+            })
+            gateway_id = result.get('id', '')
+            print(f'Registered fast_time_server (gateway_id: {gateway_id})')
+        except Exception as exc:
+            print(f'Registration failed: {exc}')
+            exit(1)
+
+        print('Waiting for tools to sync...')
+        for i in range(30):
+            time.sleep(1)
+            try:
+                tools = api_request_with_retry('GET', '/tools')
+                fast_time_tools = [t for t in tools if t.get('gatewayId') == gateway_id]
+                if fast_time_tools:
+                    print(f'Found {len(fast_time_tools)} tools from fast_time gateway')
+                    break
+            except Exception:
+                pass
+            print(f'Waiting for sync... ({i + 1}/30)')
+        else:
+            print('Warning: No tools synced, continuing anyway...')
+
+        tool_ids = []
+        try:
+            tools = api_request_with_retry('GET', '/tools')
+            tool_ids = [t['id'] for t in tools if t.get('gatewayId') == gateway_id]
+            print(f'Tools: {[t[\"name\"] for t in tools if t.get(\"gatewayId\") == gateway_id]}')
+        except Exception as exc:
+            print(f'Failed to fetch tools: {exc}')
+
+        print('Creating virtual server...')
+        try:
+            server_payload = {
+                'server': {
+                    'id': VIRTUAL_SERVER_ID,
+                    'name': 'Fast Time Server',
+                    'description': 'Virtual server exposing Fast Time MCP tools',
+                    'associated_tools': tool_ids,
+                    'associated_resources': [],
+                    'associated_prompts': []
+                }
+            }
+            api_request_with_retry('POST', '/servers', server_payload)
+            print(f'Virtual server created: {VIRTUAL_SERVER_ID} with {len(tool_ids)} tools')
+        except Exception as exc:
+            print(f'Failed to create virtual server: {exc}')
+            exit(1)
+        "
+        echo "Fast Time Server registration complete!"
+    profiles: ["testing", "monitoring", "sso"]
