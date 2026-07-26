@@ -87,6 +87,10 @@ where
 
                 apply_header_config(&mut headers, &backend_cfg, downstream_headers.as_ref());
 
+                // Propagate the active W3C trace context to the backend so the
+                // gateway span links to the downstream MCP server's spans.
+                crate::telemetry::inject_current_context(&mut headers);
+
                 let config =
                     StreamableHttpClientTransportConfig::with_uri(backend_url.to_string()).custom_headers(headers);
                 let transport = StreamableHttpClientTransport::with_client(client, config);

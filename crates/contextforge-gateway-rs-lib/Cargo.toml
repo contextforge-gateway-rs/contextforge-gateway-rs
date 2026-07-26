@@ -15,6 +15,8 @@ rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
 tokio.workspace = true
 tokio-util = "0.7"
 axum = "0.8"
@@ -48,6 +50,7 @@ with_tools = []
 
 
 [dev-dependencies]
+opentelemetry_sdk.workspace = true
 cpex.workspace = true
 openport = { version = "0.4.0", features = ["rand"] }
 test-log = "0.2.20"

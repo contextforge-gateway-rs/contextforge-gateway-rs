@@ -115,6 +115,10 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
             )
             .build();
 
+        // Install the W3C propagator so inbound `traceparent` is extracted and
+        // outbound requests carry it. Without this, inject/extract are no-ops.
+        global::set_text_map_propagator(opentelemetry_sdk::propagation::TraceContextPropagator::new());
+
         let tracer = tracer_provider.tracer(CONTROLLER_NAME);
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
