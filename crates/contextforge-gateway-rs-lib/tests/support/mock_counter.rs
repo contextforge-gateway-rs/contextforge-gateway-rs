@@ -191,8 +191,10 @@ impl ServerHandler for Counter {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
             ServerCapabilities::builder()
+                .enable_completions()
                 .enable_prompts()
                 .enable_resources()
+                .enable_resources_subscribe()
                 .enable_tools()
                 .build(),
         )
