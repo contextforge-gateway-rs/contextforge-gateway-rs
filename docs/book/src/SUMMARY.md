@@ -17,6 +17,7 @@
   - [Architectural Choices](architectural-choices.md)
 - [🔌 MCP Behavior](mcp-behavior.md)
   - [MCP Method Reference](mcp-method-reference.md)
+  - [Capability Flow](capability-flow.md)
   - [MCP Routing Semantics](mcp-routing-semantics.md)
 - [🧭 Operations](operations.md)
   - [Plugins And Policy](plugins-and-policy.md)
