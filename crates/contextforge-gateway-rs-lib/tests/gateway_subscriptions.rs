@@ -87,6 +87,7 @@ async fn plaintext_subscribe_to_unrouted_resource_errors() -> Result<()> {
     maybe_passed
 }
 
+#[expect(deprecated, reason = "legacy RMCP coverage; modern subscriptions/listen tests are deferred")]
 async fn assert_two_backend_subscribe_roundtrips(gateway_url: String, client: reqwest::Client) -> Result<()> {
     let recording_client = RecordingClient::default();
     let resource_updates = Arc::clone(&recording_client.resource_updates);
@@ -143,6 +144,7 @@ async fn assert_no_more_resource_updates(
     Ok(())
 }
 
+#[expect(deprecated, reason = "legacy RMCP coverage; modern subscriptions/listen tests are deferred")]
 async fn assert_unrouted_subscribe_errors(gateway_url: String, client: reqwest::Client) -> Result<()> {
     let running_service = connect_client(gateway_url, client).await?;
 

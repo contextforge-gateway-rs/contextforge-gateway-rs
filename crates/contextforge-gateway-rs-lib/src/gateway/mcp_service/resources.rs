@@ -105,6 +105,7 @@ where
     Ok(ListResourceTemplatesResult::with_all_items(merge_resource_templates(responses, namespace_identifiers)))
 }
 
+#[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
 pub(super) async fn subscribe<T>(
     mcp_service: &McpService<T>,
     request: SubscribeRequestParams,
@@ -137,6 +138,7 @@ where
     Ok(())
 }
 
+#[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
 pub(super) async fn unsubscribe<T>(
     mcp_service: &McpService<T>,
     request: UnsubscribeRequestParams,
