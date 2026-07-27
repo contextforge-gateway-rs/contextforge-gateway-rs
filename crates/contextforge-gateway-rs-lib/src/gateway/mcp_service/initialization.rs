@@ -346,18 +346,34 @@ mod tests {
             ("X-Custom", "value"),
         ]);
         let cfg = backend(
-            &["connection", "transfer-encoding", "upgrade", "keep-alive", "te", "trailers",
-              "proxy-authorization", "proxy-authenticate", "x-custom"],
+            &[
+                "connection",
+                "transfer-encoding",
+                "upgrade",
+                "keep-alive",
+                "te",
+                "trailers",
+                "proxy-authorization",
+                "proxy-authenticate",
+                "x-custom",
+            ],
             &[],
             &[],
         );
         apply_header_config(&mut headers, &cfg, Some(&ds));
         // Only the non-hop-by-hop header gets through
         assert_eq!(headers[&http::HeaderName::from_static("x-custom")], "value");
-        for blocked in &["connection", "transfer-encoding", "upgrade", "keep-alive", "te",
-                          "trailers", "proxy-authorization", "proxy-authenticate"] {
-            assert!(!headers.contains_key(&http::HeaderName::from_static(blocked)),
-                "{blocked} must be blocked");
+        for blocked in &[
+            "connection",
+            "transfer-encoding",
+            "upgrade",
+            "keep-alive",
+            "te",
+            "trailers",
+            "proxy-authorization",
+            "proxy-authenticate",
+        ] {
+            assert!(!headers.contains_key(&http::HeaderName::from_static(blocked)), "{blocked} must be blocked");
         }
     }
 
