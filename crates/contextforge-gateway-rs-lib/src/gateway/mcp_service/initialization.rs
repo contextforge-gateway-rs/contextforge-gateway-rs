@@ -43,6 +43,13 @@ where
     };
 
     let namespace_identifiers = virtual_host.backends.len() > 1;
+    // SESSION-SCOPED: downstream headers are snapshotted here and baked into
+    // the StreamableHttpClientTransportConfig for the lifetime of the backend
+    // transport. Post-initialize calls (tools, resources, prompts) reuse these
+    // headers. True per-request propagation requires either per-request transport
+    // reconstruction or an SDK-level per-call header injection API on RunningService.
+    // When the stateless path (MCP 2026-07-28, SEP-2575/SEP-2567) is implemented,
+    // transports will be per-request and headers will naturally be request-scoped.
     let downstream_headers = cx.extensions.get::<Parts>().map(|parts| parts.headers.clone());
     let tasks: Vec<_> = virtual_host
         .backends
@@ -180,8 +187,14 @@ fn merge_and_build_capabilities(server_capabilities: Vec<(String, Option<ServerC
 /// Apply a backend's header config to the upstream header map.
 ///
 /// Order: passthrough (copy named headers from the downstream request) -> add
-/// (inject/override static headers) -> remove (strip named headers). The
-/// gateway-managed `HOST` header is never affected by config.
+/// (inject/override static headers) -> remove (strip named headers).
+///
+/// Protected headers are silently skipped in every phase:
+/// - Gateway-managed: `Host` (set from backend URL before this runs)
+/// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`,
+///   `Proxy-Authorization`, `TE`, `Trailers`, `Transfer-Encoding`, `Upgrade`
+/// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
+///
 /// ponytail: single-value per name; a repeated downstream header keeps its first value.
 fn apply_header_config(
     headers: &mut HashMap<http::HeaderName, http::HeaderValue>,
@@ -191,7 +204,7 @@ fn apply_header_config(
     if let Some(downstream) = downstream {
         for name in &backend.passthrough_headers {
             let Ok(name) = http::HeaderName::from_bytes(name.as_bytes()) else { continue };
-            if name == http::header::HOST {
+            if is_protected_header(&name) {
                 continue;
             }
             if let Some(value) = downstream.get(&name) {
@@ -204,18 +217,41 @@ fn apply_header_config(
         else {
             continue;
         };
-        if name == http::header::HOST {
+        if is_protected_header(&name) {
             continue;
         }
         headers.insert(name, value);
     }
     for name in &backend.remove_headers {
         let Ok(name) = http::HeaderName::from_bytes(name.as_bytes()) else { continue };
-        if name == http::header::HOST {
+        if is_protected_header(&name) {
             continue;
         }
         headers.remove(&name);
     }
+}
+
+/// Returns `true` for headers that config must never touch:
+/// gateway-managed `Host`, HTTP/1.1 hop-by-hop headers (RFC 7230 §6.1), and
+/// RMCP transport-reserved headers (`Mcp-Session-Id`, `Accept`, `Last-Event-Id`).
+fn is_protected_header(name: &http::HeaderName) -> bool {
+    const PROTECTED: &[&str] = &[
+        "host",
+        // hop-by-hop (RFC 7230 §6.1)
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+        // RMCP transport-reserved
+        "mcp-session-id",
+        "accept",
+        "last-event-id",
+    ];
+    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p))
 }
 
 #[cfg(test)]
@@ -293,5 +329,48 @@ mod tests {
         apply_header_config(&mut headers, &cfg, None);
         assert_eq!(headers[&http::HeaderName::from_static("x-add")], "added");
         assert!(!headers.contains_key(&http::header::AUTHORIZATION));
+    }
+
+    #[test]
+    fn hop_by_hop_headers_cannot_be_passed_through() {
+        let mut headers = HashMap::new();
+        let ds = downstream(&[
+            ("Connection", "keep-alive"),
+            ("Transfer-Encoding", "chunked"),
+            ("Upgrade", "websocket"),
+            ("Keep-Alive", "timeout=5"),
+            ("TE", "trailers"),
+            ("Trailers", "X-Foo"),
+            ("Proxy-Authorization", "Basic abc"),
+            ("Proxy-Authenticate", "Basic realm=x"),
+            ("X-Custom", "value"),
+        ]);
+        let cfg = backend(
+            &["connection", "transfer-encoding", "upgrade", "keep-alive", "te", "trailers",
+              "proxy-authorization", "proxy-authenticate", "x-custom"],
+            &[],
+            &[],
+        );
+        apply_header_config(&mut headers, &cfg, Some(&ds));
+        // Only the non-hop-by-hop header gets through
+        assert_eq!(headers[&http::HeaderName::from_static("x-custom")], "value");
+        for blocked in &["connection", "transfer-encoding", "upgrade", "keep-alive", "te",
+                          "trailers", "proxy-authorization", "proxy-authenticate"] {
+            assert!(!headers.contains_key(&http::HeaderName::from_static(blocked)),
+                "{blocked} must be blocked");
+        }
+    }
+
+    #[test]
+    fn rmcp_reserved_headers_cannot_be_passed_through_or_added() {
+        let mut headers = HashMap::new();
+        let ds = downstream(&[("Mcp-Session-Id", "sess123"), ("Accept", "text/html"), ("Last-Event-Id", "42")]);
+        let cfg = backend(
+            &["mcp-session-id", "accept", "last-event-id"],
+            &[("Mcp-Session-Id", "injected"), ("Accept", "text/html")],
+            &[],
+        );
+        apply_header_config(&mut headers, &cfg, Some(&ds));
+        assert!(headers.is_empty(), "no RMCP-reserved header must reach the upstream config");
     }
 }

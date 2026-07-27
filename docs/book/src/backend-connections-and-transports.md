@@ -82,9 +82,12 @@ VirtualHost.backends
   -> store running service in BackendTransports
 ```
 
-For HTTPS backend URLs, the gateway also sets a custom `Host` header from the
-backend URL host and optional port. HTTP backend URLs do not get this custom
-header in the current code.
+For HTTPS backend URLs, the gateway sets a `Host` header from the backend URL host and optional port.
+After that, `apply_header_config` runs the backend's header config in order: passthrough named downstream
+headers, inject static `add_headers`, then strip `remove_headers`. Hop-by-hop (Connection, Keep-Alive,
+TE, Transfer-Encoding, Trailers, Upgrade, Proxy-Authenticate, Proxy-Authorization) and RMCP-reserved
+(Mcp-Session-Id, Accept, Last-Event-Id) headers are silently skipped in all three phases; the
+gateway-managed `Host` is likewise protected and never altered by config.
 
 Backend connection failures are not fatal to the whole initialize call. The
 gateway stores the backend entry with no running service, so list calls can
@@ -121,9 +124,9 @@ but it is not the final shape for every backend-specific decision.
 | --- | --- | --- |
 | Downstream TLS certificate | Process config. | Process config. It belongs to the gateway listener. |
 | Upstream trust bundle and mTLS identity | Process config. | Runtime config per backend or referenced secret material. |
-| Backend auth headers | Not applied from `UserConfig` yet. | Runtime config per backend. |
+| Backend auth headers | Delegated to `passthrough_headers` / `add_headers` / `remove_headers` in `BackendMCPGateway`. | — |
 | Backend transport type | Model field exists, not routed yet. | Runtime config per backend. |
-| Header pass-through policy | Model field exists, not enforced yet. | Runtime config per backend or route policy. |
+| Header pass-through policy | Implemented via `passthrough_headers`, `add_headers`, `remove_headers` on `BackendMCPGateway`. Headers are session-scoped (snapshotted at initialize); request-scoped propagation is future work. | — |
 
 The boundary to preserve is simple: listener code should not know Redis schema,
 MCP routing code should not know Redis command details, and backend transport

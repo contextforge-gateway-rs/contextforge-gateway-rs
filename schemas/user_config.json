@@ -42,10 +42,27 @@
           "$ref": "#/$defs/Transport"
         },
         "passthrough_headers": {
+          "description": "Header names copied from the downstream request onto the upstream connection.",
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "add_headers": {
+          "description": "Static headers injected onto the upstream connection (override passthrough).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "remove_headers": {
+          "description": "Header names stripped from the upstream connection (applied last).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         },
         "allowed_tool_names": {
           "type": "array",
