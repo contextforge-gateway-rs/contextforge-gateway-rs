@@ -15,7 +15,7 @@ routed methods use them, and `ping` remains local to the gateway process.
 | Fanout | One `StreamableHttpClientTransport` per configured backend in the selected virtual host, opened concurrently with `futures::future::join_all`. |
 | Backend failure | Not fatal. A backend that fails to initialize is stored with no running service; list calls skip it and routed calls to it fail. |
 | Stored state | The local user session mapping, plus one `BackendTransports` entry per backend keyed by principal, backend name, and downstream session id. |
-| Result | `InitializeResult` with the gateway's current fixed capability set: completions, prompts, resources, and tools enabled. Backend capabilities are stored with transport state but are not merged into the response yet. |
+| Result | `InitializeResult` with the gateway's merged capability set. A capability family is advertised when at least one initialized backend advertises it and the gateway has routing support for that family. Backend capabilities are also stored with transport state. |
 
 ## Routed List Methods
 

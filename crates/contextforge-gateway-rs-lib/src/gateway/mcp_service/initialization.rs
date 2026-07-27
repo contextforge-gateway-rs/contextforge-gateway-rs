@@ -134,17 +134,59 @@ where
     }
     drop(transports);
 
-    Ok(InitializeResult::new(merge_capabilities(capabilities))
+    Ok(InitializeResult::new(merge_and_build_capabilities(capabilities))
         .with_server_info(Implementation::new("rust-conformance-server", "0.1.0"))
         .with_instructions("Rust MCP conformance test server"))
 }
 
-fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
-    ServerCapabilities::builder()
-        .enable_completions()
-        .enable_prompts()
-        .enable_resources()
-        .enable_resources_subscribe()
-        .enable_tools()
-        .build()
+fn merge_and_build_capabilities(server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
+    let mut merged = ServerCapabilities::default();
+
+    for (_, capabilities) in server_capabilities {
+        let Some(capabilities) = capabilities else {
+            continue;
+        };
+
+        if capabilities.completions.is_some() {
+            merged.completions.get_or_insert_default();
+        }
+
+        if capabilities.prompts.is_some() {
+            merged.prompts.get_or_insert_default();
+        }
+
+        if let Some(resources) = capabilities.resources {
+            let merged_resources = merged.resources.get_or_insert_default();
+            if resources.subscribe == Some(true) {
+                merged_resources.subscribe = Some(true);
+            }
+        }
+
+        if capabilities.tools.is_some() {
+            merged.tools.get_or_insert_default();
+        }
+    }
+
+    merged
+}
+
+#[cfg(test)]
+mod tests {
+    use rmcp::model::ServerCapabilities;
+
+    use super::merge_and_build_capabilities;
+
+    #[test]
+    fn merge_and_build_capabilities_only_advertises_upstream_capabilities() {
+        let capabilities = merge_and_build_capabilities(vec![
+            ("first".to_owned(), Some(ServerCapabilities::builder().enable_tools().build())),
+            ("second".to_owned(), Some(ServerCapabilities::builder().enable_resources().enable_completions().build())),
+            ("third".to_owned(), Some(ServerCapabilities::builder().enable_tools().build())),
+        ]);
+
+        assert!(capabilities.tools.is_some());
+        assert!(capabilities.completions.is_some());
+        assert!(capabilities.resources.is_some());
+        assert!(capabilities.prompts.is_none());
+    }
 }
