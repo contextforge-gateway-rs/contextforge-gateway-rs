@@ -637,6 +637,8 @@ dependencies = [
  "jsonwebtoken",
  "lru_time_cache",
  "openport",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "redis",
  "reqwest",
  "rmcp",
@@ -654,6 +656,7 @@ dependencies = [
  "tower",
  "tower-http 0.7.0",
  "tracing",
+ "tracing-opentelemetry",
  "typed-builder",
  "uuid",
 ]

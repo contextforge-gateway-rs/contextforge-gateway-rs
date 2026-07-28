@@ -13,6 +13,7 @@ mod common;
 mod const_values;
 mod gateway;
 mod layers;
+mod telemetry;
 mod transports;
 
 #[cfg(feature = "with_tools")]
@@ -142,7 +143,7 @@ impl Gateway {
         let app = app.with_state(mcp_add_state);
         let app = axum::Router::new()
             .nest("/contextforge-rs", app)
-            .layer(TraceLayer::new_for_http())
+            .layer(TraceLayer::new_for_http().make_span_with(telemetry::ExtractingMakeSpan))
             .layer(HttpMetricsLayerBuilder::new().build());
 
         let mut handlers = vec![];
