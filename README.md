@@ -25,8 +25,11 @@ This should spin up Redis instance and two mcp-gateways: a simple counter and a 
 
 3. Get a test JWT token
 ```bash
+USER_ID=11111111-1111-1111-1111-111111111111
+USER_EMAIL=admin@example.com
+
 curl --request GET \
-  --url http://127.0.0.1:8001/contextforge-rs/admin/tokens/admin@example.com \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}?email=${USER_EMAIL}" \
   --header 'accept: application/json' \  
   --header 'content-type: application/json'
 ```
@@ -34,7 +37,7 @@ curl --request GET \
 4. Use the token to add a test user to Redis
 ```bash
 curl --request POST \
-  --url http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/admin@example.com \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/${USER_ID}" \
   --header 'authorization: Bearer {{token}}' \
   --header 'content-type: application/json' \
   --data '{
@@ -168,8 +171,11 @@ cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
 Get a token:
 
 ```bash
+USER_ID=11111111-1111-1111-1111-111111111111
+USER_EMAIL=admin@example.com
+
 TOKEN=$(curl --silent --show-error --request GET \
-  --url http://127.0.0.1:8001/contextforge-rs/admin/tokens/admin@example.com \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}?email=${USER_EMAIL}" \
   --header 'accept: application/json' \
   --header 'content-type: application/json')
 ```
@@ -178,7 +184,7 @@ Create the gateway user config:
 
 ```bash
 curl --silent --show-error --request POST \
-  --url http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/admin@example.com \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/${USER_ID}" \
   --header "authorization: Bearer ${TOKEN}" \
   --header 'content-type: application/json' \
   --data '{

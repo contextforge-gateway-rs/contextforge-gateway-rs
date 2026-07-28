@@ -102,7 +102,8 @@ mod test {
 
     fn active_test_claims() -> ContextForgeClaims {
         let now = now_epoch_seconds();
-        let user_id = "admin@example.com".to_owned();
+        let user_id = "11111111-1111-1111-1111-111111111111".to_owned();
+        let user_email = "admin@example.com".to_owned();
 
         ContextForgeClaims {
             iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
@@ -114,7 +115,7 @@ mod test {
             token_use: Some("api".to_owned()),
             teams: Some(vec!["team_awesome".to_owned()]),
             user: common::User::builder()
-                .email(user_id)
+                .email(user_email)
                 .auth_provider("api_token".to_owned())
                 .full_name(Some("API Token User".to_owned()))
                 .is_admin(true)
@@ -228,11 +229,11 @@ mod test {
             Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
         }
 
-        let user_id = "admin@example.com".to_owned();
+        let user_email = "admin@example.com".to_owned();
         let mut claims = active_test_claims();
         claims.token_use = None;
         claims.user = common::User::builder()
-            .email(user_id)
+            .email(user_email)
             .auth_provider("local".to_owned())
             .full_name(None)
             .is_admin(true)

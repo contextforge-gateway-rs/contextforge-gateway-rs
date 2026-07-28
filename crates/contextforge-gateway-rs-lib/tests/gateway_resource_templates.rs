@@ -5,7 +5,8 @@ use rmcp::model::{ReadResourceRequestParams, ResourceContents};
 use tracing::{info, warn};
 
 use support::{
-    ListToolsGatewaySettings, connect_client, create_client, create_gateway_with_four_counters, create_ports,
+    ListToolsGatewaySettings, TEST_USER_ID, connect_client, create_client, create_gateway_with_four_counters,
+    create_ports,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -20,7 +21,7 @@ async fn plaintext_lists_prefixed_backend_resource_templates() -> Result<()> {
         ..Default::default()
     };
 
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings {
         handle,
         gateway_url,
@@ -57,7 +58,7 @@ async fn plaintext_reads_resource_from_prefixed_template() -> Result<()> {
         ..Default::default()
     };
 
-    let user = "admin@example.com";
+    let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
         create_gateway_with_four_counters(user, config).await
     else {

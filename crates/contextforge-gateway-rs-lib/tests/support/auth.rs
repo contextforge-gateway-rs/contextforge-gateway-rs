@@ -6,6 +6,8 @@ use std::{
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde_json::json;
 
+use super::TEST_USER_EMAIL;
+
 const TEST_TOKEN_TTL_SECS: u64 = 60 * 60;
 
 pub(crate) fn token(user_id: &str) -> String {
@@ -23,7 +25,7 @@ pub(crate) fn token(user_id: &str) -> String {
         "token_use": "api",
         "teams": ["team_awesome"],
         "user": {
-            "email": user_id,
+            "email": TEST_USER_EMAIL,
             "full_name": "API Token User",
             "is_admin": true,
             "auth_provider": "api_token"
