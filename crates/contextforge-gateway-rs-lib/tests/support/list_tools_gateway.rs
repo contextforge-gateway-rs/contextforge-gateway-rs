@@ -217,6 +217,8 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     url,
                     transport: Transport::default(),
                     passthrough_headers: Vec::new(),
+                    add_headers: HashMap::default(),
+                    remove_headers: Vec::new(),
                     allowed_tool_names: Vec::new(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()

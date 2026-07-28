@@ -66,11 +66,20 @@ but the distinction should stay explicit:
 | `BackendMCPGateway.url` | Required. Used to build the upstream `StreamableHttpClientTransport`. |
 | `BackendMCPGateway.name` | Present in the model. Current routing uses the backend map key, not this field, as the namespace. |
 | `transport` | Present in the model. Current upstream code always builds a streamable HTTP client transport. |
-| `passthrough_headers` | Present in the model. Current MCP routing does not apply header pass-through policy from this field. |
+| `passthrough_headers` | Applied during `initialize`: named downstream request headers are copied onto the upstream connection header map. Body-framing (`Content-Length`, `Content-Type`), hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. Propagation is session-scoped — headers are snapshotted from the initialize request; see note below. |
+| `add_headers` | Static `{name: value}` headers injected onto the upstream connection after passthrough (override passthrough values). Body-framing, hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. |
+| `remove_headers` | Header names stripped from the upstream connection after add (applied last). Body-framing, hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. |
 | `allowed_tool_names` | Present in the model. Current list/call routing does not enforce it. |
 | `tool_name_aliases` | Optional exact `{downstream_alias: upstream_original}` mapping used by tool list/call routing before the single-versus-multi-backend fallback. |
 | `allowed_resource_names` | Present in the model. Current resource routing does not enforce it. |
 | `allowed_prompt_names` | Present in the model. Current prompt routing does not enforce it. |
+
+> **Note — session-scoped header propagation:** `passthrough_headers` values are snapshotted from the
+> downstream `initialize` request and baked into the backend transport connection for the lifetime of the
+> session. Post-initialize requests (tool calls, list calls, etc.) reuse those headers. True
+> request-scoped propagation requires either per-request transport reconstruction or SDK support for
+> per-request header injection; this is the correct path as MCP moves toward stateless operation
+> (SEP-2575, SEP-2567).
 
 The current route selection is:
 
@@ -89,7 +98,6 @@ Expected config growth beyond the current fields:
 - route selection across multiple MCP endpoints
 - principal/virtual-host filters for tools, resources, and prompts
 - backend auth/TLS material references
-- request/response header pass/add/remove rules
 - plugin/CPEX hook settings
 - pagination/SSE behavior where protocol handling needs config
 - future A2A and LLM routing/provider settings

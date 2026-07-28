@@ -28,7 +28,14 @@ pub struct BackendMCPGateway {
     pub name: String,
     pub url: url::Url,
     pub transport: Transport,
+    /// Header names copied from the downstream request onto the upstream connection.
     pub passthrough_headers: Vec<String>,
+    /// Static headers injected onto the upstream connection (override passthrough).
+    #[serde(default)]
+    pub add_headers: HashMap<String, String>,
+    /// Header names stripped from the upstream connection (applied last).
+    #[serde(default)]
+    pub remove_headers: Vec<String>,
     pub allowed_tool_names: Vec<String>,
     #[serde(default)]
     pub tool_name_aliases: HashMap<String, String>,

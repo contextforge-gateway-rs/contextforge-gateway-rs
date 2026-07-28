@@ -261,6 +261,8 @@ async fn start_gateway_with_runtime(
                                 name: String::new(),
                                 transport: Transport::default(),
                                 passthrough_headers: Vec::new(),
+                                add_headers: HashMap::default(),
+                                remove_headers: Vec::new(),
                                 allowed_tool_names: Vec::new(),
                                 tool_name_aliases: HashMap::new(),
                                 allowed_resource_names: Vec::new(),
