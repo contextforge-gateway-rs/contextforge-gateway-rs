@@ -1,5 +1,10 @@
 # System Shape
 
+> **Migration note:** session-oriented components shown on this page describe
+> current internals. The downstream target is MCP `2026-07-28` over Streamable
+> HTTP. Legacy MCP and SSE stay on control-plane routes and do not enter the
+> dataplane.
+
 > 🧭 **Architecture lens:** this page explains what the gateway is, what it is
 > not, and which code owns each boundary.
 

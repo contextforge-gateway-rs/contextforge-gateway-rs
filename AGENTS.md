@@ -7,6 +7,22 @@ with the external ContextForge control plane in
 `https://github.com/IBM/mcp-context-forge`, but it must not become a
 control-plane, UI, IAM, or metrics-storage app.
 
+## MCP Protocol Support
+
+- The downstream dataplane contract targets modern MCP clients using protocol
+  version `2026-07-28` over Streamable HTTP.
+- Do not add new dataplane compatibility for older MCP protocol versions,
+  legacy `initialize`/session behavior, or the legacy SSE transport. Replace
+  remaining legacy paths with their `2026-07-28` equivalents as that migration
+  proceeds.
+- The external ContextForge control plane owns and serves legacy clients.
+  Older MCP versions and SSE remain on control-plane routes and must not be
+  routed through this dataplane.
+- Tests, examples, and new protocol behavior should use `server/discover`,
+  per-request client metadata, and the `2026-07-28` protocol version.
+- Temporary compatibility shims in the current implementation are migration
+  details, not supported client contracts. Do not build new behavior on them.
+
 ## Architecture
 
 Architecture documentation lives in The ContextForge Gateway Book under

@@ -15,6 +15,12 @@ presents those backends to the client as one merged MCP server.
 Throughout this book, *downstream* means the client side of the gateway and
 *upstream* means the backend side.
 
+> **Protocol boundary:** the downstream dataplane target is MCP `2026-07-28`
+> over Streamable HTTP. Older MCP versions, legacy session initialization, and
+> SSE remain on external ContextForge control-plane routes and do not enter the
+> dataplane. The current session-oriented internals are temporary migration
+> state, not a compatibility promise for direct dataplane clients.
+
 ![Gateway overview](assets/gateway-overview.svg)
 
 Blue arrows show request traffic. Green arrows show backend responses returning
@@ -22,7 +28,7 @@ to the gateway and the merged MCP response going back to the client.
 
 | Layer | What happens |
 | --- | --- |
-| Client edge | An MCP client calls `/contextforge-rs/servers/{virtual_host_id}/mcp` with a bearer token and MCP session headers. |
+| Client edge | A modern MCP `2026-07-28` client calls `/contextforge-rs/servers/{virtual_host_id}/mcp` over Streamable HTTP with a bearer token and per-request client context. |
 | Gateway hot path | The gateway validates identity, loads runtime config, selects the virtual host, and routes MCP methods. |
 | Backend edge | The gateway opens or reuses MCP client sessions to configured backend MCP servers and merges what the client sees. |
 
@@ -45,7 +51,7 @@ think about one client-facing MCP endpoint:
 Behind that endpoint, the gateway has three main boundaries:
 
 - the downstream boundary, where clients connect over streamable HTTP and
-  present their bearer token and MCP session id
+  present their bearer token and MCP `2026-07-28` per-request context
 - the configuration boundary, where the gateway turns the JWT subject into a
   runtime `UserConfig`
 - the upstream boundary, where the gateway opens or reuses MCP client sessions

@@ -23,7 +23,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 # Keep dependencies here only when at least two workspace members inherit them.
 contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
 contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}
-rmcp = { version = "3.0.0-beta.2", features = [
+rmcp = { version = "3.0.0-beta.3", features = [
     "server",
     "client",
     "auth",
@@ -31,7 +31,7 @@ rmcp = { version = "3.0.0-beta.2", features = [
     "reqwest",
     "transport-streamable-http-client-reqwest",
     "elicitation",
-], git = "https://github.com/contextforge-gateway-rs/mcp-rust-sdk", rev = "cd847d0a5b17138eec926872152a5f9f5d83a59b" }
+] }
 serde = {version= "1.0"}
 serde_json = "1.0"
 tracing = "0.1"

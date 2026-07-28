@@ -13,7 +13,8 @@ These are the values both sides currently rely on:
 
 | Agreement | Value today |
 | --- | --- |
-| Client-facing route | `/servers/{virtual_host_id}/mcp` behaves like the legacy ContextForge MCP endpoint. The front door rewrites it to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the dataplane. |
+| Client-facing route | The public route remains `/servers/{virtual_host_id}/mcp`. The front door rewrites modern MCP `2026-07-28` Streamable HTTP traffic to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the dataplane. |
+| Protocol compatibility | The dataplane target is MCP `2026-07-28` only. The control plane serves older MCP versions, legacy session initialization, and SSE on its own routes; that traffic is not forwarded to the dataplane. |
 | Unknown virtual host | `404` with body `{"detail":"Server not found"}`, matching the control-plane response shape. |
 | Token issuer and audience | `iss = mcpgateway`, `aud = mcpgateway-api` — the values the control plane mints. |
 | Claims shape | `sub`, `jti`, `iss`, `aud`, `exp`, and `user` are required. `token_use`, `iat`, `teams`, and `scopes` are optional, as is `user.full_name`. The dataplane routes on `sub` only. |
@@ -23,6 +24,10 @@ These are the values both sides currently rely on:
 
 Changing any of these is a cross-repo change: the dataplane, the control-plane
 publisher, and the integration harness all need updating together.
+
+The protocol boundary is a target contract while the implementation migration
+is in progress. Temporary session-oriented code inside the dataplane does not
+move legacy compatibility ownership back into this repository.
 
 ## Config Publishing
 
@@ -58,10 +63,11 @@ commit them whenever `UserConfig`, `VirtualHost`, `BackendMCPGateway`, or the
 
 ## Front-Door Split
 
-Only MCP dataplane traffic comes to this process. The repository's reference
-`docker/nginx.conf` proxies `location ^~ /contextforge-rs` to the gateway;
-all UI, management API, and other ContextForge traffic stays on the existing
-control-plane paths.
+Only modern MCP `2026-07-28` Streamable HTTP traffic comes to this process.
+The repository's reference `docker/nginx.conf` proxies
+`location ^~ /contextforge-rs` to the gateway. Legacy MCP and SSE traffic,
+plus all UI, management API, and other ContextForge traffic, stays on the
+control-plane paths and does not enter the dataplane.
 
 ## Verifying The Integration
 

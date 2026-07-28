@@ -1,5 +1,9 @@
 # Capability Flow
 
+> **Migration note:** this page documents the current `initialize` capability
+> path. The target downstream contract is MCP `2026-07-28`, where
+> `server/discover` replaces this client-facing lifecycle.
+
 This page explains where MCP capabilities come from during `initialize`, how
 the gateway stores them, and what the downstream client sees today.
 
@@ -32,7 +36,7 @@ runs this capability-related flow:
 
 The code path that reads the upstream capabilities is:
 
-```rust
+```rust,ignore
 let server_capabilities = running_service
     .as_ref()
     .and_then(|rs| rs.peer().peer_info().as_ref().map(|pi| pi.capabilities.clone()));
@@ -40,7 +44,7 @@ let server_capabilities = running_service
 
 Those values are then stored here:
 
-```rust
+```rust,ignore
 BackendTransportService::from((server_capabilities, running_service.map(Arc::new)))
 ```
 
@@ -49,7 +53,7 @@ BackendTransportService::from((server_capabilities, running_service.map(Arc::new
 The source of truth is the upstream backend server. For example, a backend test
 server can return:
 
-```rust
+```rust,ignore
 InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
 ```
 

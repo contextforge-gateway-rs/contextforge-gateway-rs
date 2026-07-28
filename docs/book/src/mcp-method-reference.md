@@ -4,6 +4,11 @@
 > gateway today, from the client's point of view. For how identifiers are
 > preserved, aliased, or namespaced, see [MCP Routing Semantics](mcp-routing-semantics.md).
 
+> **Migration note:** the supported target uses MCP `2026-07-28`,
+> `server/discover`, and per-request client context. The legacy `initialize`,
+> session, and subscription paths below are implementation inventory to replace,
+> not compatibility contracts.
+
 Gateway methods fall into three groups: `initialize` creates backend sessions,
 routed methods use them, and `ping` remains local to the gateway process.
 

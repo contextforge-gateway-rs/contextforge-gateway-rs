@@ -13,6 +13,7 @@ They describe the shape of the current Rust dataplane, not just preferences.
 | Choice | Current decision | Why it matters |
 | --- | --- | --- |
 | Dataplane, not control plane | This repo consumes runtime config and handles traffic. It does not own UI, IAM lifecycle, management APIs, or durable observability storage. | Keeps the hot path small and prevents product workflows from leaking into request routing. |
+| Modern downstream MCP only | The target dataplane contract is MCP `2026-07-28` over Streamable HTTP. The control plane serves older versions and SSE without routing them through the dataplane. | Keeps legacy negotiation and transport compatibility out of the hot dataplane. |
 | Config access is abstracted | MCP routing depends on `UserConfig`, `VirtualHost`, and `UserConfigStore`, not Redis commands. | Keeps future xDS/gRPC or another config stream possible. |
 | Backend names are public | The backend map key is part of tool/resource/prompt names. | Backend renames are client-visible behavior changes. |
 | Sessions are local today | Backend RMCP services live in `BackendTransports` inside one process. | Load-balanced deployments need sticky routing or a new session ownership design. |
@@ -38,6 +39,26 @@ Is this hot-path enforcement, or is this a management workflow?
 If it is a workflow, it probably belongs outside this repo. The Rust gateway
 should enforce the result of management decisions, not become the place where
 those decisions are authored.
+
+## Modern Downstream MCP Only
+
+The dataplane is moving to one downstream protocol contract:
+
+```text
+MCP 2026-07-28
+  -> Streamable HTTP
+  -> server/discover
+  -> required per-request client context
+```
+
+The Rust gateway should not grow adapters for older MCP versions, legacy
+session initialization, or SSE. The external control plane serves those
+clients on control-plane routes. Legacy traffic does not enter the dataplane;
+only clients using the modern contract are routed here.
+
+Some current code and diagrams still describe session-oriented implementation
+details. Treat them as migration inventory. Replace them with the modern
+protocol path rather than preserving them as public compatibility behavior.
 
 ## Config Access Is Abstracted
 
@@ -158,6 +179,7 @@ Changing one of these choices should update more than one file.
 
 | Change | Expected follow-through |
 | --- | --- |
+| Downstream MCP version changes | Coordinate with the control plane, update modern protocol tests and examples, and keep legacy traffic on control-plane routes. |
 | Backend namespace changes | Update merge logic, split logic, tests, docs, and migration notes. |
 | Session state moves external | Update `SessionManager`, cleanup behavior, load-balancing docs, and failure-mode tests. |
 | Config transport changes | Keep `UserConfigStore` as the boundary and update adapter tests. |
