@@ -66,9 +66,9 @@ but the distinction should stay explicit:
 | `BackendMCPGateway.url` | Required. Used to build the upstream `StreamableHttpClientTransport`. |
 | `BackendMCPGateway.name` | Present in the model. Current routing uses the backend map key, not this field, as the namespace. |
 | `transport` | Present in the model. Current upstream code always builds a streamable HTTP client transport. |
-| `passthrough_headers` | Applied during `initialize`: named downstream request headers are copied onto the upstream connection header map. Hop-by-hop and RMCP-reserved headers are silently skipped. Propagation is session-scoped — headers are snapshotted from the initialize request; see note below. |
-| `add_headers` | Static `{name: value}` headers injected onto the upstream connection after passthrough (override passthrough values). Hop-by-hop and RMCP-reserved headers are silently skipped. |
-| `remove_headers` | Header names stripped from the upstream connection after add (applied last). Hop-by-hop and RMCP-reserved headers are silently skipped. |
+| `passthrough_headers` | Applied during `initialize`: named downstream request headers are copied onto the upstream connection header map. Body-framing (`Content-Length`, `Content-Type`), hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. Propagation is session-scoped — headers are snapshotted from the initialize request; see note below. |
+| `add_headers` | Static `{name: value}` headers injected onto the upstream connection after passthrough (override passthrough values). Body-framing, hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. |
+| `remove_headers` | Header names stripped from the upstream connection after add (applied last). Body-framing, hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. |
 | `allowed_tool_names` | Present in the model. Current list/call routing does not enforce it. |
 | `tool_name_aliases` | Optional exact `{downstream_alias: upstream_original}` mapping used by tool list/call routing before the single-versus-multi-backend fallback. |
 | `allowed_resource_names` | Present in the model. Current resource routing does not enforce it. |

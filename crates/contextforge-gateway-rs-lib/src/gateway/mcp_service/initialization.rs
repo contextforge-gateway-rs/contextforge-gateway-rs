@@ -191,8 +191,10 @@ fn merge_and_build_capabilities(server_capabilities: Vec<(String, Option<ServerC
 ///
 /// Protected headers are silently skipped in every phase:
 /// - Gateway-managed: `Host` (set from backend URL before this runs)
+/// - Body-framing: `Content-Length`, `Content-Type` (gateway owns framing)
 /// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`,
-///   `Proxy-Authorization`, `TE`, `Trailers`, `Transfer-Encoding`, `Upgrade`
+///   `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
+/// - Non-standard hop-by-hop: `Proxy-Connection`
 /// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
 ///
 /// ponytail: single-value per name; a repeated downstream header keeps its first value.
@@ -232,20 +234,29 @@ fn apply_header_config(
 }
 
 /// Returns `true` for headers that config must never touch:
-/// gateway-managed `Host`, HTTP/1.1 hop-by-hop headers (RFC 7230 §6.1), and
-/// RMCP transport-reserved headers (`Mcp-Session-Id`, `Accept`, `Last-Event-Id`).
+/// - Gateway-managed: `Host`
+/// - Body-framing: `Content-Length`, `Content-Type` (gateway owns framing; forwarding corrupts body or enables encoding-dispatch bypass)
+/// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
+/// - Non-standard hop-by-hop: `Proxy-Connection` (must not cross gateway boundary)
+/// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
 fn is_protected_header(name: &http::HeaderName) -> bool {
     const PROTECTED: &[&str] = &[
         "host",
+        // body-framing: gateway owns these; forwarding corrupts framing or enables encoding-dispatch bypass
+        "content-length",
+        "content-type",
         // hop-by-hop (RFC 7230 §6.1)
         "connection",
         "keep-alive",
         "proxy-authenticate",
         "proxy-authorization",
         "te",
+        "trailer",
         "trailers",
         "transfer-encoding",
         "upgrade",
+        // non-standard hop-by-hop; must not cross gateway boundary
+        "proxy-connection",
         // RMCP transport-reserved
         "mcp-session-id",
         "accept",
@@ -388,5 +399,29 @@ mod tests {
         );
         apply_header_config(&mut headers, &cfg, Some(&ds));
         assert!(headers.is_empty(), "no RMCP-reserved header must reach the upstream config");
+    }
+
+    #[test]
+    fn body_framing_and_connection_management_headers_cannot_be_forwarded() {
+        let mut headers = HashMap::new();
+        let ds = downstream(&[
+            ("Content-Type", "text/plain"),
+            ("Content-Length", "42"),
+            ("Proxy-Connection", "keep-alive"),
+            ("Trailer", "X-Checksum"),
+            ("X-Custom", "ok"),
+        ]);
+        let cfg = backend(
+            &["content-type", "content-length", "proxy-connection", "trailer", "x-custom"],
+            &[("Content-Length", "99")],
+            &[],
+        );
+        apply_header_config(&mut headers, &cfg, Some(&ds));
+        // legitimate header passes through
+        assert_eq!(headers[&http::HeaderName::from_static("x-custom")], "ok");
+        // blocked in both passthrough and add phases
+        for blocked in &["content-type", "content-length", "proxy-connection", "trailer"] {
+            assert!(!headers.contains_key(&http::HeaderName::from_static(blocked)), "{blocked} must be blocked");
+        }
     }
 }

@@ -84,10 +84,11 @@ VirtualHost.backends
 
 For HTTPS backend URLs, the gateway sets a `Host` header from the backend URL host and optional port.
 After that, `apply_header_config` runs the backend's header config in order: passthrough named downstream
-headers, inject static `add_headers`, then strip `remove_headers`. Hop-by-hop (Connection, Keep-Alive,
-TE, Transfer-Encoding, Trailers, Upgrade, Proxy-Authenticate, Proxy-Authorization) and RMCP-reserved
-(Mcp-Session-Id, Accept, Last-Event-Id) headers are silently skipped in all three phases; the
-gateway-managed `Host` is likewise protected and never altered by config.
+headers, inject static `add_headers`, then strip `remove_headers`. Protected headers are silently skipped
+in all three phases: body-framing (`Content-Length`, `Content-Type`), hop-by-hop (`Connection`,
+`Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `Proxy-Connection`, `TE`, `Trailer`,
+`Trailers`, `Transfer-Encoding`, `Upgrade`), and RMCP-reserved (`Mcp-Session-Id`, `Accept`,
+`Last-Event-Id`). The gateway-managed `Host` is likewise protected and never altered by config.
 
 Backend connection failures are not fatal to the whole initialize call. The
 gateway stores the backend entry with no running service, so list calls can
