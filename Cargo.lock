@@ -2819,8 +2819,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "2.2.0"
-source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=3252f013c350fd77194caefc70abae69ef0f415a#3252f013c350fd77194caefc70abae69ef0f415a"
+version = "3.0.0-beta.2"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=cd847d0a5b17138eec926872152a5f9f5d83a59b#cd847d0a5b17138eec926872152a5f9f5d83a59b"
 dependencies = [
  "async-trait",
  "base64",
@@ -2852,8 +2852,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "2.2.0"
-source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=3252f013c350fd77194caefc70abae69ef0f415a#3252f013c350fd77194caefc70abae69ef0f415a"
+version = "3.0.0-beta.2"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?rev=cd847d0a5b17138eec926872152a5f9f5d83a59b#cd847d0a5b17138eec926872152a5f9f5d83a59b"
 dependencies = [
  "darling",
  "proc-macro2",

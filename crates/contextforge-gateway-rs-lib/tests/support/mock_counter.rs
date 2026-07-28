@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 #![allow(dead_code)]
 
-use std::{any::Any, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -12,27 +12,10 @@ use rmcp::{
     model::*,
     prompt, prompt_handler, prompt_router, schemars,
     service::RequestContext,
-    task_handler,
-    task_manager::{OperationProcessor, OperationResultTransport},
     tool, tool_handler, tool_router,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
-
-struct ToolCallOperationResult {
-    id: String,
-    result: Result<CallToolResult, McpError>,
-}
-
-impl OperationResultTransport for ToolCallOperationResult {
-    fn operation_id(&self) -> &String {
-        &self.id
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct StructRequest {
@@ -60,7 +43,6 @@ pub struct Counter {
     counter: Arc<Mutex<i32>>,
     tool_router: ToolRouter<Counter>,
     prompt_router: PromptRouter<Counter>,
-    processor: Arc<Mutex<OperationProcessor>>,
 }
 
 #[tool_router]
@@ -71,7 +53,6 @@ impl Counter {
             counter: Arc::new(Mutex::new(0)),
             tool_router: Self::tool_router(),
             prompt_router: Self::prompt_router(),
-            processor: Arc::new(Mutex::new(OperationProcessor::new())),
         }
     }
 
@@ -186,7 +167,6 @@ impl Counter {
 
 #[tool_handler(meta = Meta(rmcp::object!({"tool_meta_key": "tool_meta_value"})))]
 #[prompt_handler(meta = Meta(rmcp::object!({"router_meta_key": "router_meta_value"})))]
-#[task_handler]
 impl ServerHandler for Counter {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
