@@ -91,9 +91,10 @@ In another terminal, request a JWT for the test subject:
 
 ```bash
 USER_ID=11111111-1111-1111-1111-111111111111
+USER_EMAIL=admin@example.com
 
 TOKEN=$(curl --silent --show-error \
-  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}")
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}?email=${USER_EMAIL}")
 
 printf '%s\n' "${TOKEN}"
 ```

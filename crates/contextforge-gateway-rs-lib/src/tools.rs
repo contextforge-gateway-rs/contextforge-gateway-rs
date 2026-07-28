@@ -3,13 +3,14 @@ use std::fs;
 use axum::{
     Json,
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{IntoResponse, Response},
     routing::{Router, get, post},
 };
 use chrono::Duration;
 use contextforge_gateway_rs_apis::{User as CFUser, user_store::UserConfig};
 use http::{StatusCode, header};
+use serde::Deserialize;
 use uuid::Uuid;
 
 //use tracing::debug;
@@ -18,8 +19,15 @@ use crate::{
     const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
 };
 
+const DEFAULT_TOKEN_EMAIL: &str = "admin@example.com";
+
+#[derive(Debug, Deserialize)]
+pub struct TokenQuery {
+    email: Option<String>,
+}
+
 impl ContextForgeClaims {
-    pub fn new(user_id: &str) -> Self {
+    pub fn new(user_id: &str, user_email: &str) -> Self {
         let audience = CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
         let start = std::time::SystemTime::now();
         let now = start.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
@@ -33,7 +41,7 @@ impl ContextForgeClaims {
             token_use: Some("api".to_owned()),
             teams: Some(vec!["team_awesome".to_owned()]),
             user: User::builder()
-                .email(user_id.to_owned())
+                .email(user_email.to_owned())
                 .auth_provider("api_token".to_owned())
                 .full_name(Some("API Token User".to_owned()))
                 .is_admin(true)
@@ -65,13 +73,18 @@ pub async fn health() -> Response {
         .expect("Expecting this to work")
 }
 
-pub async fn get_token(State(state): State<ContextForgeGatewayAppState>, Path(user_id): Path<String>) -> Response {
+pub async fn get_token(
+    State(state): State<ContextForgeGatewayAppState>,
+    Path(user_id): Path<String>,
+    Query(query): Query<TokenQuery>,
+) -> Response {
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(
         &fs::read(&state.config.token_verification_private_key).expect("Expecting this to work"),
     )
     .expect("Expecting this to work");
 
-    let claims = ContextForgeClaims::new(&user_id);
+    let user_email = query.email.as_deref().unwrap_or(DEFAULT_TOKEN_EMAIL);
+    let claims = ContextForgeClaims::new(&user_id, user_email);
     let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
     header.kid = Some("test".to_owned());
     let token = jsonwebtoken::encode::<ContextForgeClaims>(&header, &claims, &key).expect("Expecting this to work");
@@ -97,5 +110,22 @@ pub async fn configure_user(
             .header(header::CONTENT_TYPE, "text/plain")
             .body(Body::from("Problem with encoding "))
             .expect("Expecting this to work")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::ContextForgeClaims;
+
+    #[test]
+    fn new_claims_keeps_subject_and_email_metadata_separate() {
+        let claims = ContextForgeClaims::new("11111111-1111-1111-1111-111111111111", "admin@example.com");
+
+        let payload = serde_json::to_value(claims).expect("claims should serialize");
+
+        assert_eq!(payload["sub"], Value::String("11111111-1111-1111-1111-111111111111".to_owned()));
+        assert_eq!(payload["user"]["email"], Value::String("admin@example.com".to_owned()));
     }
 }

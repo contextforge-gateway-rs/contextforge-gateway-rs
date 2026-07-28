@@ -26,9 +26,10 @@ This should spin up Redis instance and two mcp-gateways: a simple counter and a 
 3. Get a test JWT token
 ```bash
 USER_ID=11111111-1111-1111-1111-111111111111
+USER_EMAIL=admin@example.com
 
 curl --request GET \
-  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}" \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}?email=${USER_EMAIL}" \
   --header 'accept: application/json' \  
   --header 'content-type: application/json'
 ```
@@ -171,9 +172,10 @@ Get a token:
 
 ```bash
 USER_ID=11111111-1111-1111-1111-111111111111
+USER_EMAIL=admin@example.com
 
 TOKEN=$(curl --silent --show-error --request GET \
-  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}" \
+  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}?email=${USER_EMAIL}" \
   --header 'accept: application/json' \
   --header 'content-type: application/json')
 ```
