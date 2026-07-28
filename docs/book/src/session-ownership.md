@@ -9,6 +9,13 @@ The current gateway keeps backend MCP client services in memory. That choice is
 simple and fast, but it defines how initialized MCP sessions can be routed in a
 deployment.
 
+> **Temporary RMCP v3 compatibility:** the gateway currently maps initialize
+> and every downstream `Mcp-Session-Id` header to one fixed internal session
+> key. RMCP still manages the real transport session; the fixed key only keeps
+> the existing gateway-owned backend lookup working until that state is
+> removed. It is not part of the supported MCP `2026-07-28` client contract;
+> legacy clients remain on control-plane routes and do not enter the dataplane.
+
 ## Owned State
 
 Several pieces of state participate in one MCP session. They do not all have
@@ -16,7 +23,7 @@ the same owner.
 
 | State | Key | Owner today | Lifetime |
 | --- | --- | --- | --- |
-| RMCP downstream session | RMCP `DownstreamSessionId` and later `Mcp-session-id`. | RMCP `LocalSessionManager`. | Local process. |
+| RMCP downstream session | RMCP `Mcp-Session-Id`; fixed internal gateway session key. | RMCP `LocalSessionManager`. | Local process. |
 | User session mapping | `UserSession { principal, downstream_session_id }`. | `LocalUserSessionStore`. | Local LRU cache, 50,000 entries, 1 hour. |
 | Backend running service | `principal + backend_name + session_id`. | `BackendTransports`. | Local process. |
 | Backend upstream MCP session | Managed inside RMCP running client service. | Backend service handle. | Local process and backend server. |
@@ -34,7 +41,7 @@ unless that architecture changes too.
 InitializeCallValidator
   -> selected VirtualHost
   -> claims.sub
-  -> RMCP DownstreamSessionId
+  -> fixed internal gateway session key
   -> one upstream client service per backend
   -> BackendTransports entries
 ```

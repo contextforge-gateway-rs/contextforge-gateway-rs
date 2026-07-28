@@ -30,7 +30,7 @@ where
     let (virtual_host, downstream_session_id, claims) = call_validator.validate()?;
     let session_mapping = if let Ok(maybe_session_mapping) = mcp_service
         .user_session_store
-        .get_session(&UserSession::new(claims.sub.clone(), Arc::clone(&downstream_session_id.session_id)))
+        .get_session(&UserSession::new(claims.sub.clone(), Arc::from(downstream_session_id.value().as_str())))
         .await
     {
         maybe_session_mapping.unwrap_or_default()
@@ -131,7 +131,7 @@ where
     if mcp_service
         .user_session_store
         .set_session(
-            &UserSession::new(claims.sub.clone(), Arc::clone(&downstream_session_id.session_id)),
+            &UserSession::new(claims.sub.clone(), Arc::from(downstream_session_id.value().as_str())),
             &session_mapping,
         )
         .await
@@ -147,7 +147,11 @@ where
     let mut transports = mcp_service.transports.inner().lock().await;
     for (name, service) in backend_services {
         transports
-            .entry(BackendTransportKey::from((name.as_str(), downstream_session_id.value(), claims.sub.as_str())))
+            .entry(BackendTransportKey::from((
+                name.as_str(),
+                downstream_session_id.value().as_str(),
+                claims.sub.as_str(),
+            )))
             .insert_entry(service);
     }
     drop(transports);

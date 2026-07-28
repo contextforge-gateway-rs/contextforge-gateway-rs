@@ -19,6 +19,13 @@ cargo nextest run --locked --workspace
 Use `cargo test` when nextest is unavailable. For book changes, also run
 `mdbook build docs/book` and `mdbook test docs/book`.
 
+Protocol tests and fixtures should target MCP `2026-07-28`, use
+`server/discover`, and include the required per-request client metadata. Do not
+add new dataplane coverage for older protocol versions, legacy session
+initialization, or SSE; those paths belong in control-plane tests and must not
+route legacy traffic through the dataplane. Existing legacy-shaped tests are
+migration inventory and should be replaced as the modern implementation lands.
+
 ## In-Repo Integration Tests
 
 `crates/contextforge-gateway-rs-lib/tests/` exercises the gateway against

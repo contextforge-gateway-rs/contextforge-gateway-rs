@@ -6,7 +6,7 @@ use tracing::info;
 
 use crate::{
     common::ContextForgeClaims,
-    const_values::MCP_SESSION_ID,
+    const_values::{MCP_SESSION_ID, MOCK_SESSION_ID},
     gateway::{BackendTransports, UserSession, UserSessionStore},
 };
 
@@ -16,6 +16,10 @@ pub struct SessionId {
 }
 
 impl SessionId {
+    pub(crate) fn mock() -> Self {
+        Self { value: MOCK_SESSION_ID.to_owned() }
+    }
+
     pub fn value(&self) -> &String {
         &self.value
     }
@@ -28,8 +32,11 @@ pub struct SessionIdState {
 }
 
 pub async fn session_id_layer(State(state): State<SessionIdState>, mut request: Request<Body>, next: Next) -> Response {
-    let session_id =
-        request.headers().get(MCP_SESSION_ID).and_then(|session_id| session_id.to_str().ok()).map(str::to_owned);
+    let session_id = request
+        .headers()
+        .get(MCP_SESSION_ID)
+        .and_then(|session_id| session_id.to_str().ok())
+        .map(|_| MOCK_SESSION_ID.to_owned());
 
     if let Some(session_id) = &session_id {
         info!("MCP Session ID {session_id}");

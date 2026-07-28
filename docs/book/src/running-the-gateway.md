@@ -148,7 +148,14 @@ JWT subject 11111111-1111-1111-1111-111111111111
   -> backend MCP URLs
 ```
 
-## 5. Initialize an MCP Session
+## 5. Temporary Legacy Smoke Flow
+
+> This section exercises the current migration-era implementation. It is not
+> the supported downstream client contract. New clients must target MCP
+> `2026-07-28` over Streamable HTTP with `server/discover` and per-request
+> client context. Legacy clients and SSE remain on control-plane routes and do
+> not use this dataplane endpoint; this smoke flow will be replaced as the
+> dataplane migration lands.
 
 Open a streamable HTTP MCP session and save the returned `mcp-session-id`
 header:

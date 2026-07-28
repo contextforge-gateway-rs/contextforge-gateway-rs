@@ -1,5 +1,10 @@
 # Request Flow
 
+> **Migration note:** the flow below documents the current session-oriented
+> implementation. The downstream target is MCP `2026-07-28` with
+> `server/discover` and per-request client context. Older clients and SSE remain
+> on control-plane routes and do not enter this dataplane.
+
 > 🎯 **Flow invariant:** Axum builds request context before RMCP handlers route MCP
 > methods. MCP handlers should read typed extensions, not parse headers, paths,
 > or Redis keys directly.

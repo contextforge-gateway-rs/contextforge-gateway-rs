@@ -1,9 +1,6 @@
 use contextforge_gateway_rs_apis::user_store::{UserConfig, VirtualHost};
 use http::request::Parts;
-use rmcp::{
-    ErrorData, RoleServer, model::ErrorCode, service::RequestContext,
-    transport::streamable_http_server::tower::DownstreamSessionId,
-};
+use rmcp::{ErrorData, RoleServer, model::ErrorCode, service::RequestContext};
 use tracing::debug;
 
 use crate::{
@@ -95,30 +92,22 @@ impl<'a> InitializeCallValidator<'a> {
     pub fn new(ctx: &'a RequestContext<RoleServer>) -> Self {
         Self { ctx }
     }
-    pub fn validate(self) -> Result<(&'a VirtualHost, &'a DownstreamSessionId, &'a ContextForgeClaims), ErrorData> {
+    pub fn validate(self) -> Result<(&'a VirtualHost, SessionId, &'a ContextForgeClaims), ErrorData> {
         let maybe_parts = self.ctx.extensions.get::<Parts>();
 
-        let maybe_downstream_session = self.ctx.extensions.get::<DownstreamSessionId>();
+        let downstream_session_id = SessionId::mock();
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
         let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
         let call_name = "initialize";
         let has_user_config = maybe_user_config.is_some();
         let virtual_hosts = maybe_user_config.map_or(0, |user_config| user_config.virtual_hosts.len());
-        let has_session_id = maybe_downstream_session.is_some();
+        let has_session_id = true;
         let has_claims = maybe_claims.is_some();
         let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", |id| id.value().as_str());
         debug!(
             "InitializeCallValidator::validate - mcp call validation call_name = {call_name} has_user_config = {has_user_config} virtual_hosts = {virtual_hosts} has_session_id = {has_session_id} has_claims = {has_claims} virtual_host_id = {virtual_host_id}"
         );
-
-        let Some(downstream_session_id) = maybe_downstream_session else {
-            return Err(ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... downstream session id not created".into(),
-                data: None,
-            });
-        };
 
         let Some(user_config) = maybe_user_config else {
             return Err(ErrorData {
