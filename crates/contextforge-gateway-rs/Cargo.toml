@@ -33,5 +33,16 @@ rustls.workspace = true
 secrets-detection-plugin = ["dep:secrets_detection_rust"]
 test-plugins = ["dep:cpex-payload-marker", "dep:cpex-text-prefixer", "dep:cpex-tool-namespace"]
 
+[dev-dependencies]
+axum = "0.8"
+contextforge-gateway-rs-apis.workspace = true
+http.workspace = true
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
+openport = { version = "0.4.0", features = ["rand"] }
+redis.workspace = true
+reqwest.workspace = true
+rmp-serde.workspace = true
+serde_json.workspace = true
+
 [lints]
 workspace = true

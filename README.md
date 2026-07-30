@@ -102,6 +102,12 @@ Build the gateway with the secrets detection factory:
 cargo check -p contextforge-gateway-rs --features secrets-detection-plugin
 ```
 
+Run the ignored binary E2E smoke test. This starts `redis-server`, a test MCP backend, and the real gateway binary:
+
+```bash
+cargo +1.96 test -p contextforge-gateway-rs --features secrets-detection-plugin --test secrets_detection_e2e -- --ignored --nocapture
+```
+
 Register the runtime plugin config in Redis:
 
 ```bash
