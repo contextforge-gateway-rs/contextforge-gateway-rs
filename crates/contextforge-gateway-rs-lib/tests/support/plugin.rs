@@ -298,6 +298,424 @@ fn cmf_result_text(payload: &MessagePayload) -> String {
         .map_or_else(|| payload.message.get_text_content(), |result| text(&result))
 }
 
+pub(crate) const PROMPT_PRE_DENY_ERROR_CODE: i32 = -32011;
+pub(crate) const PROMPT_POST_DENY_ERROR_CODE: i32 = -32012;
+pub(crate) const REWRITTEN_PROMPT_TOPIC: &str = "rewritten-topic";
+
+#[derive(Default)]
+pub(crate) struct PromptObservations {
+    pub(crate) pre_calls: usize,
+    pub(crate) post_calls: usize,
+    pub(crate) pre_name: Option<String>,
+    pub(crate) pre_server_id: Option<String>,
+    pub(crate) pre_request_id: Option<String>,
+    pub(crate) post_request_id: Option<String>,
+    pub(crate) post_texts: Vec<String>,
+    pub(crate) post_prompt_names: Vec<String>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum PromptBehavior {
+    #[default]
+    Allow,
+    RewriteArguments,
+    DenyPre,
+    RewriteText,
+    DenyPost,
+    /// Renames every listed prompt. `prompts/list` exposure is read-only, so the client must still
+    /// receive the original names.
+    RewriteListNames,
+}
+
+/// Prompt hooks carry `PromptRequest` / `PromptResult` content parts rather than the tool parts
+/// [`TestPlugin`] handles. Pre and post are told apart by the CMF role — `User` on the request
+/// side, `Assistant` on the response side — which holds for both `prompts/get` and `prompts/list`.
+/// Content part alone does not work: a `prompts/list` post payload is also made of
+/// `PromptRequest` parts.
+pub(crate) struct PromptTestPlugin {
+    pub(crate) config: PluginConfig,
+    pub(crate) observations: Arc<Mutex<PromptObservations>>,
+    behavior: PromptBehavior,
+}
+
+impl PromptTestPlugin {
+    pub(crate) fn new(name: &str, hooks: Vec<&'static str>, behavior: PromptBehavior) -> Self {
+        Self {
+            config: PluginConfig {
+                name: name.to_owned(),
+                kind: "prompt-test".to_owned(),
+                hooks: hooks.into_iter().map(str::to_owned).collect(),
+                ..Default::default()
+            },
+            observations: Arc::new(Mutex::new(PromptObservations::default())),
+            behavior,
+        }
+    }
+
+    pub(crate) fn observations(&self) -> Arc<Mutex<PromptObservations>> {
+        Arc::clone(&self.observations)
+    }
+}
+
+#[async_trait]
+impl Plugin for PromptTestPlugin {
+    fn config(&self) -> &PluginConfig {
+        &self.config
+    }
+}
+
+impl HookHandler<CmfHook> for PromptTestPlugin {
+    async fn handle(
+        &self,
+        payload: &MessagePayload,
+        _extensions: &Extensions,
+        _ctx: &mut PluginContext,
+    ) -> PluginResult<MessagePayload> {
+        let is_post = payload.message.role == Role::Assistant;
+        let mut observations = self.observations.lock().expect("observations lock poisoned");
+        if is_post {
+            observations.post_calls += 1;
+            if let Some(result) = payload.message.get_prompt_results().first() {
+                observations.post_request_id = Some(result.prompt_request_id.clone());
+                // `prompts/get` carries text inside the rendered messages; a prompt-reference
+                // completion carries its values as top-level text parts.
+                observations.post_texts = result
+                    .messages
+                    .iter()
+                    .flat_map(|message| message.content.iter())
+                    .chain(payload.message.content.iter())
+                    .filter_map(|part| match part {
+                        ContentPart::Text { text } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect();
+            } else {
+                // `prompts/list` post: the listing arrives as one `PromptRequest` per prompt, with
+                // each description following as text.
+                let listed = payload.message.get_prompt_requests();
+                observations.post_request_id = listed.first().map(|request| request.prompt_request_id.clone());
+                observations.post_prompt_names = listed.iter().map(|request| request.name.clone()).collect();
+                observations.post_texts = payload
+                    .message
+                    .content
+                    .iter()
+                    .filter_map(|part| match part {
+                        ContentPart::Text { text } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect();
+            }
+        } else {
+            observations.pre_calls += 1;
+            if let Some(request) = payload.message.get_prompt_requests().first() {
+                observations.pre_name = Some(request.name.clone());
+                observations.pre_server_id.clone_from(&request.server_id);
+                observations.pre_request_id = Some(request.prompt_request_id.clone());
+            }
+        }
+        drop(observations);
+
+        match (is_post, self.behavior) {
+            (false, PromptBehavior::RewriteArguments) => {
+                let mut modified = payload.clone();
+                if let Some(ContentPart::PromptRequest { content }) =
+                    modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::PromptRequest { .. }))
+                {
+                    content.arguments = HashMap::from([("topic".to_owned(), json!(REWRITTEN_PROMPT_TOPIC))]);
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (false, PromptBehavior::DenyPre) => PluginResult::deny(
+                PluginViolation::new("prompt_pre_denied", "prompt pre denied")
+                    .with_proto_error_code(i64::from(PROMPT_PRE_DENY_ERROR_CODE)),
+            ),
+            (true, PromptBehavior::RewriteText) => {
+                let mut modified = payload.clone();
+                // `prompts/get` nests text inside the rendered messages; a prompt-reference
+                // completion carries its values as top-level text parts.
+                for part in &mut modified.message.content {
+                    match part {
+                        ContentPart::PromptResult { content } => {
+                            for message in &mut content.messages {
+                                for part in &mut message.content {
+                                    if let ContentPart::Text { text } = part {
+                                        *text = format!("redacted:{text}");
+                                    }
+                                }
+                            }
+                        },
+                        ContentPart::Text { text } => *text = format!("redacted:{text}"),
+                        _ => {},
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (true, PromptBehavior::RewriteListNames) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::PromptRequest { content } = part {
+                        content.name = format!("mutated-{}", content.name);
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (true, PromptBehavior::DenyPost) => PluginResult::deny(
+                PluginViolation::new("prompt_post_denied", "prompt post denied")
+                    .with_proto_error_code(i64::from(PROMPT_POST_DENY_ERROR_CODE)),
+            ),
+            _ => PluginResult::allow(),
+        }
+    }
+}
+
+pub(crate) struct PromptTestPluginFactory {
+    observations: Arc<Mutex<PromptObservations>>,
+    behavior: PromptBehavior,
+}
+
+impl PromptTestPluginFactory {
+    pub(crate) fn from_plugin(plugin: &PromptTestPlugin) -> Self {
+        Self { observations: Arc::clone(&plugin.observations), behavior: plugin.behavior }
+    }
+}
+
+impl PluginFactory for PromptTestPluginFactory {
+    fn create(&self, config: &PluginConfig) -> Result<PluginInstance, Box<PluginError>> {
+        let plugin = Arc::new(PromptTestPlugin {
+            config: config.clone(),
+            observations: Arc::clone(&self.observations),
+            behavior: self.behavior,
+        });
+        let handlers = config
+            .hooks
+            .iter()
+            .filter_map(|hook| {
+                let hook = match hook.as_str() {
+                    cmf_hook_names::PROMPT_PRE_FETCH => cmf_hook_names::PROMPT_PRE_FETCH,
+                    cmf_hook_names::PROMPT_POST_FETCH => cmf_hook_names::PROMPT_POST_FETCH,
+                    _ => return None,
+                };
+                Some((
+                    hook,
+                    Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
+                        as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
+                ))
+            })
+            .collect();
+        let plugin: Arc<dyn Plugin> = plugin;
+        Ok(PluginInstance { plugin, handlers })
+    }
+}
+
+pub(crate) const RESOURCE_PRE_DENY_ERROR_CODE: i32 = -32021;
+pub(crate) const RESOURCE_POST_DENY_ERROR_CODE: i32 = -32022;
+pub(crate) const REWRITTEN_RESOURCE_URI: &str = "rewritten://resource";
+
+#[derive(Default)]
+pub(crate) struct ResourceObservations {
+    pub(crate) pre_calls: usize,
+    pub(crate) post_calls: usize,
+    pub(crate) pre_uri: Option<String>,
+    pub(crate) pre_backend: Option<String>,
+    pub(crate) pre_request_id: Option<String>,
+    pub(crate) post_request_id: Option<String>,
+    pub(crate) post_uris: Vec<String>,
+    pub(crate) post_names: Vec<String>,
+    pub(crate) post_texts: Vec<String>,
+    pub(crate) post_contents: Vec<String>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum ResourceBehavior {
+    #[default]
+    Allow,
+    DenyPre,
+    DenyPost,
+    /// Rewrites the target URI of a subscribe/unsubscribe request.
+    RewriteUri,
+    /// Rewrites completion values, which arrive as top-level text parts.
+    RewriteText,
+    /// Rewrites `resources/read` text contents.
+    RewriteContent,
+    /// Rewrites every listed template URI. `resources/templates/list` exposure is read-only, so the
+    /// client must still receive the original URI templates.
+    RewriteListUris,
+}
+
+/// Resource hooks carry `ResourceRef` content parts. Pre and post are told apart by the CMF role,
+/// the same convention the prompt hooks use.
+pub(crate) struct ResourceTestPlugin {
+    pub(crate) config: PluginConfig,
+    pub(crate) observations: Arc<Mutex<ResourceObservations>>,
+    behavior: ResourceBehavior,
+}
+
+impl ResourceTestPlugin {
+    pub(crate) fn new(name: &str, hooks: Vec<&'static str>, behavior: ResourceBehavior) -> Self {
+        Self {
+            config: PluginConfig {
+                name: name.to_owned(),
+                kind: "resource-test".to_owned(),
+                hooks: hooks.into_iter().map(str::to_owned).collect(),
+                ..Default::default()
+            },
+            observations: Arc::new(Mutex::new(ResourceObservations::default())),
+            behavior,
+        }
+    }
+
+    pub(crate) fn observations(&self) -> Arc<Mutex<ResourceObservations>> {
+        Arc::clone(&self.observations)
+    }
+}
+
+#[async_trait]
+impl Plugin for ResourceTestPlugin {
+    fn config(&self) -> &PluginConfig {
+        &self.config
+    }
+}
+
+impl HookHandler<CmfHook> for ResourceTestPlugin {
+    async fn handle(
+        &self,
+        payload: &MessagePayload,
+        _extensions: &Extensions,
+        _ctx: &mut PluginContext,
+    ) -> PluginResult<MessagePayload> {
+        let is_post = payload.message.role == Role::Assistant;
+        let references = payload.message.get_resource_refs();
+        let mut observations = self.observations.lock().expect("observations lock poisoned");
+        if is_post {
+            observations.post_calls += 1;
+            let resources = payload.message.get_resources();
+            observations.post_request_id = references
+                .first()
+                .map(|item| item.resource_request_id.clone())
+                .or_else(|| resources.first().map(|item| item.resource_request_id.clone()));
+            observations.post_uris = references
+                .iter()
+                .map(|item| item.uri.clone())
+                .chain(resources.iter().map(|item| item.uri.clone()))
+                .collect();
+            observations.post_names = references.iter().filter_map(|item| item.name.clone()).collect();
+            observations.post_texts = payload
+                .message
+                .content
+                .iter()
+                .filter_map(|part| match part {
+                    ContentPart::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect();
+            observations.post_contents = resources.iter().filter_map(|item| item.content.clone()).collect();
+        } else {
+            observations.pre_calls += 1;
+            // Subscribe/unsubscribe payloads carry a `Resource`; listings carry `ResourceRef`.
+            let resources = payload.message.get_resources();
+            if let Some(resource) = resources.first() {
+                observations.pre_uri = Some(resource.uri.clone());
+                observations.pre_request_id = Some(resource.resource_request_id.clone());
+                observations.pre_backend =
+                    resource.annotations.get("backend").and_then(Value::as_str).map(str::to_owned);
+            } else if let Some(reference) = references.first() {
+                observations.pre_uri = Some(reference.uri.clone());
+                observations.pre_request_id = Some(reference.resource_request_id.clone());
+            }
+        }
+        drop(observations);
+
+        match (is_post, self.behavior) {
+            (false, ResourceBehavior::DenyPre) => PluginResult::deny(
+                PluginViolation::new("resource_pre_denied", "resource pre denied")
+                    .with_proto_error_code(i64::from(RESOURCE_PRE_DENY_ERROR_CODE)),
+            ),
+            (true, ResourceBehavior::DenyPost) => PluginResult::deny(
+                PluginViolation::new("resource_post_denied", "resource post denied")
+                    .with_proto_error_code(i64::from(RESOURCE_POST_DENY_ERROR_CODE)),
+            ),
+            (false, ResourceBehavior::RewriteUri) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::Resource { content } = part {
+                        REWRITTEN_RESOURCE_URI.clone_into(&mut content.uri);
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (true, ResourceBehavior::RewriteContent) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::Resource { content } = part
+                        && let Some(text) = &content.content
+                    {
+                        content.content = Some(format!("redacted:{text}"));
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (true, ResourceBehavior::RewriteText) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::Text { text } = part {
+                        *text = format!("redacted:{text}");
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (true, ResourceBehavior::RewriteListUris) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::ResourceRef { content } = part {
+                        content.uri = format!("mutated://{}", content.uri);
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            _ => PluginResult::allow(),
+        }
+    }
+}
+
+pub(crate) struct ResourceTestPluginFactory {
+    observations: Arc<Mutex<ResourceObservations>>,
+    behavior: ResourceBehavior,
+}
+
+impl ResourceTestPluginFactory {
+    pub(crate) fn from_plugin(plugin: &ResourceTestPlugin) -> Self {
+        Self { observations: Arc::clone(&plugin.observations), behavior: plugin.behavior }
+    }
+}
+
+impl PluginFactory for ResourceTestPluginFactory {
+    fn create(&self, config: &PluginConfig) -> Result<PluginInstance, Box<PluginError>> {
+        let plugin = Arc::new(ResourceTestPlugin {
+            config: config.clone(),
+            observations: Arc::clone(&self.observations),
+            behavior: self.behavior,
+        });
+        let handlers = config
+            .hooks
+            .iter()
+            .filter_map(|hook| {
+                let hook = match hook.as_str() {
+                    cmf_hook_names::RESOURCE_PRE_FETCH => cmf_hook_names::RESOURCE_PRE_FETCH,
+                    cmf_hook_names::RESOURCE_POST_FETCH => cmf_hook_names::RESOURCE_POST_FETCH,
+                    _ => return None,
+                };
+                Some((
+                    hook,
+                    Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
+                        as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
+                ))
+            })
+            .collect();
+        let plugin: Arc<dyn Plugin> = plugin;
+        Ok(PluginInstance { plugin, handlers })
+    }
+}
+
 pub(crate) struct TestPluginFactory {
     pub(crate) observations: Arc<Mutex<Observations>>,
     pub(crate) pre_behavior: PreBehavior,

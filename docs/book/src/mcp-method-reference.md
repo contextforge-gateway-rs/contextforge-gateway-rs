@@ -43,10 +43,15 @@ single-backend pass-through, or a multi-backend prefix:
 | Method | Behavior |
 | --- | --- |
 | `call_tool` | Resolves an exact control-plane alias first, then falls back to the single-versus-multi rule. It runs the optional plugin hooks, tracks progress, forwards the backend-local tool name, and propagates downstream cancellation. |
-| `read_resource` | Preserves a single-backend URI or strips a multi-backend prefix, then returns the selected backend's result. |
-| `subscribe`, `unsubscribe` | Apply the same resource-URI routing, track the downstream subscription, and forward or stop forwarding matching resource-update notifications. |
-| `get_prompt` | Preserves a single-backend prompt name or strips a multi-backend prefix, then returns the selected backend's result. |
-| `complete` | Applies the same routing to the prompt name or resource URI in `ref` and returns the selected backend's completion result. |
+| `read_resource` | Preserves a single-backend URI or strips a multi-backend prefix, then returns the selected backend's result. Runs the optional resource hooks, which may deny, rewrite the URI, or rewrite returned text contents. |
+| `subscribe`, `unsubscribe` | Apply the same resource-URI routing, track the downstream subscription, and forward or stop forwarding matching resource-update notifications. The optional resource pre hook may deny or rewrite the URI; the rewritten URI is both forwarded and tracked. Neither has a post hook, because both return an empty acknowledgement. |
+| `get_prompt` | Preserves a single-backend prompt name or strips a multi-backend prefix, then returns the selected backend's result. Runs the optional prompt hooks, which may deny, replace arguments, or rewrite message text. |
+| `complete` | Applies the same routing to the prompt name or resource URI in `ref` and returns the selected backend's completion result. Runs the optional prompt or resource hooks depending on the reference kind; the pre hook is deny-only and the post hook may rewrite completion values. |
+
+Fan-out methods also run hooks: `list_prompts`, `list_resources`, and `list_resource_templates`
+run their family's pre hook once before fan-out and the post hook once on the
+merged result. See [Plugins And Policy](plugins-and-policy.md) for the full
+hook contract.
 
 Routed failures are JSON-RPC errors: an identifier that cannot select a backend
 or an unavailable backend returns an internal error, and duplicate backend

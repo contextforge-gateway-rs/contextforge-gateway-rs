@@ -345,7 +345,7 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
 
     assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), text(&result));
     let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
-    assert_eq!("sum", backend_calls[0].tool_name);
+    assert_eq!("sum", backend_calls[0].name);
     assert_eq!(Some(&Value::from(REWRITTEN_SUM_A)), backend_calls[0].args.as_ref().and_then(|args| args.get("a")));
 
     let observations = observations.lock().expect("observations lock poisoned");

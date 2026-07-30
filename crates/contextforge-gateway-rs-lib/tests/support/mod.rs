@@ -23,9 +23,18 @@ pub(crate) use list_tools_gateway::{
     create_tls_gateway_with_four_tls_counters, plaintext_config,
 };
 pub(crate) use plugin::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, TestPlugin, TestPluginFactory,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_POST_DENY_ERROR_CODE, PROMPT_PRE_DENY_ERROR_CODE, PromptBehavior,
+    PromptTestPlugin, PromptTestPluginFactory, RESOURCE_POST_DENY_ERROR_CODE, RESOURCE_PRE_DENY_ERROR_CODE,
+    REWRITTEN_PROMPT_TOPIC, REWRITTEN_RESOURCE_URI, REWRITTEN_SUM_A, REWRITTEN_SUM_B, ResourceBehavior,
+    ResourceTestPlugin, ResourceTestPluginFactory, TestPlugin, TestPluginFactory,
 };
-pub(crate) use plugin_gateway::{RunningGateway, start_gateway, start_gateway_with_json_backend_responses};
-pub(crate) use runtime::{runtime_with_post, runtime_with_pre, runtime_with_pre_and_post};
+pub(crate) use plugin_gateway::{
+    COMPLETION_VALUES, PROMPT_DESCRIPTION, RESOURCE_DESCRIPTION, RESOURCE_TEXT, RESOURCE_URI, RunningGateway,
+    TEMPLATE_DESCRIPTION, TEMPLATE_URI, start_gateway, start_gateway_with_json_backend_responses,
+};
+pub(crate) use runtime::{
+    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin,
+    runtime_with_resource_plugin,
+};
 pub(crate) use tool::{error_code, sum_request, text};
 pub(crate) use user_config_store::MemoryUserConfigStore;

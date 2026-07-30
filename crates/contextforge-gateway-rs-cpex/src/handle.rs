@@ -13,7 +13,10 @@ use cpex::cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, ErrorCode},
+    model::{
+        CallToolRequestParams, CallToolResult, CompleteResult, ErrorCode, GetPromptRequestParams, GetPromptResult,
+        Prompt, ReadResourceResult, Resource as McpResource, ResourceTemplate,
+    },
     serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::task::JoinHandle;
@@ -21,7 +24,10 @@ use tokio::task::JoinHandle;
 use crate::{
     config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config},
     error::GatewayPluginRuntimeError,
-    hooks::{RuntimeHookError, RuntimeHookState, ToolPreCallResult},
+    hooks::{
+        CompletionRequest, CompletionTarget, PromptPreFetchResult, ResourcePreFetchResult, ResourceUriUpdate,
+        RuntimeHookError, RuntimeHookState, ToolPreCallResult,
+    },
     runtime::GatewayPluginRuntime,
 };
 
@@ -40,7 +46,9 @@ pub struct GatewayPluginRuntimeHandle {
     runtime: Arc<ArcSwap<RuntimeState>>,
 }
 
-struct RegistryToolCallState {
+/// Pins the runtime that ran a pre hook to its matching post hook, so a config reload mid-call
+/// cannot hand an in-flight request to a different plugin set.
+struct RegistryCallState {
     runtime: Arc<GatewayPluginRuntime>,
     state: Option<RuntimeHookState>,
 }
@@ -251,9 +259,9 @@ impl GatewayPluginRuntimeHandle {
             return Err(runtime_failed_error(state.as_ref()));
         };
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
-        if runtime.has_post_hook() {
+        if runtime.has_tool_post_hook() {
             let state = result.state.take();
-            result.state = Some(Arc::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
+            result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
         } else {
             result.state = None;
         }
@@ -266,8 +274,184 @@ impl GatewayPluginRuntimeHandle {
         response: CallToolResult,
         state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
-        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
             Some(state) => state.runtime.after_tool_call(tool_name, response, state.state.clone()).await,
+            None => Ok(response),
+        }
+    }
+
+    pub async fn before_complete(
+        &self,
+        request: &CompletionRequest<'_>,
+    ) -> Result<Option<RuntimeHookState>, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let pre_state = runtime.before_complete(request).await?;
+        Ok(runtime.has_completion_post_hook(request.target).then(|| {
+            Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state: pre_state }) as RuntimeHookState
+        }))
+    }
+
+    pub async fn after_complete(
+        &self,
+        target: CompletionTarget,
+        identifier: &str,
+        response: CompleteResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<CompleteResult, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_complete(target, identifier, response, state.state.clone()).await,
+            None => Ok(response),
+        }
+    }
+
+    pub async fn before_subscribe(&self, uri: &str, backend_name: &str) -> Result<ResourceUriUpdate, ErrorData> {
+        self.before_resource_subscription(uri, backend_name, "resource subscribe").await
+    }
+
+    pub async fn before_unsubscribe(&self, uri: &str, backend_name: &str) -> Result<ResourceUriUpdate, ErrorData> {
+        self.before_resource_subscription(uri, backend_name, "resource unsubscribe").await
+    }
+
+    async fn before_resource_subscription(
+        &self,
+        uri: &str,
+        backend_name: &str,
+        denied: &str,
+    ) -> Result<ResourceUriUpdate, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        runtime.before_resource_subscription(uri, backend_name, denied).await
+    }
+
+    pub async fn before_read_resource(
+        &self,
+        uri: &str,
+        backend_name: &str,
+    ) -> Result<ResourcePreFetchResult, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let mut result = runtime.before_read_resource(uri, backend_name).await?;
+        if runtime.has_resource_post_hook() {
+            let state = result.state.take();
+            result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
+        } else {
+            result.state = None;
+        }
+        Ok(result)
+    }
+
+    pub async fn after_read_resource(
+        &self,
+        response: ReadResourceResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_read_resource(response, state.state.clone()).await,
+            None => Ok(response),
+        }
+    }
+
+    pub async fn before_list_resources(&self) -> Result<Option<RuntimeHookState>, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let pre_state = runtime.before_list_resources().await?;
+        Ok(runtime.has_resource_post_hook().then(|| {
+            Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state: pre_state }) as RuntimeHookState
+        }))
+    }
+
+    pub async fn after_list_resources(
+        &self,
+        resources: &[McpResource],
+        state: Option<RuntimeHookState>,
+    ) -> Result<(), ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_list_resources(resources, state.state.clone()).await,
+            None => Ok(()),
+        }
+    }
+
+    pub async fn before_list_resource_templates(&self) -> Result<Option<RuntimeHookState>, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let pre_state = runtime.before_list_resource_templates().await?;
+        Ok(runtime.has_resource_post_hook().then(|| {
+            Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state: pre_state }) as RuntimeHookState
+        }))
+    }
+
+    pub async fn after_list_resource_templates(
+        &self,
+        templates: &[ResourceTemplate],
+        state: Option<RuntimeHookState>,
+    ) -> Result<(), ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_list_resource_templates(templates, state.state.clone()).await,
+            None => Ok(()),
+        }
+    }
+
+    pub async fn before_list_prompts(&self, cursor: Option<&str>) -> Result<Option<RuntimeHookState>, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let pre_state = runtime.before_list_prompts(cursor).await?;
+        Ok(runtime.has_prompt_post_hook().then(|| {
+            Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state: pre_state }) as RuntimeHookState
+        }))
+    }
+
+    pub async fn after_list_prompts(
+        &self,
+        prompts: &[Prompt],
+        state: Option<RuntimeHookState>,
+    ) -> Result<(), ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_list_prompts(prompts, state.state.clone()).await,
+            None => Ok(()),
+        }
+    }
+
+    pub async fn before_get_prompt(
+        &self,
+        request: &GetPromptRequestParams,
+        prompt_name: &str,
+        backend_name: &str,
+    ) -> Result<PromptPreFetchResult, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let mut result = runtime.before_get_prompt(request, prompt_name, backend_name).await?;
+        if runtime.has_prompt_post_hook() {
+            let state = result.state.take();
+            result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
+        } else {
+            result.state = None;
+        }
+        Ok(result)
+    }
+
+    pub async fn after_get_prompt(
+        &self,
+        prompt_name: &str,
+        response: GetPromptResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_get_prompt(prompt_name, response, state.state.clone()).await,
             None => Ok(response),
         }
     }
@@ -283,7 +467,7 @@ impl GatewayPluginRuntimeHandle {
     where
         T: Serialize + DeserializeOwned,
     {
-        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
             Some(state) => state.runtime.after_tool_event(tool_name, event, state.state.clone()).await,
             None => Ok(Some(event)),
         }
@@ -292,7 +476,7 @@ impl GatewayPluginRuntimeHandle {
 
 fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
     if let RuntimeState::Failed(error) = state {
-        tracing::warn!(%error, "rejecting tool call because CPEX runtime is failed");
+        tracing::warn!(%error, "rejecting MCP call because CPEX runtime is failed");
     }
     ErrorData { code: ErrorCode::INTERNAL_ERROR, message: "Runtime plugin reload failed".into(), data: None }
 }
@@ -320,6 +504,7 @@ mod tests {
     };
     use rmcp::model::{
         CallToolRequestParams, CallToolResult, ContentBlock, NumberOrString, ProgressNotificationParam, ProgressToken,
+        PromptMessage, Role as McpRole,
     };
     use serde_json::{Value, json};
     use tokio::sync::Mutex as TokioMutex;
@@ -329,11 +514,13 @@ mod tests {
     };
 
     use crate::config::LoadedRuntimePluginConfig;
-    use crate::{CmfPluginFactory, ToolArgumentsUpdate};
+    use crate::{CmfPluginFactory, PromptArgumentsUpdate, ToolArgumentsUpdate};
 
     use super::*;
 
     const TEST_MISSING_CONTEXT_ERROR_CODE: i64 = -32003;
+    const TEST_PROMPT_PRE_DENY_ERROR_CODE: i32 = -32011;
+    const TEST_PROMPT_POST_DENY_ERROR_CODE: i32 = -32012;
     const TEST_REWRITTEN_SUM_A: i64 = 10;
     const TEST_REWRITTEN_SUM_B: i64 = 20;
     const TEST_SHUTDOWN_RETRY_COUNT: usize = 20;
@@ -611,6 +798,331 @@ mod tests {
         }
     }
 
+    /// Prompt hooks share the CMF pipeline with tool hooks but carry `PromptRequest` /
+    /// `PromptResult` content parts, so this fixture discriminates on content part rather than
+    /// on message role.
+    #[derive(Clone, Copy, Default)]
+    enum PromptBehavior {
+        #[default]
+        Allow,
+        RewriteArguments,
+        DenyPre,
+        RewriteText,
+        DenyPost,
+        DropMessage,
+    }
+
+    #[derive(Default)]
+    struct PromptObservations {
+        pre_calls: usize,
+        post_calls: usize,
+        pre_name: Option<String>,
+        pre_server_id: Option<String>,
+        pre_request_id: Option<String>,
+        post_request_id: Option<String>,
+        post_texts: Vec<String>,
+    }
+
+    struct PromptTestPlugin {
+        config: PluginConfig,
+        observations: Arc<Mutex<PromptObservations>>,
+        behavior: PromptBehavior,
+    }
+
+    impl PromptTestPlugin {
+        fn new(behavior: PromptBehavior) -> Self {
+            Self {
+                config: PluginConfig {
+                    name: "prompt".to_owned(),
+                    kind: "prompt-test".to_owned(),
+                    hooks: vec![
+                        cmf_hook_names::PROMPT_PRE_FETCH.to_owned(),
+                        cmf_hook_names::PROMPT_POST_FETCH.to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                observations: Arc::new(Mutex::new(PromptObservations::default())),
+                behavior,
+            }
+        }
+
+        fn observations(&self) -> Arc<Mutex<PromptObservations>> {
+            Arc::clone(&self.observations)
+        }
+    }
+
+    #[async_trait]
+    impl Plugin for PromptTestPlugin {
+        fn config(&self) -> &PluginConfig {
+            &self.config
+        }
+    }
+
+    impl HookHandler<CmfHook> for PromptTestPlugin {
+        async fn handle(
+            &self,
+            payload: &MessagePayload,
+            _extensions: &Extensions,
+            _ctx: &mut PluginContext,
+        ) -> PluginResult<MessagePayload> {
+            let is_post = payload.message.role == Role::Assistant;
+            let mut observations = self.observations.lock().expect("observations lock poisoned");
+            if is_post {
+                observations.post_calls += 1;
+                if let Some(result) = payload.message.get_prompt_results().first() {
+                    observations.post_request_id = Some(result.prompt_request_id.clone());
+                    observations.post_texts = result
+                        .messages
+                        .iter()
+                        .flat_map(|message| message.content.iter())
+                        .filter_map(|part| match part {
+                            ContentPart::Text { text } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                }
+            } else {
+                observations.pre_calls += 1;
+                if let Some(request) = payload.message.get_prompt_requests().first() {
+                    observations.pre_name = Some(request.name.clone());
+                    observations.pre_server_id.clone_from(&request.server_id);
+                    observations.pre_request_id = Some(request.prompt_request_id.clone());
+                }
+            }
+            drop(observations);
+
+            match (is_post, self.behavior) {
+                (false, PromptBehavior::RewriteArguments) => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::PromptRequest { content }) = modified
+                        .message
+                        .content
+                        .iter_mut()
+                        .find(|part| matches!(part, ContentPart::PromptRequest { .. }))
+                    {
+                        content.arguments = HashMap::from([("topic".to_owned(), json!("rewritten"))]);
+                    }
+                    PluginResult::modify_payload(modified)
+                },
+                (false, PromptBehavior::DenyPre) => PluginResult::deny(
+                    PluginViolation::new("pre_denied", "prompt pre denied")
+                        .with_proto_error_code(i64::from(TEST_PROMPT_PRE_DENY_ERROR_CODE)),
+                ),
+                (true, PromptBehavior::RewriteText) => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::PromptResult { content }) = modified
+                        .message
+                        .content
+                        .iter_mut()
+                        .find(|part| matches!(part, ContentPart::PromptResult { .. }))
+                    {
+                        for message in &mut content.messages {
+                            for part in &mut message.content {
+                                if let ContentPart::Text { text } = part {
+                                    *text = format!("redacted:{text}");
+                                }
+                            }
+                        }
+                    }
+                    PluginResult::modify_payload(modified)
+                },
+                (true, PromptBehavior::DropMessage) => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::PromptResult { content }) = modified
+                        .message
+                        .content
+                        .iter_mut()
+                        .find(|part| matches!(part, ContentPart::PromptResult { .. }))
+                    {
+                        content.messages.clear();
+                    }
+                    PluginResult::modify_payload(modified)
+                },
+                (true, PromptBehavior::DenyPost) => PluginResult::deny(
+                    PluginViolation::new("post_denied", "prompt post denied")
+                        .with_proto_error_code(i64::from(TEST_PROMPT_POST_DENY_ERROR_CODE)),
+                ),
+                _ => PluginResult::allow(),
+            }
+        }
+    }
+
+    struct PromptTestPluginFactory {
+        observations: Arc<Mutex<PromptObservations>>,
+        behavior: PromptBehavior,
+    }
+
+    impl PluginFactory for PromptTestPluginFactory {
+        fn create(&self, config: &PluginConfig) -> Result<PluginInstance, Box<PluginError>> {
+            let plugin = Arc::new(PromptTestPlugin {
+                config: config.clone(),
+                observations: Arc::clone(&self.observations),
+                behavior: self.behavior,
+            });
+            let handlers = config
+                .hooks
+                .iter()
+                .filter_map(|hook| {
+                    let hook = match hook.as_str() {
+                        cmf_hook_names::PROMPT_PRE_FETCH => cmf_hook_names::PROMPT_PRE_FETCH,
+                        cmf_hook_names::PROMPT_POST_FETCH => cmf_hook_names::PROMPT_POST_FETCH,
+                        _ => return None,
+                    };
+                    Some((
+                        hook,
+                        Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
+                            as Arc<dyn AnyHookHandler>,
+                    ))
+                })
+                .collect();
+            let plugin: Arc<dyn Plugin> = plugin;
+            Ok(PluginInstance { plugin, handlers })
+        }
+    }
+
+    async fn prompt_runtime(behavior: PromptBehavior) -> (CpexRuntimeRegistry, Arc<Mutex<PromptObservations>>) {
+        let plugin = PromptTestPlugin::new(behavior);
+        let observations = plugin.observations();
+        let config = config_document(json!({
+            "plugins": [{
+                "name": plugin.config.name.clone(),
+                "kind": plugin.config.kind.clone(),
+                "hooks": plugin.config.hooks.clone(),
+            }]
+        }));
+        let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
+        runtime
+            .register_factory(
+                "prompt-test",
+                Box::new(PromptTestPluginFactory { observations: Arc::clone(&observations), behavior }),
+            )
+            .expect("prompt factory registers");
+        runtime.initialize().await.expect("prompt runtime initializes");
+        (runtime, observations)
+    }
+
+    fn prompt_request(topic: &str) -> GetPromptRequestParams {
+        GetPromptRequestParams::new("review")
+            .with_arguments(serde_json::Map::from_iter([("topic".to_owned(), json!(topic))]))
+    }
+
+    fn prompt_result(text: &str) -> GetPromptResult {
+        GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, text)])
+    }
+
+    fn prompt_text(result: &GetPromptResult) -> String {
+        result
+            .messages
+            .iter()
+            .filter_map(|message| match &message.content {
+                ContentBlock::Text(text) => Some(text.text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn prompt_pre_hook_sees_routed_name_and_backend() {
+        let (runtime, observations) = prompt_runtime(PromptBehavior::Allow).await;
+
+        let result = runtime
+            .handle()
+            .before_get_prompt(&prompt_request("weather"), "review", "backend-a")
+            .await
+            .expect("prompt pre hook runs");
+
+        assert!(matches!(result.arguments, PromptArgumentsUpdate::Unchanged));
+        let observations = observations.lock().expect("observations lock poisoned");
+        assert_eq!(1, observations.pre_calls);
+        assert_eq!(Some("review"), observations.pre_name.as_deref());
+        assert_eq!(Some("backend-a"), observations.pre_server_id.as_deref());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn prompt_pre_hook_replaces_arguments() {
+        let (runtime, _) = prompt_runtime(PromptBehavior::RewriteArguments).await;
+
+        let result = runtime
+            .handle()
+            .before_get_prompt(&prompt_request("weather"), "review", "backend-a")
+            .await
+            .expect("prompt pre hook runs");
+
+        let PromptArgumentsUpdate::Replace(Some(arguments)) = result.arguments else {
+            panic!("prompt arguments are replaced");
+        };
+        assert_eq!(Some(&json!("rewritten")), arguments.get("topic"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn denied_prompt_pre_hook_maps_violation_code() {
+        let (runtime, _) = prompt_runtime(PromptBehavior::DenyPre).await;
+
+        let error = expect_prompt_denied(
+            runtime.handle().before_get_prompt(&prompt_request("weather"), "review", "backend-a").await,
+        );
+
+        assert_eq!(ErrorCode(TEST_PROMPT_PRE_DENY_ERROR_CODE), error.code);
+        assert_eq!("Plugin denied prompt fetch", error.message);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn prompt_post_hook_rewrites_text_and_correlates_with_pre() {
+        let (runtime, observations) = prompt_runtime(PromptBehavior::RewriteText).await;
+
+        let pre = runtime
+            .handle()
+            .before_get_prompt(&prompt_request("weather"), "review", "backend-a")
+            .await
+            .expect("prompt pre hook runs");
+        let response = runtime
+            .handle()
+            .after_get_prompt("review", prompt_result("secret"), pre.state)
+            .await
+            .expect("prompt post hook runs");
+
+        assert_eq!("redacted:secret", prompt_text(&response));
+        let observations = observations.lock().expect("observations lock poisoned");
+        assert_eq!(1, observations.post_calls);
+        assert_eq!(observations.pre_request_id, observations.post_request_id);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn denied_prompt_post_hook_maps_violation_code() {
+        let (runtime, _) = prompt_runtime(PromptBehavior::DenyPost).await;
+
+        let pre = runtime
+            .handle()
+            .before_get_prompt(&prompt_request("weather"), "review", "backend-a")
+            .await
+            .expect("prompt pre hook runs");
+        let error = runtime
+            .handle()
+            .after_get_prompt("review", prompt_result("secret"), pre.state)
+            .await
+            .expect_err("prompt post deny is an error");
+
+        assert_eq!(ErrorCode(TEST_PROMPT_POST_DENY_ERROR_CODE), error.code);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn prompt_post_hook_rejects_structural_message_change() {
+        let (runtime, _) = prompt_runtime(PromptBehavior::DropMessage).await;
+
+        let pre = runtime
+            .handle()
+            .before_get_prompt(&prompt_request("weather"), "review", "backend-a")
+            .await
+            .expect("prompt pre hook runs");
+        let error = runtime
+            .handle()
+            .after_get_prompt("review", prompt_result("secret"), pre.state)
+            .await
+            .expect_err("dropping messages is rejected");
+
+        assert_eq!(ErrorCode::INVALID_PARAMS, error.code);
+    }
+
     fn sum_request(a: i64, b: i64) -> CallToolRequestParams {
         CallToolRequestParams::new("sum")
             .with_arguments(serde_json::Map::from_iter([("a".to_owned(), json!(a)), ("b".to_owned(), json!(b))]))
@@ -643,6 +1155,15 @@ mod tests {
                 })
             }).collect::<Vec<_>>()
         }))
+    }
+
+    /// `PromptPreFetchResult` carries an opaque `Arc<dyn Any>` state, so it cannot derive `Debug`
+    /// and `expect_err` is unavailable.
+    fn expect_prompt_denied(result: Result<PromptPreFetchResult, ErrorData>) -> ErrorData {
+        match result {
+            Ok(_) => panic!("prompt pre hook should deny"),
+            Err(error) => error,
+        }
     }
 
     fn expect_runtime_failed(result: Result<ToolPreCallResult, ErrorData>) -> ErrorData {
@@ -711,6 +1232,25 @@ mod tests {
             let error = runtime.initialize().await.expect_err("unsupported config is rejected");
 
             assert_eq!("runtime plugin config is unsupported", error.to_string());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn non_tool_mcp_hooks_are_accepted_config() {
+        for hook in [
+            cmf_hook_names::PROMPT_PRE_FETCH,
+            cmf_hook_names::PROMPT_POST_FETCH,
+            cmf_hook_names::RESOURCE_PRE_FETCH,
+            cmf_hook_names::RESOURCE_POST_FETCH,
+        ] {
+            let plugin = Arc::new(TestPlugin::new("non-tool", vec![hook]));
+            let config = plugin_config(&[Arc::clone(&plugin)]);
+            let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
+            runtime
+                .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+                .expect("test factory registers");
+
+            runtime.initialize().await.expect("non-tool MCP hook config initializes");
         }
     }
 

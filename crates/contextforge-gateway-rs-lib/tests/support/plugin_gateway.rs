@@ -15,9 +15,12 @@ use http::{HeaderMap, HeaderValue};
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation,
-        InitializeRequestParams, InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken,
-        ServerCapabilities,
+        CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
+        ContentBlock, ErrorCode, GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation,
+        InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
+        NumberOrString, PaginatedRequestParams, ProgressNotificationParam, ProgressToken, Prompt, PromptMessage,
+        ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Reference, Resource, ResourceContents,
+        ResourceTemplate, Role, ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
     },
     service::{RequestContext, Service},
     transport::{
@@ -33,18 +36,33 @@ use super::{MemoryUserConfigStore, token};
 
 static GATEWAY_PORT_LOCK: OnceLock<Arc<TokioMutex<()>>> = OnceLock::new();
 const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const PROMPT_DESCRIPTION: &str = "Reviews a topic";
+pub(crate) const TEMPLATE_URI: &str = "report://{id}/summary";
+pub(crate) const TEMPLATE_DESCRIPTION: &str = "A generated report";
+pub(crate) const COMPLETION_VALUES: [&str; 2] = ["alpha", "beta"];
+pub(crate) const RESOURCE_URI: &str = "report://42/summary";
+pub(crate) const RESOURCE_DESCRIPTION: &str = "A stored report";
+pub(crate) const RESOURCE_TEXT: &str = "quarterly numbers";
 const GATEWAY_PORT_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
 pub(crate) struct BackendObservation {
-    pub(crate) tool_name: String,
+    pub(crate) name: String,
     pub(crate) args: Option<Map<String, Value>>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) prompt_lists: Arc<StdMutex<usize>>,
+    pub(crate) template_lists: Arc<StdMutex<usize>>,
+    pub(crate) completions: Arc<StdMutex<Vec<String>>>,
+    pub(crate) reads: Arc<StdMutex<Vec<String>>>,
+    pub(crate) resource_lists: Arc<StdMutex<usize>>,
+    pub(crate) subscriptions: Arc<StdMutex<Vec<String>>>,
+    pub(crate) unsubscriptions: Arc<StdMutex<Vec<String>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
 }
 
@@ -59,8 +77,118 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("test-backend", "0.1.0")))
+        Ok(InitializeResult::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .enable_resources()
+                .enable_resources_subscribe()
+                .build(),
+        )
+        .with_server_info(Implementation::new("test-backend", "0.1.0")))
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        *self.state.prompt_lists.lock().expect("backend prompt lists lock poisoned") += 1;
+        Ok(ListPromptsResult::with_all_items(vec![Prompt::new("review", Some(PROMPT_DESCRIPTION), None)]))
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.state.subscriptions.lock().expect("backend subscriptions lock poisoned").push(request.uri.clone());
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.state.unsubscriptions.lock().expect("backend unsubscriptions lock poisoned").push(request.uri.clone());
+        Ok(())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        *self.state.resource_lists.lock().expect("backend resource lists lock poisoned") += 1;
+        Ok(ListResourcesResult::with_all_items(vec![
+            Resource::new(RESOURCE_URI, "report").with_description(RESOURCE_DESCRIPTION),
+        ]))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        self.state.reads.lock().expect("backend reads lock poisoned").push(request.uri.clone());
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(RESOURCE_TEXT, request.uri)]).into())
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        let identifier = match &request.r#ref {
+            Reference::Prompt(prompt) => prompt.name.clone(),
+            Reference::Resource(resource) => resource.uri.clone(),
+            _ => String::new(),
+        };
+        self.state.completions.lock().expect("backend completions lock poisoned").push(identifier);
+        let completion = CompletionInfo::new(COMPLETION_VALUES.iter().map(|value| (*value).to_owned()).collect())
+            .expect("completion values are within the MCP limit");
+        Ok(CompleteResult::new(completion))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        *self.state.template_lists.lock().expect("backend template lists lock poisoned") += 1;
+        Ok(ListResourceTemplatesResult::with_all_items(vec![
+            ResourceTemplate::new(TEMPLATE_URI, "report").with_description(TEMPLATE_DESCRIPTION),
+        ]))
+    }
+
+    /// Renders `review` from its `topic` argument so tests can prove a pre-hook argument rewrite
+    /// reached the backend, and prove a post-hook rewrite changed what the client received.
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        self.state
+            .prompts
+            .lock()
+            .expect("backend prompts lock poisoned")
+            .push(BackendObservation { name: request.name.clone(), args: request.arguments.clone() });
+
+        if request.name != "review" {
+            return Err(ErrorData {
+                code: ErrorCode::METHOD_NOT_FOUND,
+                message: format!("unknown prompt {}", request.name).into(),
+                data: None,
+            });
+        }
+        let topic = request
+            .arguments
+            .as_ref()
+            .and_then(|arguments| arguments.get("topic"))
+            .and_then(Value::as_str)
+            .unwrap_or("nothing");
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(Role::User, format!("review of {topic}"))]).into())
     }
 
     async fn call_tool(
@@ -72,7 +200,7 @@ impl ServerHandler for TestBackend {
             .calls
             .lock()
             .expect("backend calls lock poisoned")
-            .push(BackendObservation { tool_name: request.name.to_string(), args: request.arguments.clone() });
+            .push(BackendObservation { name: request.name.to_string(), args: request.arguments.clone() });
 
         let result: Result<CallToolResult, ErrorData> = match request.name.as_ref() {
             "sum" => {

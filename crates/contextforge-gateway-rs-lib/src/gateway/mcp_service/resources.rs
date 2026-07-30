@@ -1,3 +1,4 @@
+use contextforge_gateway_rs_cpex::ResourcePreFetchResult;
 use rmcp::{
     ErrorData, RoleServer,
     model::{
@@ -30,6 +31,14 @@ where
     let namespace_identifiers = virtual_host.backends.len() > 1;
 
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
+
+    // A listing has no single backend, so the pre hook runs once before fan-out as a deny gate and
+    // the post hook sees the merged, namespaced result. Both are read-only for this path.
+    let post_state = match &mcp_service.plugin_runtime {
+        Some(plugin_runtime) => plugin_runtime.before_list_resources().await?,
+        None => None,
+    };
+
     let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
     let responses = fan_out_list(
@@ -43,7 +52,12 @@ where
     )
     .await;
 
-    Ok(ListResourcesResult::with_all_items(merge_resources(responses, namespace_identifiers)))
+    let resources = merge_resources(responses, namespace_identifiers);
+    if let (Some(plugin_runtime), Some(post_state)) = (&mcp_service.plugin_runtime, post_state) {
+        plugin_runtime.after_list_resources(&resources, Some(post_state)).await?;
+    }
+
+    Ok(ListResourcesResult::with_all_items(resources))
 }
 
 pub(super) async fn read_resource<T>(
@@ -66,12 +80,26 @@ where
     )
     .await?;
 
+    // Hooks run after routing, so plugins see the backend-local URI and the backend that owns it.
+    let pre_result = match &mcp_service.plugin_runtime {
+        Some(plugin_runtime) => plugin_runtime.before_read_resource(&resource_uri, &service_name).await?,
+        None => ResourcePreFetchResult::unchanged(),
+    };
+    let post_state = pre_result.state;
+    let resource_uri = pre_result.uri.apply_to(resource_uri);
+
     let mut routed_request = request;
     routed_request.uri = resource_uri;
     let response = service
         .read_resource(routed_request)
         .await
         .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
+    let response = match (&mcp_service.plugin_runtime, post_state) {
+        (Some(plugin_runtime), Some(post_state)) => {
+            plugin_runtime.after_read_resource(response, Some(post_state)).await?
+        },
+        _ => response,
+    };
     info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
     Ok(response.into())
 }
@@ -89,6 +117,14 @@ where
     let namespace_identifiers = virtual_host.backends.len() > 1;
 
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
+
+    // A listing has no single backend, so the pre hook runs once before fan-out as a deny gate and
+    // the post hook sees the merged, namespaced result. Both are read-only for this path.
+    let post_state = match &mcp_service.plugin_runtime {
+        Some(plugin_runtime) => plugin_runtime.before_list_resource_templates().await?,
+        None => None,
+    };
+
     let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
     let responses = fan_out_list(
@@ -102,7 +138,12 @@ where
     )
     .await;
 
-    Ok(ListResourceTemplatesResult::with_all_items(merge_resource_templates(responses, namespace_identifiers)))
+    let templates = merge_resource_templates(responses, namespace_identifiers);
+    if let (Some(plugin_runtime), Some(post_state)) = (&mcp_service.plugin_runtime, post_state) {
+        plugin_runtime.after_list_resource_templates(&templates, Some(post_state)).await?;
+    }
+
+    Ok(ListResourceTemplatesResult::with_all_items(templates))
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
@@ -125,6 +166,17 @@ where
         "Routing problem... wrong resource name",
     )
     .await?;
+
+    // Hooks run after routing, so plugins see the backend-local URI and the backend that owns it.
+    // There is no post hook: `subscribe` returns an empty acknowledgement. The rewritten URI is
+    // used for tracking too, or a rewritten subscription would be tracked under a URI the backend
+    // never notifies about.
+    let resource_uri = match &mcp_service.plugin_runtime {
+        Some(plugin_runtime) => {
+            plugin_runtime.before_subscribe(&resource_uri, &service_name).await?.apply_to(resource_uri)
+        },
+        None => resource_uri,
+    };
 
     let mut routed_request = request;
     routed_request.uri = resource_uri.clone();
@@ -158,6 +210,15 @@ where
         "Routing problem... wrong resource name",
     )
     .await?;
+
+    // Same contract as `subscribe`: pre hook only, and the rewritten URI is what gets forwarded and
+    // untracked, so a rewritten subscribe and unsubscribe pair resolve to the same tracking key.
+    let resource_uri = match &mcp_service.plugin_runtime {
+        Some(plugin_runtime) => {
+            plugin_runtime.before_unsubscribe(&resource_uri, &service_name).await?.apply_to(resource_uri)
+        },
+        None => resource_uri,
+    };
 
     let mut routed_request = request;
     routed_request.uri = resource_uri.clone();

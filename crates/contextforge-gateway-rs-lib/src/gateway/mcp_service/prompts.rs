@@ -1,3 +1,4 @@
+use contextforge_gateway_rs_cpex::PromptPreFetchResult;
 use rmcp::{
     ErrorData, RoleServer,
     model::{GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
@@ -27,6 +28,17 @@ where
     let namespace_identifiers = virtual_host.backends.len() > 1;
 
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
+
+    // A listing has no single backend, so the pre hook runs once before fan-out as a deny gate and
+    // the post hook sees the merged, namespaced result. Both are read-only for this path.
+    let post_state = match &mcp_service.plugin_runtime {
+        Some(plugin_runtime) => {
+            let cursor = request.as_ref().and_then(|request| request.cursor.as_deref());
+            plugin_runtime.before_list_prompts(cursor).await?
+        },
+        None => None,
+    };
+
     let backend_transports: Vec<_> = session_manager.borrow_transports().await;
 
     let responses = fan_out_list(
@@ -40,7 +52,12 @@ where
     )
     .await;
 
-    Ok(ListPromptsResult::with_all_items(merge_prompts(responses, namespace_identifiers)))
+    let prompts = merge_prompts(responses, namespace_identifiers);
+    if let (Some(plugin_runtime), Some(post_state)) = (&mcp_service.plugin_runtime, post_state) {
+        plugin_runtime.after_list_prompts(&prompts, Some(post_state)).await?;
+    }
+
+    Ok(ListPromptsResult::with_all_items(prompts))
 }
 
 pub(super) async fn get_prompt<T>(
@@ -63,12 +80,27 @@ where
     )
     .await?;
 
+    // Hooks run after routing, so plugins see the backend-local prompt name and the backend that
+    // owns it, matching the `call_tool` contract.
+    let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name).await?
+    } else {
+        PromptPreFetchResult::unchanged()
+    };
+    let post_state = pre_result.state;
     let mut routed_request = request;
-    routed_request.name = prompt_name;
+    pre_result.arguments.apply_to_request(&mut routed_request, &prompt_name);
+
     let response = service
         .get_prompt(routed_request)
         .await
         .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
+    let response = match (&mcp_service.plugin_runtime, post_state) {
+        (Some(plugin_runtime), Some(post_state)) => {
+            plugin_runtime.after_get_prompt(&prompt_name, response, Some(post_state)).await?
+        },
+        _ => response,
+    };
     info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
     Ok(response.into())
 }
