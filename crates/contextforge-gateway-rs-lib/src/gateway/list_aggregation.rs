@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, HashSet}, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 
 use contextforge_gateway_rs_apis::user_store::VirtualHost;
 use rmcp::{
@@ -42,8 +45,8 @@ impl Default for GatewayCursor {
 /// issued by one list operation from being accepted by a different one.
 pub(super) fn decode_gateway_cursor(raw: Option<&str>, expected_op: &str) -> Result<GatewayCursor, ErrorData> {
     let Some(raw) = raw else { return Ok(GatewayCursor::default()) };
-    let cursor: GatewayCursor = serde_json::from_str(raw)
-        .map_err(|_| ErrorData::new(ErrorCode::INVALID_PARAMS, "invalid cursor", None))?;
+    let cursor: GatewayCursor =
+        serde_json::from_str(raw).map_err(|_| ErrorData::new(ErrorCode::INVALID_PARAMS, "invalid cursor", None))?;
     if cursor.op != expected_op {
         return Err(ErrorData::new(ErrorCode::INVALID_PARAMS, "cursor operation mismatch", None));
     }
@@ -331,7 +334,8 @@ mod tests {
         let mut result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
         result.next_cursor = Some("backend-page2".to_owned());
 
-        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
+        let (_, next_cursor) =
+            merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
         let raw = next_cursor.expect("should have a next cursor");
 
         let cursor: GatewayCursor = serde_json::from_str(&raw).expect("valid JSON");
@@ -345,7 +349,8 @@ mod tests {
         // next_cursor is None → backend is exhausted
         let result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
 
-        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
+        let (_, next_cursor) =
+            merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
         assert!(next_cursor.is_none(), "no cursor when all backends exhausted");
     }
 
@@ -369,11 +374,7 @@ mod tests {
         // Simulate an incoming cursor where both b1 and b2 had more pages.
         let incoming = GatewayCursor {
             op: "list_tools".to_owned(),
-            backends: [
-                ("b1".to_owned(), "b1-page2".to_owned()),
-                ("b2".to_owned(), "b2-page2".to_owned()),
-            ]
-            .into(),
+            backends: [("b1".to_owned(), "b1-page2".to_owned()), ("b2".to_owned(), "b2-page2".to_owned())].into(),
         };
         // b1 succeeds and is done (no next_cursor); b2 fails (absent from results).
         let b1_result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
@@ -381,7 +382,7 @@ mod tests {
 
         let raw = next_cursor.expect("b2 failure must produce a next cursor to retry");
         let cursor: GatewayCursor = serde_json::from_str(&raw).expect("valid JSON");
-        assert!(cursor.backends.get("b1").is_none(), "b1 exhausted itself — must not appear");
+        assert!(!cursor.backends.contains_key("b1"), "b1 exhausted itself — must not appear");
         assert_eq!(cursor.backends.get("b2").map(String::as_str), Some("b2-page2"), "b2 prior cursor preserved");
     }
 
@@ -392,7 +393,8 @@ mod tests {
         let virtual_host = test_virtual_host("b1");
         let mut result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
         result.next_cursor = Some("page2".to_owned());
-        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
+        let (_, next_cursor) =
+            merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
         let raw = next_cursor.expect("cursor present");
 
         // Presenting a list_tools cursor to list_prompts must fail.
