@@ -33,7 +33,7 @@ share one fanout path:
 | Identifiers | A single backend preserves upstream identifiers; multiple backends use the backend map-key prefix. Explicit control-plane tool aliases are returned exactly as configured. Resource templates apply the same single-versus-multi rule to both names and URI templates. |
 | Ordering | Merged output is sorted by name. |
 | Failures | Failed or unavailable backends are logged and omitted from the merged result. |
-| Pagination | One backend call per request and no downstream cursor; see [Known Gaps](mcp-routing-semantics.md#known-gaps). |
+| Pagination | Cursor-based, per the [MCP spec §Pagination](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/pagination). The gateway cursor is an opaque JSON token encoding each active backend's position. On the first request (no cursor) all backends are queried; on resume only backends with remaining pages are queried. An undecodable cursor returns `−32602 Invalid params`. See [Federated Pagination](mcp-routing-semantics.md#federated-pagination). |
 
 ## Routed Targeted Methods
 
