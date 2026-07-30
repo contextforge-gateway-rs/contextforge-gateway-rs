@@ -23,7 +23,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 # Keep dependencies here only when at least two workspace members inherit them.
 contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
 contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}
-rmcp = { version = "3.0.0-beta.3", features = [
+rmcp = { version = "3.0.1", features = [
     "server",
     "client",
     "auth",
