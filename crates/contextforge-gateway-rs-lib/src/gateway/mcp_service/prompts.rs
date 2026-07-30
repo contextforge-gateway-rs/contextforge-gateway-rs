@@ -36,28 +36,27 @@ where
         all_transports
     };
 
-    let responses =
-        fan_out_list(
-            backend_transports,
-            "list_prompts",
-            |response: &ListPromptsResult| response.prompts.len(),
-            |name, service| {
-                let cursor = gateway_cursor.backends.get(&name).cloned();
-                let req = request.clone();
-                async move {
-                    let backend_req = match cursor {
-                        Some(c) => {
-                            let mut r = req.unwrap_or_default();
-                            r.cursor = Some(c);
-                            Some(r)
-                        }
-                        None => req,
-                    };
-                    service.list_prompts(backend_req).await
-                }
-            },
-        )
-        .await;
+    let responses = fan_out_list(
+        backend_transports,
+        "list_prompts",
+        |response: &ListPromptsResult| response.prompts.len(),
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            let req = request.clone();
+            async move {
+                let backend_req = match cursor {
+                    Some(c) => {
+                        let mut r = req.unwrap_or_default();
+                        r.cursor = Some(c);
+                        Some(r)
+                    },
+                    None => req,
+                };
+                service.list_prompts(backend_req).await
+            }
+        },
+    )
+    .await;
 
     let (prompts, next_cursor) = merge_prompts(responses, namespace_identifiers);
     let mut result = ListPromptsResult::with_all_items(prompts);

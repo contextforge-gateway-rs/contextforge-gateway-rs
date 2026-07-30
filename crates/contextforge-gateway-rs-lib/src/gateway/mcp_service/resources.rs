@@ -52,7 +52,7 @@ where
                         let mut r = req.unwrap_or_default();
                         r.cursor = Some(c);
                         Some(r)
-                    }
+                    },
                     None => req,
                 };
                 service.list_resources(backend_req).await
@@ -132,7 +132,7 @@ where
                         let mut r = req.unwrap_or_default();
                         r.cursor = Some(c);
                         Some(r)
-                    }
+                    },
                     None => req,
                 };
                 service.list_resource_templates(backend_req).await

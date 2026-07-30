@@ -39,28 +39,27 @@ where
         all_transports
     };
 
-    let responses =
-        fan_out_list(
-            backend_transports,
-            "list_tools",
-            |response: &ListToolsResult| response.tools.len(),
-            |name, service| {
-                let cursor = gateway_cursor.backends.get(&name).cloned();
-                let req = request.clone();
-                async move {
-                    let backend_req = match cursor {
-                        Some(c) => {
-                            let mut r = req.unwrap_or_default();
-                            r.cursor = Some(c);
-                            Some(r)
-                        }
-                        None => req,
-                    };
-                    service.list_tools(backend_req).await
-                }
-            },
-        )
-        .await;
+    let responses = fan_out_list(
+        backend_transports,
+        "list_tools",
+        |response: &ListToolsResult| response.tools.len(),
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            let req = request.clone();
+            async move {
+                let backend_req = match cursor {
+                    Some(c) => {
+                        let mut r = req.unwrap_or_default();
+                        r.cursor = Some(c);
+                        Some(r)
+                    },
+                    None => req,
+                };
+                service.list_tools(backend_req).await
+            }
+        },
+    )
+    .await;
 
     let (tools, next_cursor) = merge_tools(responses, virtual_host);
     let mut result = ListToolsResult::with_all_items(tools);
