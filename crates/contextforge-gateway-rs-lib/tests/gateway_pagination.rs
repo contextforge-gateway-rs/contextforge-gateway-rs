@@ -39,15 +39,20 @@ fn backend_id(port: u16) -> String {
     format!("00000000-0000-0000-0000-{port:012}")
 }
 
-/// Start an axum MCP server at `port` serving a `PaginatingServer`.
-async fn serve_paginating_backend(port: u16) {
+/// Bind the TCP port for a backend; returns the ready listener.
+/// Call this *before* `tokio::spawn` so the port is reserved before the test proceeds.
+async fn bind_backend_port(port: u16) -> tokio::net::TcpListener {
+    tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await.expect("bind backend")
+}
+
+/// Start an axum MCP server on an already-bound listener serving a `PaginatingServer`.
+async fn serve_paginating_backend(listener: tokio::net::TcpListener) {
     let service = StreamableHttpService::new(
         || Ok(paginating_mock::PaginatingServer),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default(),
     );
     let router = axum::Router::new().route_service("/mcp", service);
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await.expect("bind backend");
     axum::serve(listener, router).await.expect("backend server");
 }
 
@@ -87,7 +92,8 @@ async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
     let user_config =
         UserConfig { virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends })]) };
 
-    tokio::spawn(serve_paginating_backend(backend_port));
+    let backend_listener = bind_backend_port(backend_port).await;
+    tokio::spawn(serve_paginating_backend(backend_listener));
     let gateway_url = start_gateway(config, virtual_host_id, user_config).await;
 
     let svc = connect_client(gateway_url, create_client(TEST_USER_ID)).await?;
@@ -139,8 +145,10 @@ async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
     let user_config =
         UserConfig { virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends })]) };
 
-    tokio::spawn(serve_paginating_backend(port_a));
-    tokio::spawn(serve_paginating_backend(port_b));
+    let listener_a = bind_backend_port(port_a).await;
+    let listener_b = bind_backend_port(port_b).await;
+    tokio::spawn(serve_paginating_backend(listener_a));
+    tokio::spawn(serve_paginating_backend(listener_b));
     let gateway_url = start_gateway(config, virtual_host_id, user_config).await;
 
     let svc = connect_client(gateway_url, create_client(TEST_USER_ID)).await?;

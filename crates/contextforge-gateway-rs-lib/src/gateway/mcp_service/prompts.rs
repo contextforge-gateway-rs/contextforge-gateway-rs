@@ -43,8 +43,17 @@ where
             |response: &ListPromptsResult| response.prompts.len(),
             |name, service| {
                 let cursor = gateway_cursor.backends.get(&name).cloned();
+                let req = request.clone();
                 async move {
-                    service.list_prompts(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)))).await
+                    let backend_req = match cursor {
+                        Some(c) => {
+                            let mut r = req.unwrap_or_default();
+                            r.cursor = Some(c);
+                            Some(r)
+                        }
+                        None => req,
+                    };
+                    service.list_prompts(backend_req).await
                 }
             },
         )

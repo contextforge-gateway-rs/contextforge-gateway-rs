@@ -46,8 +46,17 @@ where
             |response: &ListToolsResult| response.tools.len(),
             |name, service| {
                 let cursor = gateway_cursor.backends.get(&name).cloned();
+                let req = request.clone();
                 async move {
-                    service.list_tools(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)))).await
+                    let backend_req = match cursor {
+                        Some(c) => {
+                            let mut r = req.unwrap_or_default();
+                            r.cursor = Some(c);
+                            Some(r)
+                        }
+                        None => req,
+                    };
+                    service.list_tools(backend_req).await
                 }
             },
         )
