@@ -1,0 +1,21 @@
+# ContextForge Data Plane — Wiki
+
+This wiki captures durable project context and working preferences.
+Check this index at the start of a task to decide whether deeper context is needed,
+then follow only the links that are relevant.
+
+## Pages
+
+| File | What it covers |
+| --- | --- |
+| [project.md](project.md) | What the project is, goals, stakeholders, key modules, active work |
+| [preferences.md](preferences.md) | Working standards, code style, logging rules, AI interaction preferences |
+
+## Quick orientation
+
+- **Repo**: `contextforge-gateway-rs` — the Rust dataplane for ContextForge.
+- **Core invariant**: this crate is pure routing logic. No IAM, UI, or metrics storage.
+- **Protocol target**: MCP `2026-07-28` over Streamable HTTP. Legacy SSE paths are being removed.
+- **Architecture book**: [`docs/book/src/`](../../docs/book/src/) — read the relevant page before touching the hot path.
+- **Validation gate**: `cargo test` + `cargo clippy` must be clean before any change is done.
+- **System topology**: `client → nginx → [dataplane | control-plane]`; config flows from control-plane via `dataplane_publisher.py` → Redis → dataplane. See [project.md § System topology](project.md#system-topology).
