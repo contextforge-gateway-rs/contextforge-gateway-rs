@@ -92,61 +92,6 @@ Plugin configuration is stored in Redis at key `ContextForgeGatewayRuntimePlugin
 
 This integration currently passes only tool payloads. CPEX configs that enable route-based plugin selection, plugin directories, global policies/defaults, non-tool hooks, or plugin conditions are rejected in this PR. Redis write access to this key is a control-plane trust boundary because it controls which registered hooks run.
 
-### Secrets Detection Spike
-
-This spike feature registers the Rust-native secrets detection plugin from the sibling `cpex-plugins` checkout. The plugin must be compiled into the gateway before Redis config can activate it.
-
-Build the gateway with the secrets detection factory:
-
-```bash
-cargo check -p contextforge-gateway-rs --features secrets-detection-plugin
-```
-
-Run the ignored binary E2E smoke test. This starts `redis-server`, a test MCP backend, and the real gateway binary:
-
-```bash
-cargo +1.96 test -p contextforge-gateway-rs --features secrets-detection-plugin --test secrets_detection_e2e -- --ignored --nocapture
-```
-
-Register the runtime plugin config in Redis:
-
-```bash
-docker compose -f docker/docker-compose-local.yaml exec -T redis redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
-  "version": 1,
-  "cpex": {
-    "plugins": [
-      {
-        "name": "secrets-detection",
-        "kind": "validator/secrets-detection",
-        "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
-        "config": {
-          "redact": true,
-          "redaction_text": "[redacted]",
-          "block_on_detection": false
-        }
-      }
-    ]
-  }
-}'
-```
-
-Start the gateway with runtime plugins enabled:
-
-```bash
-cargo run --release --features secrets-detection-plugin --bin contextforge-gateway-rs -- \
-  --address 0.0.0.0:8001 \
-  --redis-port 6379 \
-  --redis-address 127.0.0.1 \
-  --token-verification-public-key assets/jwt.key.pub \
-  --token-verification-private-key assets/jwt.key \
-  --number-of-cpus 16 \
-  --redis-mode=plain-text \
-  --upstream-connection-mode=plain-text-or-tls \
-  --runtime-plugins-enabled true
-```
-
-Only `cmf.tool_pre_invoke` and `cmf.tool_post_invoke` are wired in this data-plane spike. Set `block_on_detection` to `true` to verify deny behavior before the backend receives the tool call.
-
 ### Payload Marker Demo
 
 This demo uses the `test-plugins` feature, which includes the demo plugin crates from `cpex-plugins-rs`. The plugin must be included in the gateway build before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
