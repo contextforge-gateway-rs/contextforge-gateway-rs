@@ -10,15 +10,13 @@ use contextforge_gateway_rs_lib::{Config, Gateway, Result, UserConfigStore, User
 use rmcp::{
     model::PaginatedRequestParams,
     transport::{
-        StreamableHttpServerConfig, StreamableHttpService,
-        streamable_http_server::session::local::LocalSessionManager,
+        StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
     },
 };
 use tracing::warn;
 
 use support::{
-    MemoryUserConfigStore, TEST_USER_ID, connect_client, create_client, create_ports, paginating_mock,
-    plaintext_config,
+    MemoryUserConfigStore, TEST_USER_ID, connect_client, create_client, create_ports, paginating_mock, plaintext_config,
 };
 
 /// Build a single-backend `BackendMCPGateway` pointed at `port`.
@@ -49,9 +47,7 @@ async fn serve_paginating_backend(port: u16) {
         StreamableHttpServerConfig::default(),
     );
     let router = axum::Router::new().route_service("/mcp", service);
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
-        .await
-        .expect("bind backend");
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await.expect("bind backend");
     axum::serve(listener, router).await.expect("backend server");
 }
 
@@ -60,9 +56,8 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
     let store = MemoryUserConfigStore::default();
     store.set_config(&User::new(TEST_USER_ID), &user_config).await.expect("set config");
 
-    let address = config.address.clone().expect("address required");
-    let gateway_url =
-        format!("http://{address}/contextforge-rs/servers/{virtual_host_id}/mcp");
+    let address = config.address.expect("address required");
+    let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_id}/mcp");
 
     let gateway = Gateway::builder()
         .with_config(config)
@@ -104,8 +99,7 @@ async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
     assert_eq!(page1_names, ["tool_alpha", "tool_beta"]);
 
     // Page 2
-    let cursor =
-        page1.next_cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)));
+    let cursor = page1.next_cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)));
     let page2 = svc.list_tools(cursor).await.expect("page 2");
     let page2_names: Vec<&str> = page2.tools.iter().map(|t| t.name.as_ref()).collect();
     assert!(page2.next_cursor.is_none(), "page 2 must be the final page");
@@ -157,8 +151,7 @@ async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
     assert_eq!(page1.tools.len(), 4, "page 1 should have 2 tools from each backend");
 
     // Page 2: both backends contribute their second page (1 tool each)
-    let cursor =
-        page1.next_cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)));
+    let cursor = page1.next_cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)));
     let page2 = svc.list_tools(cursor).await.expect("page 2");
     assert!(page2.next_cursor.is_none(), "page 2 must be the final page");
     assert_eq!(page2.tools.len(), 2, "page 2 should have 1 tool from each backend");
@@ -167,11 +160,7 @@ async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
     let mut all_names: Vec<_> = page1.tools.iter().chain(page2.tools.iter()).map(|t| t.name.clone()).collect();
     all_names.sort_unstable();
     all_names.dedup();
-    assert_eq!(
-        all_names.len(),
-        page1.tools.len() + page2.tools.len(),
-        "no duplicate tools across pages"
-    );
+    assert_eq!(all_names.len(), page1.tools.len() + page2.tools.len(), "no duplicate tools across pages");
 
     Ok(())
 }

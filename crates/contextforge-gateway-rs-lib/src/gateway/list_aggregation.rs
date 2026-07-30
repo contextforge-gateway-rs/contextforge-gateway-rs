@@ -4,8 +4,8 @@ use contextforge_gateway_rs_apis::user_store::VirtualHost;
 use rmcp::{
     ErrorData,
     model::{
-        ErrorCode, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
-        Prompt, Resource, ResourceTemplate, Tool,
+        ErrorCode, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, Prompt,
+        Resource, ResourceTemplate, Tool,
     },
 };
 use tracing::{info, warn};
@@ -26,8 +26,7 @@ pub(super) struct GatewayCursor {
 /// `None` means first page; an undecodable value returns `-32602 Invalid params`.
 pub(super) fn decode_gateway_cursor(raw: Option<&str>) -> Result<GatewayCursor, ErrorData> {
     let Some(raw) = raw else { return Ok(GatewayCursor::default()) };
-    serde_json::from_str(raw)
-        .map_err(|_| ErrorData::new(ErrorCode::INVALID_PARAMS, "invalid cursor", None))
+    serde_json::from_str(raw).map_err(|_| ErrorData::new(ErrorCode::INVALID_PARAMS, "invalid cursor", None))
 }
 
 /// Build the next gateway cursor from backends that returned a `next_cursor`.
@@ -36,10 +35,7 @@ fn encode_next_cursor(backends: HashMap<String, String>) -> Option<String> {
     if backends.is_empty() {
         return None;
     }
-    Some(
-        serde_json::to_string(&GatewayCursor { backends })
-            .expect("GatewayCursor is always serializable"),
-    )
+    Some(serde_json::to_string(&GatewayCursor { backends }).expect("GatewayCursor is always serializable"))
 }
 
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
@@ -244,8 +240,7 @@ mod tests {
     #[test]
     fn backend_next_cursor_is_preserved_in_gateway_cursor() {
         let virtual_host = test_virtual_host("b1");
-        let mut result =
-            ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
+        let mut result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
         result.next_cursor = Some("backend-page2".to_owned());
 
         let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host);

@@ -46,9 +46,7 @@ where
         |name, service| {
             let cursor = gateway_cursor.backends.get(&name).cloned();
             async move {
-                service
-                    .list_resources(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c))))
-                    .await
+                service.list_resources(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c)))).await
             }
         },
     )
@@ -120,9 +118,7 @@ where
             let cursor = gateway_cursor.backends.get(&name).cloned();
             async move {
                 service
-                    .list_resource_templates(
-                        cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c))),
-                    )
+                    .list_resource_templates(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c))))
                     .await
             }
         },
