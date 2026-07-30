@@ -10,7 +10,7 @@ use super::McpService;
 use crate::gateway::{
     backend_client::call_backend_tool,
     identifier_routing::{backend_forward_error, resolve_backend, resolve_tool_route},
-    list_aggregation::{fan_out_list, merge_tools},
+    list_aggregation::{decode_gateway_cursor, fan_out_list, merge_tools},
     mcp_call_validator::AuthorizedCallValidator,
     session_manager::SessionManager,
     session_store::UserSessionStore,
@@ -27,20 +27,37 @@ where
     let mcp_call_validator = AuthorizedCallValidator::new("list_tools", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
-    let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+    let all_transports: Vec<_> = session_manager.borrow_transports().await;
+
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    // On resume, skip backends already exhausted in the prior page.
+    // ponytail: topology changes between pages silently drop removed backends;
+    //           add a cursor version field if reconfiguration stability matters.
+    let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
+        all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
+    } else {
+        all_transports
+    };
 
     let responses = fan_out_list(
         backend_transports,
         "list_tools",
         |response: &ListToolsResult| response.tools.len(),
-        |service| {
-            let request = request.clone();
-            async move { service.list_tools(request).await }
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            async move {
+                service
+                    .list_tools(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c))))
+                    .await
+            }
         },
     )
     .await;
 
-    Ok(ListToolsResult::with_all_items(merge_tools(responses, virtual_host)))
+    let (tools, next_cursor) = merge_tools(responses, virtual_host);
+    let mut result = ListToolsResult::with_all_items(tools);
+    result.next_cursor = next_cursor;
+    Ok(result)
 }
 
 pub(super) async fn call_tool<T>(

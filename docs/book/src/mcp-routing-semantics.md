@@ -86,12 +86,26 @@ service for the principal and downstream session. Missing backends fail the
 call. Duplicate matches are treated as invalid session state and trigger
 backend cleanup.
 
-## Known Gaps
+## Federated Pagination
 
-Pagination is not complete. `list_tools`, `list_resources`, `list_prompts`,
-and `list_resource_templates` currently perform one backend call and return a
-merged response with no downstream cursor. Full parity needs to gather all
-backend pages or define a merged cursor strategy.
+All four list operations support cursor-based pagination across backends.
+
+The gateway wraps per-backend cursors inside its own opaque token (JSON serialised,
+treated as an opaque string by MCP clients per spec). On the first request (no cursor)
+every backend is queried. On a resume request the gateway decodes its cursor to
+recover per-backend positions, skips backends that have already been exhausted, and
+forwards each remaining backend its own cursor. Results from the current page are
+merged and sorted. A new gateway cursor is emitted when at least one backend still
+has more pages; the cursor is omitted once all backends are exhausted.
+
+An undecodable cursor returns `-32602 Invalid params` (MCP spec §Pagination).
+
+**Known limitation:** if the backend set changes between pages (reconfiguration), the
+cursor for a removed backend is silently dropped and its remaining items are not
+returned. Add a cursor version field if stability under live reconfiguration is
+required.
+
+## Known Gaps
 
 Streaming/SSE behavior is also still a tracked design area. The target is to
 stream downstream as backend chunks arrive while preserving plugin behavior,

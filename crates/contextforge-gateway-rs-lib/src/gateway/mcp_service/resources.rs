@@ -11,7 +11,7 @@ use tracing::info;
 use super::McpService;
 use crate::gateway::{
     identifier_routing::{backend_forward_error, route_identifier_to_backend},
-    list_aggregation::{fan_out_list, merge_resource_templates, merge_resources},
+    list_aggregation::{decode_gateway_cursor, fan_out_list, merge_resource_templates, merge_resources},
     mcp_call_validator::AuthorizedCallValidator,
     session_manager::SessionManager,
     session_store::UserSessionStore,
@@ -30,20 +30,34 @@ where
     let namespace_identifiers = virtual_host.backends.len() > 1;
 
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
-    let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+    let all_transports: Vec<_> = session_manager.borrow_transports().await;
+
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
+        all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
+    } else {
+        all_transports
+    };
 
     let responses = fan_out_list(
         backend_transports,
         "list_resources",
         |response: &ListResourcesResult| response.resources.len(),
-        |service| {
-            let request = request.clone();
-            async move { service.list_resources(request).await }
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            async move {
+                service
+                    .list_resources(cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c))))
+                    .await
+            }
         },
     )
     .await;
 
-    Ok(ListResourcesResult::with_all_items(merge_resources(responses, namespace_identifiers)))
+    let (resources, next_cursor) = merge_resources(responses, namespace_identifiers);
+    let mut result = ListResourcesResult::with_all_items(resources);
+    result.next_cursor = next_cursor;
+    Ok(result)
 }
 
 pub(super) async fn read_resource<T>(
@@ -89,20 +103,36 @@ where
     let namespace_identifiers = virtual_host.backends.len() > 1;
 
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
-    let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+    let all_transports: Vec<_> = session_manager.borrow_transports().await;
+
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
+        all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
+    } else {
+        all_transports
+    };
 
     let responses = fan_out_list(
         backend_transports,
         "list_resource_templates",
         |response: &ListResourceTemplatesResult| response.resource_templates.len(),
-        |service| {
-            let request = request.clone();
-            async move { service.list_resource_templates(request).await }
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            async move {
+                service
+                    .list_resource_templates(
+                        cursor.map(|c| PaginatedRequestParams::default().with_cursor(Some(c))),
+                    )
+                    .await
+            }
         },
     )
     .await;
 
-    Ok(ListResourceTemplatesResult::with_all_items(merge_resource_templates(responses, namespace_identifiers)))
+    let (resource_templates, next_cursor) = merge_resource_templates(responses, namespace_identifiers);
+    let mut result = ListResourceTemplatesResult::with_all_items(resource_templates);
+    result.next_cursor = next_cursor;
+    Ok(result)
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
