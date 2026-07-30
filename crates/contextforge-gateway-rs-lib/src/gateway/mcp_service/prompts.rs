@@ -29,7 +29,7 @@ where
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
     let all_transports: Vec<_> = session_manager.borrow_transports().await;
 
-    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()), "list_prompts")?;
     let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
         all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
     } else {
@@ -58,7 +58,7 @@ where
     )
     .await;
 
-    let (prompts, next_cursor) = merge_prompts(responses, namespace_identifiers);
+    let (prompts, next_cursor) = merge_prompts(responses, namespace_identifiers, &gateway_cursor, "list_prompts");
     let mut result = ListPromptsResult::with_all_items(prompts);
     result.next_cursor = next_cursor;
     Ok(result)

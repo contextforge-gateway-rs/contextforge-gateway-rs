@@ -29,7 +29,7 @@ where
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
     let all_transports: Vec<_> = session_manager.borrow_transports().await;
 
-    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()), "list_tools")?;
     // On resume, skip backends already exhausted in the prior page.
     // ponytail: topology changes between pages silently drop removed backends;
     //           add a cursor version field if reconfiguration stability matters.
@@ -61,7 +61,7 @@ where
     )
     .await;
 
-    let (tools, next_cursor) = merge_tools(responses, virtual_host);
+    let (tools, next_cursor) = merge_tools(responses, virtual_host, &gateway_cursor, "list_tools");
     let mut result = ListToolsResult::with_all_items(tools);
     result.next_cursor = next_cursor;
     Ok(result)

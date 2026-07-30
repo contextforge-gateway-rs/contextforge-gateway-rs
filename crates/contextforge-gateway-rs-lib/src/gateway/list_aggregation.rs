@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future};
+use std::{collections::{HashMap, HashSet}, future::Future};
 
 use contextforge_gateway_rs_apis::user_store::VirtualHost;
 use rmcp::{
@@ -16,26 +16,50 @@ use super::{
 };
 
 /// Per-backend cursor state encoded as the gateway's opaque cursor token.
-/// Only backends that still have pages appear in `backends`; absent == exhausted.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+///
+/// `op` names the list operation that issued this cursor (e.g. `"list_tools"`); a cursor
+/// presented to a different operation is rejected with `-32602`.
+///
+/// Only backends that still have pages **or that failed mid-page** appear in `backends`.
+/// Backends that returned `next_cursor = None` are absent (truly exhausted).
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct GatewayCursor {
+    pub(super) op: String,
     pub(super) backends: HashMap<String, String>,
+}
+
+impl Default for GatewayCursor {
+    /// Returns the first-page sentinel. `op` is empty; it is never validated because
+    /// `decode_gateway_cursor` returns this value only when `raw` is `None`.
+    fn default() -> Self {
+        Self { op: String::new(), backends: HashMap::new() }
+    }
 }
 
 /// Decode an incoming gateway cursor (raw JSON, opaque to MCP clients).
 /// `None` means first page; an undecodable value returns `-32602 Invalid params`.
-pub(super) fn decode_gateway_cursor(raw: Option<&str>) -> Result<GatewayCursor, ErrorData> {
+/// `expected_op` must match the `op` field stored in the cursor, preventing a cursor
+/// issued by one list operation from being accepted by a different one.
+pub(super) fn decode_gateway_cursor(raw: Option<&str>, expected_op: &str) -> Result<GatewayCursor, ErrorData> {
     let Some(raw) = raw else { return Ok(GatewayCursor::default()) };
-    serde_json::from_str(raw).map_err(|_| ErrorData::new(ErrorCode::INVALID_PARAMS, "invalid cursor", None))
+    let cursor: GatewayCursor = serde_json::from_str(raw)
+        .map_err(|_| ErrorData::new(ErrorCode::INVALID_PARAMS, "invalid cursor", None))?;
+    if cursor.op != expected_op {
+        return Err(ErrorData::new(ErrorCode::INVALID_PARAMS, "cursor operation mismatch", None));
+    }
+    Ok(cursor)
 }
 
-/// Build the next gateway cursor from backends that returned a `next_cursor`.
+/// Build the next gateway cursor from backends that still have pages.
 /// Returns `None` (= no more pages) when all backends are exhausted.
-fn encode_next_cursor(backends: HashMap<String, String>) -> Option<String> {
+fn encode_next_cursor(op: &str, backends: HashMap<String, String>) -> Option<String> {
     if backends.is_empty() {
         return None;
     }
-    Some(serde_json::to_string(&GatewayCursor { backends }).expect("GatewayCursor is always serializable"))
+    Some(
+        serde_json::to_string(&GatewayCursor { op: op.to_owned(), backends })
+            .expect("GatewayCursor is always serializable"),
+    )
 }
 
 /// Fans a paginated list request out to every connected backend concurrently, logs each response,
@@ -89,35 +113,65 @@ fn log_backend_response<T, E: std::fmt::Debug>(
     }
 }
 
+/// Merges tool listings from multiple backends into a single sorted list.
+///
+/// `op` is the list operation name used to tag the outgoing cursor.
+/// `incoming_cursor` is used to re-emit the prior cursor position for any backend
+/// that was expected to continue but failed on this page (transient failure ≠ exhaustion).
 pub(super) fn merge_tools(
     tools: Vec<(String, ListToolsResult)>,
     virtual_host: &VirtualHost,
+    incoming_cursor: &GatewayCursor,
+    op: &str,
 ) -> (Vec<Tool>, Option<String>) {
-    let mut next_backends = HashMap::new();
+    let mut next_backends: HashMap<String, String> = HashMap::new();
+    let mut succeeded: HashSet<&str> = HashSet::new();
     let mut merged = Vec::new();
-    for (backend_name, result) in tools {
-        if let Some(c) = result.next_cursor {
-            next_backends.insert(backend_name.clone(), c);
+    for (backend_name, result) in &tools {
+        succeeded.insert(backend_name.as_str());
+        if let Some(c) = &result.next_cursor {
+            next_backends.insert(backend_name.clone(), c.clone());
         }
+    }
+    // Preserve cursor for backends that were expected to continue but failed this page.
+    for (backend_name, prior_cursor) in &incoming_cursor.backends {
+        if !succeeded.contains(backend_name.as_str()) {
+            next_backends.entry(backend_name.clone()).or_insert_with(|| prior_cursor.clone());
+        }
+    }
+    for (backend_name, result) in tools {
         for mut tool in result.tools {
             tool.name = exposed_tool_name(virtual_host, &backend_name, &tool.name).into();
             merged.push(tool);
         }
     }
     merged.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    (merged, encode_next_cursor(next_backends))
+    (merged, encode_next_cursor(op, next_backends))
 }
 
+/// Merges resource listings from multiple backends into a single sorted list.
+/// See `merge_tools` for the `incoming_cursor` / `op` contract.
 pub(super) fn merge_resources(
     resources: Vec<(String, ListResourcesResult)>,
     namespace_identifiers: bool,
+    incoming_cursor: &GatewayCursor,
+    op: &str,
 ) -> (Vec<Resource>, Option<String>) {
-    let mut next_backends = HashMap::new();
+    let mut next_backends: HashMap<String, String> = HashMap::new();
+    let mut succeeded: HashSet<&str> = HashSet::new();
     let mut merged = Vec::new();
-    for (backend_name, result) in resources {
-        if let Some(c) = result.next_cursor {
-            next_backends.insert(backend_name.clone(), c);
+    for (backend_name, result) in &resources {
+        succeeded.insert(backend_name.as_str());
+        if let Some(c) = &result.next_cursor {
+            next_backends.insert(backend_name.clone(), c.clone());
         }
+    }
+    for (backend_name, prior_cursor) in &incoming_cursor.backends {
+        if !succeeded.contains(backend_name.as_str()) {
+            next_backends.entry(backend_name.clone()).or_insert_with(|| prior_cursor.clone());
+        }
+    }
+    for (backend_name, result) in resources {
         for mut resource in result.resources {
             if namespace_identifiers {
                 resource.name = prefixed_name(&backend_name, &resource.name);
@@ -127,19 +181,32 @@ pub(super) fn merge_resources(
         }
     }
     merged.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    (merged, encode_next_cursor(next_backends))
+    (merged, encode_next_cursor(op, next_backends))
 }
 
+/// Merges resource-template listings from multiple backends into a single sorted list.
+/// See `merge_tools` for the `incoming_cursor` / `op` contract.
 pub(super) fn merge_resource_templates(
     templates: Vec<(String, ListResourceTemplatesResult)>,
     namespace_identifiers: bool,
+    incoming_cursor: &GatewayCursor,
+    op: &str,
 ) -> (Vec<ResourceTemplate>, Option<String>) {
-    let mut next_backends = HashMap::new();
+    let mut next_backends: HashMap<String, String> = HashMap::new();
+    let mut succeeded: HashSet<&str> = HashSet::new();
     let mut merged = Vec::new();
-    for (backend_name, result) in templates {
-        if let Some(c) = result.next_cursor {
-            next_backends.insert(backend_name.clone(), c);
+    for (backend_name, result) in &templates {
+        succeeded.insert(backend_name.as_str());
+        if let Some(c) = &result.next_cursor {
+            next_backends.insert(backend_name.clone(), c.clone());
         }
+    }
+    for (backend_name, prior_cursor) in &incoming_cursor.backends {
+        if !succeeded.contains(backend_name.as_str()) {
+            next_backends.entry(backend_name.clone()).or_insert_with(|| prior_cursor.clone());
+        }
+    }
+    for (backend_name, result) in templates {
         for mut template in result.resource_templates {
             if namespace_identifiers {
                 template.name = prefixed_name(&backend_name, &template.name);
@@ -149,19 +216,32 @@ pub(super) fn merge_resource_templates(
         }
     }
     merged.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    (merged, encode_next_cursor(next_backends))
+    (merged, encode_next_cursor(op, next_backends))
 }
 
+/// Merges prompt listings from multiple backends into a single sorted list.
+/// See `merge_tools` for the `incoming_cursor` / `op` contract.
 pub(super) fn merge_prompts(
     prompts: Vec<(String, ListPromptsResult)>,
     namespace_identifiers: bool,
+    incoming_cursor: &GatewayCursor,
+    op: &str,
 ) -> (Vec<Prompt>, Option<String>) {
-    let mut next_backends = HashMap::new();
+    let mut next_backends: HashMap<String, String> = HashMap::new();
+    let mut succeeded: HashSet<&str> = HashSet::new();
     let mut merged = Vec::new();
-    for (backend_name, result) in prompts {
-        if let Some(c) = result.next_cursor {
-            next_backends.insert(backend_name.clone(), c);
+    for (backend_name, result) in &prompts {
+        succeeded.insert(backend_name.as_str());
+        if let Some(c) = &result.next_cursor {
+            next_backends.insert(backend_name.clone(), c.clone());
         }
+    }
+    for (backend_name, prior_cursor) in &incoming_cursor.backends {
+        if !succeeded.contains(backend_name.as_str()) {
+            next_backends.entry(backend_name.clone()).or_insert_with(|| prior_cursor.clone());
+        }
+    }
+    for (backend_name, result) in prompts {
         for mut prompt in result.prompts {
             if namespace_identifiers {
                 prompt.name = prefixed_name(&backend_name, &prompt.name);
@@ -170,7 +250,7 @@ pub(super) fn merge_prompts(
         }
     }
     merged.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    (merged, encode_next_cursor(next_backends))
+    (merged, encode_next_cursor(op, next_backends))
 }
 
 #[cfg(test)]
@@ -203,6 +283,8 @@ mod tests {
                 ListToolsResult::with_all_items(vec![Tool::new("test_simple_text", "", serde_json::Map::new())]),
             )],
             &virtual_host,
+            &GatewayCursor::default(),
+            "list_tools",
         );
         let (prompts, _) = merge_prompts(
             vec![(
@@ -210,6 +292,8 @@ mod tests {
                 ListPromptsResult::with_all_items(vec![Prompt::new("test_prompt", None::<String>, None)]),
             )],
             false,
+            &GatewayCursor::default(),
+            "list_prompts",
         );
         let (resources, _) = merge_resources(
             vec![(
@@ -217,6 +301,8 @@ mod tests {
                 ListResourcesResult::with_all_items(vec![Resource::new("test://resource", "test_resource")]),
             )],
             false,
+            &GatewayCursor::default(),
+            "list_resources",
         );
         let (templates, _) = merge_resource_templates(
             vec![(
@@ -227,6 +313,8 @@ mod tests {
                 )]),
             )],
             false,
+            &GatewayCursor::default(),
+            "list_resource_templates",
         );
 
         assert_eq!("test_simple_text", tools[0].name);
@@ -243,10 +331,11 @@ mod tests {
         let mut result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
         result.next_cursor = Some("backend-page2".to_owned());
 
-        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host);
+        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
         let raw = next_cursor.expect("should have a next cursor");
 
         let cursor: GatewayCursor = serde_json::from_str(&raw).expect("valid JSON");
+        assert_eq!(cursor.op, "list_tools");
         assert_eq!(cursor.backends.get("b1").map(String::as_str), Some("backend-page2"));
     }
 
@@ -256,19 +345,60 @@ mod tests {
         // next_cursor is None → backend is exhausted
         let result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
 
-        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host);
+        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
         assert!(next_cursor.is_none(), "no cursor when all backends exhausted");
     }
 
     #[test]
     fn invalid_cursor_returns_invalid_params_error() {
-        let err = decode_gateway_cursor(Some("not-json!")).unwrap_err();
+        let err = decode_gateway_cursor(Some("not-json!"), "list_tools").unwrap_err();
         assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
     }
 
     #[test]
     fn none_cursor_returns_default_empty_gateway_cursor() {
-        let cursor = decode_gateway_cursor(None).expect("None is a valid first-page indicator");
+        let cursor = decode_gateway_cursor(None, "list_tools").expect("None is a valid first-page indicator");
         assert!(cursor.backends.is_empty());
+    }
+
+    // Finding 1: a backend that fails mid-page keeps its prior cursor position so the
+    // client can reach its remaining items on the next page.
+    #[test]
+    fn failed_backend_cursor_preserved_across_page() {
+        let virtual_host = test_virtual_host("b1");
+        // Simulate an incoming cursor where both b1 and b2 had more pages.
+        let incoming = GatewayCursor {
+            op: "list_tools".to_owned(),
+            backends: [
+                ("b1".to_owned(), "b1-page2".to_owned()),
+                ("b2".to_owned(), "b2-page2".to_owned()),
+            ]
+            .into(),
+        };
+        // b1 succeeds and is done (no next_cursor); b2 fails (absent from results).
+        let b1_result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
+        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), b1_result)], &virtual_host, &incoming, "list_tools");
+
+        let raw = next_cursor.expect("b2 failure must produce a next cursor to retry");
+        let cursor: GatewayCursor = serde_json::from_str(&raw).expect("valid JSON");
+        assert!(cursor.backends.get("b1").is_none(), "b1 exhausted itself — must not appear");
+        assert_eq!(cursor.backends.get("b2").map(String::as_str), Some("b2-page2"), "b2 prior cursor preserved");
+    }
+
+    // Finding 2: a cursor issued by one list operation must be rejected when presented
+    // to a different operation, returning -32602.
+    #[test]
+    fn cross_operation_cursor_rejected() {
+        let virtual_host = test_virtual_host("b1");
+        let mut result = ListToolsResult::with_all_items(vec![Tool::new("t1", "", serde_json::Map::new())]);
+        result.next_cursor = Some("page2".to_owned());
+        let (_, next_cursor) = merge_tools(vec![("b1".to_owned(), result)], &virtual_host, &GatewayCursor::default(), "list_tools");
+        let raw = next_cursor.expect("cursor present");
+
+        // Presenting a list_tools cursor to list_prompts must fail.
+        let err = decode_gateway_cursor(Some(&raw), "list_prompts").unwrap_err();
+        assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
+        // Presenting it to its own operation succeeds.
+        assert!(decode_gateway_cursor(Some(&raw), "list_tools").is_ok());
     }
 }

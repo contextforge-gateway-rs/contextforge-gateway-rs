@@ -32,7 +32,7 @@ where
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
     let all_transports: Vec<_> = session_manager.borrow_transports().await;
 
-    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()), "list_resources")?;
     let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
         all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
     } else {
@@ -61,7 +61,7 @@ where
     )
     .await;
 
-    let (resources, next_cursor) = merge_resources(responses, namespace_identifiers);
+    let (resources, next_cursor) = merge_resources(responses, namespace_identifiers, &gateway_cursor, "list_resources");
     let mut result = ListResourcesResult::with_all_items(resources);
     result.next_cursor = next_cursor;
     Ok(result)
@@ -112,7 +112,7 @@ where
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
     let all_transports: Vec<_> = session_manager.borrow_transports().await;
 
-    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()))?;
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()), "list_resource_templates")?;
     let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
         all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
     } else {
@@ -141,7 +141,7 @@ where
     )
     .await;
 
-    let (resource_templates, next_cursor) = merge_resource_templates(responses, namespace_identifiers);
+    let (resource_templates, next_cursor) = merge_resource_templates(responses, namespace_identifiers, &gateway_cursor, "list_resource_templates");
     let mut result = ListResourceTemplatesResult::with_all_items(resource_templates);
     result.next_cursor = next_cursor;
     Ok(result)
