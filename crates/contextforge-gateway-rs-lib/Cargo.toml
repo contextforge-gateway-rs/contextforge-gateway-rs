@@ -53,6 +53,7 @@ with_tools = []
 opentelemetry_sdk.workspace = true
 cpex.workspace = true
 openport = { version = "0.4.0", features = ["rand"] }
+secrets_detection_rust = { path = "../../../cpex-plugins/experiments/secrets_detection_rust" }
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 

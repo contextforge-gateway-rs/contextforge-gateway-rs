@@ -105,9 +105,9 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "apl-cmf"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3caf776592011d33f4d9d85834daf615de7c038549edbde4ad001c96e83d645d"
+checksum = "685a1bffb26e794b393daa3727be034f3343fd946a60a89f02604ef1c72abecf"
 dependencies = [
  "apl-core",
  "cpex-core",
@@ -116,9 +116,9 @@ dependencies = [
 
 [[package]]
 name = "apl-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae106c4bf2497c610b74ec7091f8facb8d82cd041a53ef6b4a7bbd3524c8ce50"
+checksum = "94b5847a0dd6ea9694862e899774c001e039b88df6e3113d5ee0736e2b4fc12d"
 dependencies = [
  "async-trait",
  "cpex-orchestration",
@@ -132,9 +132,9 @@ dependencies = [
 
 [[package]]
 name = "apl-cpex"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e40e33d304dcf1d6d57ea91fd58bc6d4bfc4d473ad2c48b503b13696f2782bf"
+checksum = "dbf227ec0421e66496b039881391ac6aaa32bc340f7496dc74db78e51bb1f329"
 dependencies = [
  "apl-cmf",
  "apl-core",
@@ -580,6 +580,7 @@ dependencies = [
  "opentelemetry_sdk",
  "rmcp",
  "rustls",
+ "secrets_detection_rust",
  "tikv-jemallocator",
  "tokio",
  "tonic",
@@ -646,6 +647,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "secret-string",
+ "secrets_detection_rust",
  "serde",
  "serde_json",
  "test-log",
@@ -729,9 +731,9 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpex"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f3b05e323dc449d9e61e7ec9e72e6b35634a8c4f650c52d37b9bddd8827840d"
+checksum = "52e486736defb1437d0c65ea8dd3005bb5759ef9ed74e935a86bfc1a6e934a46"
 dependencies = [
  "apl-cmf",
  "apl-core",
@@ -741,9 +743,9 @@ dependencies = [
 
 [[package]]
 name = "cpex-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de077ac4aacd2b33d89a8d430f24459f974e277688877a1e1f39eaf13d7f6cb6"
+checksum = "696544a387bb5c51e8cde5287f3812ff0ae228b5041319964d64a57cb73f5cad"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -764,9 +766,9 @@ dependencies = [
 
 [[package]]
 name = "cpex-orchestration"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9808b666ceab61a32281ba8801063e3729bc8f9b28959974cbbfc147382cc8ae"
+checksum = "39bd3b81889995d239d711e4876b079dabf21288eca79eb3bb4ed3004def1bbb"
 dependencies = [
  "futures",
  "tokio",
@@ -778,6 +780,15 @@ version = "0.1.0"
 source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=ab47801daccfbba44ea07b033034a347e7b5afdd#ab47801daccfbba44ea07b033034a347e7b5afdd"
 dependencies = [
  "cpex",
+]
+
+[[package]]
+name = "cpex-sdk"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba20e81ab4924231882adc31a437000fa045f890b80d7cce4fc1396848e710f0"
+dependencies = [
+ "cpex-core",
 ]
 
 [[package]]
@@ -3080,6 +3091,17 @@ name = "secret-string"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "068d960589a13890bdb2a9ea5e7ae0974b89249101117f2e9a5e166bf3af44b9"
+
+[[package]]
+name = "secrets_detection_rust"
+version = "0.0.0"
+dependencies = [
+ "cpex-core",
+ "cpex-sdk",
+ "regex",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "security-framework"
