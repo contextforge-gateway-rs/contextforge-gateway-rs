@@ -12,7 +12,7 @@ use tracing::info;
 use super::McpService;
 use crate::gateway::{
     identifier_routing::{backend_forward_error, route_identifier_to_backend},
-    list_aggregation::{fan_out_list, merge_resource_templates, merge_resources},
+    list_aggregation::{decode_gateway_cursor, fan_out_list, merge_resource_templates, merge_resources},
     mcp_call_validator::AuthorizedCallValidator,
     session_manager::SessionManager,
     session_store::UserSessionStore,
@@ -33,31 +33,51 @@ where
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
 
     // A listing has no single backend, so the pre hook runs once before fan-out as a deny gate and
-    // the post hook sees the merged, namespaced result. Both are read-only for this path.
+    // the post hook sees the merged, namespaced page. Both are read-only for this path.
     let post_state = match &mcp_service.plugin_runtime {
         Some(plugin_runtime) => plugin_runtime.before_list_resources().await?,
         None => None,
     };
 
-    let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+    let all_transports: Vec<_> = session_manager.borrow_transports().await;
+
+    let gateway_cursor = decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()), "list_resources")?;
+    let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
+        all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
+    } else {
+        all_transports
+    };
 
     let responses = fan_out_list(
         backend_transports,
         "list_resources",
         |response: &ListResourcesResult| response.resources.len(),
-        |service| {
-            let request = request.clone();
-            async move { service.list_resources(request).await }
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            let req = request.clone();
+            async move {
+                let backend_req = match cursor {
+                    Some(c) => {
+                        let mut r = req.unwrap_or_default();
+                        r.cursor = Some(c);
+                        Some(r)
+                    },
+                    None => req,
+                };
+                service.list_resources(backend_req).await
+            }
         },
     )
     .await;
 
-    let resources = merge_resources(responses, namespace_identifiers);
+    let (resources, next_cursor) = merge_resources(responses, namespace_identifiers, &gateway_cursor, "list_resources");
     if let (Some(plugin_runtime), Some(post_state)) = (&mcp_service.plugin_runtime, post_state) {
         plugin_runtime.after_list_resources(&resources, Some(post_state)).await?;
     }
 
-    Ok(ListResourcesResult::with_all_items(resources))
+    let mut result = ListResourcesResult::with_all_items(resources);
+    result.next_cursor = next_cursor;
+    Ok(result)
 }
 
 pub(super) async fn read_resource<T>(
@@ -119,31 +139,53 @@ where
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
 
     // A listing has no single backend, so the pre hook runs once before fan-out as a deny gate and
-    // the post hook sees the merged, namespaced result. Both are read-only for this path.
+    // the post hook sees the merged, namespaced page. Both are read-only for this path.
     let post_state = match &mcp_service.plugin_runtime {
         Some(plugin_runtime) => plugin_runtime.before_list_resource_templates().await?,
         None => None,
     };
 
-    let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+    let all_transports: Vec<_> = session_manager.borrow_transports().await;
+
+    let gateway_cursor =
+        decode_gateway_cursor(request.as_ref().and_then(|r| r.cursor.as_deref()), "list_resource_templates")?;
+    let backend_transports: Vec<_> = if request.as_ref().and_then(|r| r.cursor.as_ref()).is_some() {
+        all_transports.into_iter().filter(|b| gateway_cursor.backends.contains_key(&b.name)).collect()
+    } else {
+        all_transports
+    };
 
     let responses = fan_out_list(
         backend_transports,
         "list_resource_templates",
         |response: &ListResourceTemplatesResult| response.resource_templates.len(),
-        |service| {
-            let request = request.clone();
-            async move { service.list_resource_templates(request).await }
+        |name, service| {
+            let cursor = gateway_cursor.backends.get(&name).cloned();
+            let req = request.clone();
+            async move {
+                let backend_req = match cursor {
+                    Some(c) => {
+                        let mut r = req.unwrap_or_default();
+                        r.cursor = Some(c);
+                        Some(r)
+                    },
+                    None => req,
+                };
+                service.list_resource_templates(backend_req).await
+            }
         },
     )
     .await;
 
-    let templates = merge_resource_templates(responses, namespace_identifiers);
+    let (resource_templates, next_cursor) =
+        merge_resource_templates(responses, namespace_identifiers, &gateway_cursor, "list_resource_templates");
     if let (Some(plugin_runtime), Some(post_state)) = (&mcp_service.plugin_runtime, post_state) {
-        plugin_runtime.after_list_resource_templates(&templates, Some(post_state)).await?;
+        plugin_runtime.after_list_resource_templates(&resource_templates, Some(post_state)).await?;
     }
 
-    Ok(ListResourceTemplatesResult::with_all_items(templates))
+    let mut result = ListResourceTemplatesResult::with_all_items(resource_templates);
+    result.next_cursor = next_cursor;
+    Ok(result)
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]

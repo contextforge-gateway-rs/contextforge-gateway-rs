@@ -69,9 +69,14 @@ separately, so plugins never have to understand the gateway's namespace scheme.
 For fan-out methods — `prompts/list`, `resources/list`, and
 `resources/templates/list` — the pre
 hook runs **once before fan-out**, so a denial costs no backend traffic. The
-post hook runs **once on the merged, namespaced result**, so plugins see exactly
+post hook runs **once on the merged, namespaced page**, so plugins see exactly
 what the client will receive. Mutating per backend before the merge would let a
 plugin break the routing contract.
+
+These methods are paginated, so the post hook observes one page per request, not
+the complete set. A plugin that needs to reason across the whole listing must
+accumulate across calls using CPEX context; the pre hook receives the incoming
+cursor so pages can be correlated.
 
 A denial becomes an MCP error and the backend is never called. Hook state is
 carried across the upstream call so pre and post hooks share CPEX context for
