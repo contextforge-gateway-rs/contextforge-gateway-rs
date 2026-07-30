@@ -4,6 +4,7 @@ mod auth;
 mod client;
 mod list_tools_gateway;
 pub(crate) mod mock_counter;
+pub(crate) mod paginating_mock;
 mod plugin;
 mod plugin_gateway;
 mod runtime;
