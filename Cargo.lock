@@ -3122,6 +3122,7 @@ checksum = "068d960589a13890bdb2a9ea5e7ae0974b89249101117f2e9a5e166bf3af44b9"
 [[package]]
 name = "secrets_detection_rust"
 version = "0.0.0"
+source = "git+https://github.com/IBM/cpex-plugins?rev=6ff7af74587574fe6115ce87427519b63f6062da#6ff7af74587574fe6115ce87427519b63f6062da"
 dependencies = [
  "cpex-core",
  "cpex-sdk",
