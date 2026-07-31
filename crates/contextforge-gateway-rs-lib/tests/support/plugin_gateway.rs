@@ -255,6 +255,15 @@ impl ServerHandler for TestBackend {
                 }
                 Ok(CallToolResult::success(vec![ContentBlock::text("completed 4 packages")]))
             },
+            "reflect_text" => {
+                let text = request
+                    .arguments
+                    .as_ref()
+                    .and_then(|args| args.get("text"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ErrorData::invalid_params("reflect_text requires text", None))?;
+                Ok(CallToolResult::success(vec![ContentBlock::text(text.to_owned())]))
+            },
             "wait_for_cancellation" => {
                 cx.ct.cancelled().await;
                 self.state
