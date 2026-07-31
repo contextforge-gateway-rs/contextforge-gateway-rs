@@ -19,7 +19,7 @@ tracing-opentelemetry.workspace = true
 opentelemetry.workspace = true
 tokio.workspace = true
 tokio-util = "0.7"
-axum = "0.8"
+axum.workspace = true
 axum-otel-metrics = "0.14"
 tower-http = { version = "0.7.0", features = ["full"] }
 tower = "0.5.3"
@@ -52,8 +52,8 @@ with_tools = []
 [dev-dependencies]
 opentelemetry_sdk.workspace = true
 cpex.workspace = true
-openport = { version = "0.4.0", features = ["rand"] }
-secrets_detection_rust = { path = "../../../cpex-plugins/experiments/secrets_detection_rust" }
+openport.workspace = true
+secrets_detection_rust.workspace = true
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 

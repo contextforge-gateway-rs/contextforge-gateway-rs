@@ -54,6 +54,9 @@ reqwest = "0.13"
 rustls = { version = "0.23", features = ["ring"] }
 cpex = "=0.2.2"
 uuid = { version = "1.23.1", features = ["v4"] }
+axum = "0.8"
+openport = { version = "0.4.0", features = ["rand"] }
+secrets_detection_rust = { path = "../cpex-plugins/experiments/secrets_detection_rust" }
 
 [profile.release]
 codegen-units = 1
