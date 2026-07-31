@@ -400,6 +400,35 @@ async fn secrets_detection_pre_hook_redacts_tool_arguments_before_backend_call()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_clean_tool_payload_passes_through_unchanged() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::TOOL_PRE_INVOKE, cmf_hook_names::TOOL_POST_INVOKE],
+        json!({
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": true,
+        }),
+    )
+    .await;
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+
+    let result =
+        service.call_tool(sum_request("sum", 1, 2)).await.expect("clean argument payload passes through unchanged");
+
+    let result_text = text(&result);
+    assert_eq!("3", result_text.as_str());
+    assert!(!result_text.contains("[redacted]"));
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!(1, backend_calls.len());
+    assert_eq!("sum", backend_calls[0].tool_name);
+    let args = backend_calls[0].args.as_ref().expect("backend call has args");
+    assert_eq!(2, args.len());
+    assert_eq!(Some(&Value::from(1)), args.get("a"));
+    assert_eq!(Some(&Value::from(2)), args.get("b"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn secrets_detection_pre_hook_blocks_tool_arguments_before_backend_call() {
     let runtime = runtime_with_secrets_detection(
         vec![cmf_hook_names::TOOL_PRE_INVOKE],
