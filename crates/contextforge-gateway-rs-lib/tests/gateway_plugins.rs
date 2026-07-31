@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use cpex::cpex_core::cmf::Role;
+use cpex::cpex_core::config::CpexConfig;
 use cpex::cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
@@ -13,7 +14,7 @@ use rmcp::{
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
 use support::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID,
@@ -122,6 +123,43 @@ fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Valu
         "jsonrpc": "2.0",
         "id": request_id
     })
+}
+
+fn fake_aws_access_key(suffix: &str) -> String {
+    ["AKIA", suffix].concat()
+}
+
+fn sum_request_with_secret(secret_field: &str, secret: String) -> CallToolRequestParams {
+    let mut request = sum_request("sum", 1, 2);
+    request
+        .arguments
+        .as_mut()
+        .expect("sum request has arguments")
+        .insert(secret_field.to_owned(), Value::String(secret));
+    request
+}
+
+fn reflect_text_request(text: String) -> CallToolRequestParams {
+    CallToolRequestParams::new("reflect_text")
+        .with_arguments(Map::from_iter([("text".to_owned(), Value::String(text))]))
+}
+
+async fn runtime_with_secrets_detection(hooks: Vec<&'static str>, plugin_config: Value) -> Arc<CpexRuntimeRegistry> {
+    let mut runtime = CpexRuntimeRegistry::default();
+    runtime
+        .register_factory(secrets_detection_rust::KIND, Box::new(secrets_detection_rust::SecretsDetectionFactory))
+        .expect("secrets detection factory registers");
+    let config: CpexConfig = serde_json::from_value(json!({
+        "plugins": [{
+            "name": "secrets-detection",
+            "kind": secrets_detection_rust::KIND,
+            "hooks": hooks,
+            "config": plugin_config,
+        }]
+    }))
+    .expect("secrets detection CPEX config parses");
+    runtime.apply_config(Some(config)).await.expect("secrets detection runtime applies");
+    Arc::new(runtime)
 }
 
 fn sse_data_values(body: &str) -> Vec<Value> {
@@ -331,6 +369,139 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
     assert_eq!("3", text(&result));
     assert_eq!(0, pre_observations.lock().expect("observations lock poisoned").pre_calls);
     assert_eq!(0, post_observations.lock().expect("observations lock poisoned").post_calls);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_pre_hook_redacts_tool_arguments_before_backend_call() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::TOOL_PRE_INVOKE],
+        json!({
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": false,
+        }),
+    )
+    .await;
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+
+    let result = service
+        .call_tool(sum_request_with_secret("credential", fake_aws_access_key("1111111111111111")))
+        .await
+        .expect("secret argument is redacted and call succeeds");
+
+    assert_eq!("3", text(&result));
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!(1, backend_calls.len());
+    assert_eq!(
+        Some(&Value::from("[redacted]")),
+        backend_calls[0].args.as_ref().and_then(|args| args.get("credential"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_clean_tool_payload_passes_through_unchanged() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::TOOL_PRE_INVOKE, cmf_hook_names::TOOL_POST_INVOKE],
+        json!({
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": true,
+        }),
+    )
+    .await;
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+
+    let result =
+        service.call_tool(sum_request("sum", 1, 2)).await.expect("clean argument payload passes through unchanged");
+
+    let result_text = text(&result);
+    assert_eq!("3", result_text.as_str());
+    assert!(!result_text.contains("[redacted]"));
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!(1, backend_calls.len());
+    assert_eq!("sum", backend_calls[0].tool_name);
+    let args = backend_calls[0].args.as_ref().expect("backend call has args");
+    assert_eq!(2, args.len());
+    assert_eq!(Some(&Value::from(1)), args.get("a"));
+    assert_eq!(Some(&Value::from(2)), args.get("b"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_pre_hook_blocks_tool_arguments_before_backend_call() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::TOOL_PRE_INVOKE],
+        json!({
+            "redact": false,
+            "block_on_detection": true,
+        }),
+    )
+    .await;
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+
+    let error = service
+        .call_tool(sum_request_with_secret("credential", fake_aws_access_key("2222222222222222")))
+        .await
+        .expect_err("secret argument blocks the call");
+
+    assert_eq!(ErrorCode::INVALID_REQUEST, error_code(error));
+    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_post_hook_redacts_tool_result_before_client_response() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::TOOL_POST_INVOKE],
+        json!({
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": false,
+        }),
+    )
+    .await;
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+
+    let result = service
+        .call_tool(reflect_text_request(fake_aws_access_key("3333333333333333")))
+        .await
+        .expect("secret result is redacted and call succeeds");
+
+    assert_eq!("[redacted]", text(&result));
+    assert_eq!(1, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_pre_hook_respects_field_allowlist() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::TOOL_PRE_INVOKE],
+        json!({
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": false,
+            "field_allowlist": ["credential"],
+        }),
+    )
+    .await;
+    let gateway = start_gateway("admin@example.com", true, runtime).await;
+    let service = gateway.connect("admin@example.com").await;
+    let ignored_secret = fake_aws_access_key("4444444444444444");
+    let mut request = sum_request_with_secret("credential", fake_aws_access_key("5555555555555555"));
+    request
+        .arguments
+        .as_mut()
+        .expect("sum request has arguments")
+        .insert("ignored".to_owned(), Value::String(ignored_secret.clone()));
+
+    let result = service.call_tool(request).await.expect("allowed field is redacted");
+
+    assert_eq!("3", text(&result));
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    let args = backend_calls[0].args.as_ref().expect("backend call has args");
+    assert_eq!(Some(&Value::from("[redacted]")), args.get("credential"));
+    assert_eq!(Some(&Value::from(ignored_secret)), args.get("ignored"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
