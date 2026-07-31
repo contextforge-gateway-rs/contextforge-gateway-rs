@@ -283,6 +283,26 @@ async fn prompt_list_pre_and_post_hooks_share_one_request_id() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_removing_text_fails_closed() {
+    let plugin = Arc::new(PromptTestPlugin::new(
+        "prompt-delete",
+        vec![cmf_hook_names::PROMPT_POST_FETCH],
+        PromptBehavior::DeleteText,
+    ));
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let error = service
+        .get_prompt(review_request("weather"))
+        .await
+        .expect_err("removing text must not fall back to the backend message");
+
+    // Restoring the original here would return text a redaction plugin stripped.
+    assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn tool_hooks_do_not_run_for_prompt_requests() {
     let plugin = Arc::new(PromptTestPlugin::new(
         "prompt-only",

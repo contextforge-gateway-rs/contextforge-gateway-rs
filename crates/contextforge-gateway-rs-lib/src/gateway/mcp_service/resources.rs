@@ -7,7 +7,7 @@ use rmcp::{
     },
     service::RequestContext,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 use super::McpService;
 use crate::gateway::{
@@ -210,10 +210,13 @@ where
     .await?;
 
     // Hooks run after routing, so plugins see the backend-local URI and the backend that owns it.
-    // There is no post hook: `subscribe` returns an empty acknowledgement. The rewritten URI is
-    // used for tracking too, or a rewritten subscription would be tracked under a URI the backend
-    // never notifies about.
-    let resource_uri = match &mcp_service.plugin_runtime {
+    // There is no post hook: `subscribe` returns an empty acknowledgement.
+    //
+    // A rewritten URI is recorded against the URI the client subscribed to. The mapping has to be
+    // stored rather than recomputed later: a stateful plugin can return a different URI on the next
+    // call, which would leave the backend subscription and the tracking entry orphaned.
+    let client_uri = resource_uri.clone();
+    let upstream_uri = match &mcp_service.plugin_runtime {
         Some(plugin_runtime) => {
             plugin_runtime.before_subscribe(&resource_uri, &service_name).await?.apply_to(resource_uri)
         },
@@ -221,11 +224,11 @@ where
     };
 
     let mut routed_request = request;
-    routed_request.uri = resource_uri.clone();
-    service.service().track_resource_subscription(&resource_uri, cx.peer.clone()).await;
+    routed_request.uri = upstream_uri.clone();
+    service.service().track_resource_subscription(&upstream_uri, &client_uri, cx.peer.clone()).await;
 
     if let Err(error) = service.subscribe(routed_request).await {
-        service.service().stop_tracking_resource_subscription(&resource_uri).await;
+        service.service().stop_tracking_resource_subscription(&client_uri).await;
         return Err(backend_forward_error("subscribe", &service_name, &error));
     }
     info!("subscribe: backend {service_name} completed");
@@ -253,22 +256,26 @@ where
     )
     .await?;
 
-    // Same contract as `subscribe`: pre hook only, and the rewritten URI is what gets forwarded and
-    // untracked, so a rewritten subscribe and unsubscribe pair resolve to the same tracking key.
-    let resource_uri = match &mcp_service.plugin_runtime {
-        Some(plugin_runtime) => {
-            plugin_runtime.before_unsubscribe(&resource_uri, &service_name).await?.apply_to(resource_uri)
-        },
-        None => resource_uri,
-    };
+    // Same contract as `subscribe`: pre hook only. The hook still runs so a plugin can deny an
+    // unsubscribe, but its URI rewrite is *not* used to address the backend — the URI recorded at
+    // subscribe time is. Recomputing it here would unsubscribe the wrong resource whenever a
+    // plugin's rewrite is stateful or non-deterministic.
+    if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        plugin_runtime.before_unsubscribe(&resource_uri, &service_name).await?;
+    }
+
+    let upstream_uri =
+        service.service().stop_tracking_resource_subscription(&resource_uri).await.unwrap_or_else(|| {
+            debug!("unsubscribe: no tracked subscription for {resource_uri}, forwarding it unchanged");
+            resource_uri.clone()
+        });
 
     let mut routed_request = request;
-    routed_request.uri = resource_uri.clone();
+    routed_request.uri = upstream_uri;
     service
         .unsubscribe(routed_request)
         .await
         .map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
-    service.service().stop_tracking_resource_subscription(&resource_uri).await;
     info!("unsubscribe: backend {service_name} completed");
     Ok(())
 }

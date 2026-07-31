@@ -569,9 +569,15 @@ pub(crate) fn read_resource_response(
     }
 
     for (resource, original_contents) in resources.iter().zip(original.contents.iter_mut()) {
-        let Some(text) = &resource.content else { continue };
         match original_contents {
-            ResourceContents::TextResourceContents { text: original_text, .. } => original_text.clone_from(text),
+            ResourceContents::TextResourceContents { text: original_text, .. } => match &resource.content {
+                Some(text) => original_text.clone_from(text),
+                // Text contents are always exposed, so `None` means the plugin cleared them.
+                // Restoring the backend text would fail open on redaction.
+                None => return Err(invalid_payload("Plugin removed text from a resource content")),
+            },
+            // Blob bytes are never exposed, so having no text back is expected.
+            _ if resource.content.is_none() => {},
             _ => return Err(invalid_payload("Plugin added text to a non-text resource content")),
         }
     }
@@ -610,14 +616,20 @@ pub(crate) fn prompt_result_response(
     }
 
     for (message, original_message) in result.messages.iter().zip(original.messages.iter_mut()) {
-        let Some(text) = message.content.iter().find_map(|part| match part {
+        let text = message.content.iter().find_map(|part| match part {
             ContentPart::Text { text } => Some(text),
             _ => None,
-        }) else {
-            continue;
-        };
+        });
         match &mut original_message.content {
-            ContentBlock::Text(original_text) => original_text.text.clone_from(text),
+            ContentBlock::Text(original_text) => match text {
+                Some(text) => original_text.text.clone_from(text),
+                // A text block is always exposed as a text part, so its absence means the plugin
+                // removed it. Falling back to the backend text here would return content a
+                // redaction plugin explicitly stripped, so this fails closed instead.
+                None => return Err(invalid_payload("Plugin removed text from a prompt message")),
+            },
+            // Non-text blocks are never exposed, so having no text back is expected.
+            _ if text.is_none() => {},
             _ => return Err(invalid_payload("Plugin added text to a non-text prompt message")),
         }
     }

@@ -133,6 +133,12 @@ silently dropping data:
   match what the plugin was given. `description`, `_meta`, message roles, and
   non-text blocks always come from the backend response, so a plugin that only
   observes gets a byte-identical passthrough.
+- **Removing exposed text fails closed.** A text block is always exposed as a
+  text part, so its absence in the returned payload means the plugin deleted it.
+  The gateway rejects that with `INVALID_PARAMS` rather than restoring the
+  backend's text, which would return content a redaction plugin stripped.
+  Explicit deletion semantics are not supported yet; rewrite to an empty string
+  instead.
 - **Completion values** write back in full, but the value count must match, so
   the backend's `total` and `has_more` stay accurate.
 - **Listings are read-only.** MCP `Prompt` and `ResourceTemplate` are metadata —
@@ -145,9 +151,13 @@ silently dropping data:
   withheld and never modified: MCP carries blobs base64-encoded while CMF wants
   raw bytes, and cloning arbitrary binary payloads through the plugin pipeline
   on the hot path is a memory hazard.
-- **Subscription URIs** are rewritten for both the forwarded request and the
-  local subscription tracking key. Those must not diverge, or the gateway would
-  track a subscription the backend never notifies about.
+- **Subscription URIs** may be rewritten by the pre hook. The mapping from the
+  client's URI to the rewritten upstream URI is recorded at subscribe time and
+  reused afterwards — it is never recomputed. `unsubscribe` still runs its pre
+  hook so a plugin can deny it, but addresses the backend with the stored URI,
+  and resource-update notifications are reported to the client under the URI it
+  subscribed to. Recomputing would misroute both whenever a plugin's rewrite is
+  stateful or non-deterministic.
 - **Completion arguments are read-only.** The argument value is a partial user
   keystroke, so rewriting it would return completions for text the user never
   typed.

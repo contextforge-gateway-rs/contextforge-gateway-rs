@@ -446,6 +446,49 @@ async fn denied_resource_list_pre_hook_never_fans_out_to_backends() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn read_resource_post_hook_removing_text_fails_closed() {
+    let plugin = Arc::new(ResourceTestPlugin::new(
+        "read-delete",
+        vec![cmf_hook_names::RESOURCE_POST_FETCH],
+        ResourceBehavior::DeleteContent,
+    ));
+    let runtime = runtime_with_resource_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let error = service
+        .read_resource(ReadResourceRequestParams::new(RESOURCE_URI))
+        .await
+        .expect_err("removing text must not fall back to the backend content");
+
+    // Restoring the original here would return content a redaction plugin stripped.
+    assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[expect(deprecated, reason = "legacy RMCP subscription coverage; listen migration is deferred")]
+async fn unsubscribe_uses_the_uri_recorded_at_subscribe_not_a_fresh_rewrite() {
+    let plugin = Arc::new(ResourceTestPlugin::new(
+        "sub-stateful",
+        vec![cmf_hook_names::RESOURCE_PRE_FETCH],
+        ResourceBehavior::RewriteUriPerCall,
+    ));
+    let runtime = runtime_with_resource_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    service.subscribe(SubscribeRequestParams::new(SUBSCRIBED_URI)).await.expect("subscribe succeeds");
+    service.unsubscribe(UnsubscribeRequestParams::new(SUBSCRIBED_URI)).await.expect("unsubscribe succeeds");
+
+    // The plugin rewrites to a different URI on every call. Unsubscribe must use the URI recorded
+    // at subscribe time, or the backend subscription is orphaned.
+    let subscribed = gateway.backend_state.subscriptions.lock().expect("backend lock poisoned").clone();
+    let unsubscribed = gateway.backend_state.unsubscriptions.lock().expect("backend lock poisoned").clone();
+    assert_eq!(1, subscribed.len());
+    assert_eq!(subscribed, unsubscribed, "unsubscribe addressed a different URI than subscribe");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn resource_hooks_do_not_run_for_prompt_or_tool_requests() {
     let plugin = Arc::new(ResourceTestPlugin::new(
         "resource-only",

@@ -322,6 +322,8 @@ pub(crate) enum PromptBehavior {
     DenyPre,
     RewriteText,
     DenyPost,
+    /// Strips every text part, as a redaction plugin dropping sensitive data would.
+    DeleteText,
     /// Renames every listed prompt. `prompts/list` exposure is read-only, so the client must still
     /// receive the original names.
     RewriteListNames,
@@ -450,6 +452,17 @@ impl HookHandler<CmfHook> for PromptTestPlugin {
                 }
                 PluginResult::modify_payload(modified)
             },
+            (true, PromptBehavior::DeleteText) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::PromptResult { content } = part {
+                        for message in &mut content.messages {
+                            message.content.retain(|part| !matches!(part, ContentPart::Text { .. }));
+                        }
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
             (true, PromptBehavior::RewriteListNames) => {
                 let mut modified = payload.clone();
                 for part in &mut modified.message.content {
@@ -537,6 +550,10 @@ pub(crate) enum ResourceBehavior {
     RewriteText,
     /// Rewrites `resources/read` text contents.
     RewriteContent,
+    /// Clears text contents, as a redaction plugin dropping sensitive data would.
+    DeleteContent,
+    /// Rewrites the target URI to a different value on each call, as a stateful plugin would.
+    RewriteUriPerCall,
     /// Rewrites every listed template URI. `resources/templates/list` exposure is read-only, so the
     /// client must still receive the original URI templates.
     RewriteListUris,
@@ -639,6 +656,28 @@ impl HookHandler<CmfHook> for ResourceTestPlugin {
                 for part in &mut modified.message.content {
                     if let ContentPart::Resource { content } = part {
                         REWRITTEN_RESOURCE_URI.clone_into(&mut content.uri);
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (true, ResourceBehavior::DeleteContent) => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::Resource { content } = part {
+                        content.content = None;
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            (false, ResourceBehavior::RewriteUriPerCall) => {
+                let call = {
+                    let observations = self.observations.lock().expect("observations lock poisoned");
+                    observations.pre_calls
+                };
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::Resource { content } = part {
+                        content.uri = format!("{REWRITTEN_RESOURCE_URI}-{call}");
                     }
                 }
                 PluginResult::modify_payload(modified)

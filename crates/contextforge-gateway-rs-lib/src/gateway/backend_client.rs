@@ -23,7 +23,16 @@ pub(crate) struct GatewayBackendClient {
     initialize_request: InitializeRequestParams,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     in_flight_calls: Arc<RwLock<HashMap<ProgressToken, Arc<InFlightToolCall>>>>,
-    resource_subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
+    /// Keyed by the URI the client subscribed to; see [`Self::track_resource_subscription`].
+    resource_subscriptions: Arc<Mutex<HashMap<String, ResourceSubscription>>>,
+}
+
+/// A tracked subscription. `upstream_uri` is what the backend was actually subscribed to, which
+/// differs from the map key whenever a resource pre hook rewrote it.
+#[derive(Debug)]
+struct ResourceSubscription {
+    upstream_uri: String,
+    downstream: Peer<RoleServer>,
 }
 
 #[derive(Debug)]
@@ -90,21 +99,43 @@ impl GatewayBackendClient {
         calls.get(progress_token).cloned()
     }
 
-    pub(crate) async fn track_resource_subscription(&self, resource_uri: &str, downstream: Peer<RoleServer>) {
-        debug!("track_resource_subscription backend {} uri {resource_uri}", self.backend_name);
+    /// Records a subscription keyed by the URI the backend will notify about, remembering the URI
+    /// the client actually subscribed to.
+    ///
+    /// A resource pre hook may rewrite the URI, so the two can differ. Both directions of that
+    /// mapping have to be persisted here rather than recomputed: rerunning the hook on unsubscribe
+    /// can produce a different URI for a stateful plugin, and notifications must be reported to the
+    /// client under the URI it asked for, not the rewritten one.
+    pub(crate) async fn track_resource_subscription(
+        &self,
+        upstream_uri: &str,
+        client_uri: &str,
+        downstream: Peer<RoleServer>,
+    ) {
+        debug!(
+            "track_resource_subscription backend {} upstream_uri {upstream_uri} client_uri {client_uri}",
+            self.backend_name
+        );
         let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.insert(resource_uri.to_owned(), downstream);
+        subscriptions
+            .insert(client_uri.to_owned(), ResourceSubscription { upstream_uri: upstream_uri.to_owned(), downstream });
     }
 
-    pub(crate) async fn stop_tracking_resource_subscription(&self, resource_uri: &str) {
-        debug!("stop_tracking_resource_subscription backend {} uri {resource_uri}", self.backend_name);
+    /// Drops the subscription the client registered for `client_uri`, returning the URI the
+    /// backend was actually subscribed to so the caller can unsubscribe upstream with it.
+    pub(crate) async fn stop_tracking_resource_subscription(&self, client_uri: &str) -> Option<String> {
+        debug!("stop_tracking_resource_subscription backend {} client_uri {client_uri}", self.backend_name);
         let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.remove(resource_uri);
+        subscriptions.remove(client_uri).map(|subscription| subscription.upstream_uri)
     }
 
-    async fn resource_subscription(&self, resource_uri: &str) -> Option<Peer<RoleServer>> {
+    /// Resolves a backend notification URI back to the subscribing peer and the URI that peer
+    /// subscribed to.
+    async fn resource_subscription(&self, upstream_uri: &str) -> Option<(Peer<RoleServer>, String)> {
         let subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.get(resource_uri).cloned()
+        subscriptions.iter().find_map(|(client_uri, subscription)| {
+            (subscription.upstream_uri == upstream_uri).then(|| (subscription.downstream.clone(), client_uri.clone()))
+        })
     }
 
     async fn stream_event_post_hook<T>(&self, call: &InFlightToolCall, event: T) -> Option<T>
@@ -160,12 +191,14 @@ impl ClientHandler for GatewayBackendClient {
         mut params: ResourceUpdatedNotificationParam,
         _context: NotificationContext<RoleClient>,
     ) {
-        let Some(downstream) = self.resource_subscription(&params.uri).await else {
+        let Some((downstream, client_uri)) = self.resource_subscription(&params.uri).await else {
             debug!("resource_updated: dropping backend notification for unsubscribed uri {}", params.uri);
             return;
         };
 
-        params.uri = resource_uri_for_downstream(&self.backend_name, params.uri, self.namespace_identifiers);
+        // Report the update under the URI the client subscribed to. A pre hook may have rewritten
+        // the URI sent upstream, and the client never saw that value.
+        params.uri = resource_uri_for_downstream(&self.backend_name, client_uri, self.namespace_identifiers);
         if let Err(error) = downstream.notify_resource_updated(params).await {
             warn!("resource_updated: unable to forward backend notification downstream: {error:?}");
         }
