@@ -194,10 +194,14 @@ async fn binary_e2e_redacts_tool_arguments_and_results() {
         .expect("secret argument is redacted and call succeeds");
 
     assert_eq!("3", tool_text(&result));
-    let backend_calls = env.backend.state.calls.lock().expect("backend calls lock poisoned");
-    assert_eq!(1, backend_calls.len());
-    assert_eq!(Some(&Value::from(REDACTED)), backend_calls[0].args.as_ref().and_then(|args| args.get("credential")));
-    drop(backend_calls);
+    {
+        let backend_calls = env.backend.state.calls.lock().expect("backend calls lock poisoned");
+        assert_eq!(1, backend_calls.len());
+        assert_eq!(
+            Some(&Value::from(REDACTED)),
+            backend_calls[0].args.as_ref().and_then(|args| args.get("credential"))
+        );
+    }
 
     let result = service
         .call_tool(reflect_text_request(fake_aws_access_key("2222222222222222")))
