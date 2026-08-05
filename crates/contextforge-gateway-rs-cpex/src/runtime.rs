@@ -43,7 +43,7 @@ use crate::{
 };
 
 /// Whether the loaded plugin config declares the pre and post hook of one MCP path.
-#[derive(Default, Clone, Copy)]
+#[derive(Default)]
 struct HookPair {
     pre: bool,
     post: bool,
@@ -58,7 +58,7 @@ impl HookPair {
 
 /// Which hooks the loaded plugin config actually declares. Each MCP path checks only its own
 /// pair, so a prompt-only plugin config leaves the tool hot path untouched.
-#[derive(Default, Clone, Copy)]
+#[derive(Default)]
 struct HookPresence {
     tool: HookPair,
     prompt: HookPair,
@@ -260,10 +260,10 @@ impl GatewayPluginRuntime {
         result
     }
 
-    fn completion_hooks(&self, target: CompletionTarget) -> HookPair {
+    fn completion_hooks(&self, target: CompletionTarget) -> &HookPair {
         match target {
-            CompletionTarget::Prompt => self.hooks.prompt,
-            CompletionTarget::Resource => self.hooks.resource,
+            CompletionTarget::Prompt => &self.hooks.prompt,
+            CompletionTarget::Resource => &self.hooks.resource,
         }
     }
 
