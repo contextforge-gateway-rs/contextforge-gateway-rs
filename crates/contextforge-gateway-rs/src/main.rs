@@ -74,8 +74,8 @@ fn register_builtin_factories(
     #[cfg(feature = "secrets-detection-plugin")]
     {
         plugin_runtime.register_factory(
-            secrets_detection_rust::KIND,
-            Box::new(secrets_detection_rust::SecretsDetectionFactory),
+            contextforge_gateway_rs_secrets_detection::KIND,
+            Box::new(contextforge_gateway_rs_secrets_detection::SecretsDetectionFactory),
         )?;
     }
     Ok(plugin_runtime)
