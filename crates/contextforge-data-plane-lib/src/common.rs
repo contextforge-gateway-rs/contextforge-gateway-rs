@@ -257,6 +257,58 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_LOG_ROTATION")]
     pub log_rotation: Option<LogRotation>,
+
+    /// Allowlist of browser Origins permitted on MCP Streamable HTTP requests.
+    ///
+    /// Each entry must be a fully-qualified origin with scheme, e.g.
+    /// `https://app.example.com` or `http://localhost:3000`.
+    /// Port comparison is exact after RFC 3986 default-port normalization:
+    /// `https://app.example.com` and `https://app.example.com:443` are
+    /// equivalent; `https://app.example.com:8443` is distinct.
+    ///
+    /// Behaviour when this list is **non-empty**:
+    /// - No `Origin` header → accepted (native/non-browser clients).
+    /// - `Origin` present and matching an entry → accepted.
+    /// - `Origin` present, malformed, `null`, or not in the list → HTTP 403.
+    ///
+    /// Behaviour when this list is **empty** (default):
+    /// - No `Origin` header → accepted.
+    /// - `Origin` present and matching the request `Host` (same-origin) → accepted.
+    /// - `Origin` present and not matching `Host`, malformed, or `null` → HTTP 403.
+    ///
+    /// Supply multiple origins as a comma-separated string:
+    /// `https://app.example.com,https://other.example.com`
+    #[arg(
+        long,
+        env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS",
+        value_delimiter = ',',
+        num_args = 0..
+    )]
+    pub mcp_allowed_origins: Vec<String>,
+
+    /// Allowlist of `Host` header values (authorities) trusted on inbound MCP
+    /// requests, used as the companion DNS-rebinding control.
+    ///
+    /// Each entry is a hostname or `host:port` authority, e.g.
+    /// `gateway.example.com` or `gateway.example.com:8080`.
+    /// Port is optional; an entry without a port matches that host on any port.
+    ///
+    /// When this list is **non-empty**, any request whose `Host` header does
+    /// not match an entry is rejected with HTTP 403 before Origin validation.
+    ///
+    /// When this list is **empty** (default), Host validation is disabled.
+    /// For deployments exposed directly to the internet, set this alongside
+    /// `mcp_allowed_origins`.
+    ///
+    /// Supply multiple hosts as a comma-separated string:
+    /// `gateway.example.com,gateway.example.com:443`
+    #[arg(
+        long,
+        env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS",
+        value_delimiter = ',',
+        num_args = 0..
+    )]
+    pub mcp_allowed_hosts: Vec<String>,
 }
 
 #[derive(Error, Debug)]

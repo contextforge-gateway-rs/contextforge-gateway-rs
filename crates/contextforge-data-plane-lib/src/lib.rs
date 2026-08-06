@@ -40,6 +40,7 @@ use crate::{
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer,
+        mcp_origin::mcp_origin_layer,
         session_id::{SessionIdState, session_id_layer},
         user_config_store::user_config_store_layer,
         virtual_host_config::virtual_host_config_layer,
@@ -81,7 +82,17 @@ impl Gateway {
         };
         let mcp_plugin_runtime = self.plugin_runtime;
 
-        let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
+        // Host and Origin validation is owned by the outer mcp_origin_layer.
+        // Disable RMCP's built-in checks so they do not conflict with ours.
+        // When the operator has configured an allowed-hosts list, pass it to
+        // RMCP as well for defense-in-depth; RMCP's list uses bare hostnames.
+        let streamable_config = if config.mcp_allowed_hosts.is_empty() {
+            StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
+        } else {
+            StreamableHttpServerConfig::default()
+                .with_allowed_hosts(config.mcp_allowed_hosts.iter().map(String::as_str))
+                .disable_allowed_origins()
+        };
 
         let reqwest_backend_client = reqwest::Client::try_from(config)?;
 
@@ -135,7 +146,10 @@ impl Gateway {
             .layer(middleware::from_fn_with_state(session_id_state, session_id_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
-            .layer(cors_layer);
+            .layer(cors_layer)
+            // mcp_origin_layer is the outermost wrapper: fires before JWT auth,
+            // session creation, and backend fan-out.
+            .layer(middleware::from_fn_with_state(config.clone(), mcp_origin_layer));
 
         #[cfg(feature = "with_tools")]
         let app = tools::add_tools(app);

@@ -15,7 +15,7 @@ repository.workspace = true
 cpex.workspace = true
 serde= {workspace = true, features=["derive"]}
 serde_json.workspace = true
-url = { version = "2.5.8", features = ["serde"] }
+url = { workspace = true }
 schemars = { version = "1.2.1", features = ["url2", "preserve_order"] }
 
 [lints]
