@@ -5,8 +5,16 @@ payloads, so the gateway keeps the supported hook surface narrow and explicit.
 
 ## Runtime Enablement
 
-Runtime plugins are disabled by default. When enabled, the binary creates a
-CPEX runtime registry and the runtime initializes it before serving traffic.
+Runtime plugins are disabled by default. Enablement has two stages:
+
+1. Compile concrete Rust plugin factories into the gateway binary with Cargo
+   features.
+2. Start the gateway with runtime plugins enabled and provide plugin config in
+   Redis.
+
+The runtime flag activates already-registered factories; it does not load new
+Rust code into a running process. When enabled, the binary creates a CPEX
+runtime registry and the runtime initializes it before serving traffic.
 
 Plugin configuration is loaded from Redis at:
 
@@ -16,6 +24,11 @@ ContextForgeGatewayRuntimePluginConfig
 
 The runtime registry builds an initialized immutable plugin manager from that
 configuration. Reloading swaps the manager instead of mutating a live one.
+
+The bundled secrets detection plugin is experimental. Compile it into the
+gateway with `contextforge-gateway-rs/plugins`, enable runtime plugins with
+`--runtime-plugins-enabled true`, and configure the plugin kind
+`validator/secrets-detection` in the Redis document.
 
 ## Supported Hooks
 

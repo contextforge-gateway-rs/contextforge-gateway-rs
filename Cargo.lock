@@ -554,6 +554,7 @@ dependencies = [
  "contextforge-gateway-rs-cpex",
  "contextforge-gateway-rs-lib",
  "cpex-payload-marker",
+ "cpex-secrets-detection",
  "cpex-text-prefixer",
  "cpex-tool-namespace",
  "http",
@@ -568,7 +569,6 @@ dependencies = [
  "rmcp",
  "rmp-serde",
  "rustls",
- "secrets_detection_rust",
  "serde_json",
  "tikv-jemallocator",
  "tokio",
@@ -620,6 +620,7 @@ dependencies = [
  "contextforge-gateway-rs-apis",
  "contextforge-gateway-rs-cpex",
  "cpex",
+ "cpex-secrets-detection",
  "futures",
  "http",
  "hyper",
@@ -636,7 +637,6 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "secret-string",
- "secrets_detection_rust",
  "serde",
  "serde_json",
  "test-log",
@@ -772,12 +772,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpex-sdk"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba20e81ab4924231882adc31a437000fa045f890b80d7cce4fc1396848e710f0"
+name = "cpex-secrets-detection"
+version = "0.1.0"
 dependencies = [
- "cpex-core",
+ "cpex",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2739,18 +2741,6 @@ name = "secret-string"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "068d960589a13890bdb2a9ea5e7ae0974b89249101117f2e9a5e166bf3af44b9"
-
-[[package]]
-name = "secrets_detection_rust"
-version = "0.0.0"
-source = "git+https://github.com/IBM/cpex-plugins?rev=6ff7af74587574fe6115ce87427519b63f6062da#6ff7af74587574fe6115ce87427519b63f6062da"
-dependencies = [
- "cpex-core",
- "cpex-sdk",
- "regex",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "security-framework"

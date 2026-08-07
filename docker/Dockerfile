@@ -12,7 +12,7 @@ RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
     cargo fetch --locked
 RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
-    cargo build --release --features contextforge-gateway-rs-lib/with_tools
+    cargo build --release --features "contextforge-gateway-rs-lib/with_tools contextforge-gateway-rs/plugins"
 
 FROM debian:trixie-slim
 RUN <<EOF

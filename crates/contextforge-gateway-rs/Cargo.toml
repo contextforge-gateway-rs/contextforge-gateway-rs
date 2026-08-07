@@ -13,7 +13,7 @@ contextforge-gateway-rs-lib = { path = "../contextforge-gateway-rs-lib" }
 cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
 cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
 cpex-tool-namespace = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
-secrets_detection_rust = { workspace = true, optional = true }
+cpex-secrets-detection = { workspace = true, optional = true }
 clap.workspace = true
 tracing.workspace = true
 tracing-appender = "0.2.3"
@@ -30,7 +30,7 @@ tikv-jemallocator = "0.7.0"
 rustls.workspace = true
 
 [features]
-secrets-detection-plugin = ["dep:secrets_detection_rust"]
+plugins = ["dep:cpex-secrets-detection"]
 test-plugins = ["dep:cpex-payload-marker", "dep:cpex-text-prefixer", "dep:cpex-tool-namespace"]
 
 [dev-dependencies]

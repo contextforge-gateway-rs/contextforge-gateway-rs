@@ -81,6 +81,12 @@ Keep this process running. The gateway exposes MCP traffic under:
 http://127.0.0.1:8001/contextforge-rs/servers/{virtual_host_id}/mcp
 ```
 
+Runtime CPEX plugins need both a compile-time feature and runtime config. To
+try the experimental secrets detection plugin locally, build with
+`contextforge-gateway-rs/plugins`, start the gateway with
+`--runtime-plugins-enabled true`, and write the Redis plugin config before
+startup.
+
 The local command uses `--upstream-connection-mode plain-text-or-tls` because
 the sample backend URLs are plain HTTP. Without that option, the default
 upstream client is HTTPS-only.

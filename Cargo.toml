@@ -5,6 +5,7 @@ members = [
     "crates/contextforge-gateway-rs-cpex",
     "crates/contextforge-gateway-rs-lib",
     "crates/contextforge-load-test",
+    "crates/plugins/cpex-secrets-detection",
 ]
 resolver = "3"
 
@@ -57,7 +58,7 @@ cpex = "=0.2.2"
 uuid = { version = "1.23.1", features = ["v4"] }
 axum = "0.8"
 openport = { version = "0.4.0", features = ["rand"] }
-secrets_detection_rust = { git = "https://github.com/IBM/cpex-plugins", rev = "6ff7af74587574fe6115ce87427519b63f6062da", package = "secrets_detection_rust" }
+cpex-secrets-detection = { path = "./crates/plugins/cpex-secrets-detection" }
 
 [profile.release]
 codegen-units = 1
