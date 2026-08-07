@@ -9,16 +9,20 @@ git config --global http.sslVerify false
 git clone https://github.com/contextforge-gateway-rs/mcp-rust-sdk.git rust-sdk
 EOF
 WORKDIR /tmp/rust-sdk
-RUN git checkout enabling_propagation_of_new_session_id_2 
+RUN <<EOF
+git checkout enabling_propagation_of_new_session_id_2
+# The pinned SDK server binds loopback, which Docker cannot publish.
+sed -i 's/127\.0\.0\.1/0.0.0.0/' conformance/src/bin/server.rs
+EOF
 WORKDIR /tmp/rust-sdk/conformance
 
 RUN \
-    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     cargo fetch
 RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry  \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     cargo build  --release
 
 FROM debian:trixie-slim

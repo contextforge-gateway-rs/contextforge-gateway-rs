@@ -7,11 +7,11 @@ apt install -y ca-certificates protobuf-compiler
 EOF
 
 COPY . .
-RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     cargo fetch --locked
-RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     cargo build --release --features contextforge-data-plane-lib/with_tools
 
 FROM debian:trixie-slim

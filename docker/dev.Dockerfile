@@ -13,12 +13,12 @@ COPY Cargo.toml ./Cargo.toml
 COPY Cargo.lock ./Cargo.lock
 
 RUN \
-    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     cargo fetch --locked
 RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry  \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     cargo build  --release
 
 FROM debian:trixie
