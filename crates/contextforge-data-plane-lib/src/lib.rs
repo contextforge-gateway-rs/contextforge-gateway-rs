@@ -36,7 +36,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
 
 use crate::{
-    common::{ContextForgeGatewayAppState, JwtTokenDecoders},
+    common::{ContextForgeDataPlaneAppState, JwtTokenDecoders},
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer,
@@ -115,7 +115,7 @@ impl Gateway {
             Ok(key)
         });
 
-        let mcp_add_state: ContextForgeGatewayAppState = ContextForgeGatewayAppState {
+        let mcp_add_state: ContextForgeDataPlaneAppState = ContextForgeDataPlaneAppState {
             jwt_token_decoding_keys: JwtTokenDecoders {
                 rs: rs_decoding_key.transpose()?,
                 hmac_sha: config

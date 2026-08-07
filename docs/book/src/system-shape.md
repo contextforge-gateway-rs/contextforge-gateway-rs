@@ -10,7 +10,7 @@
 
 ![System shape](assets/system-shape.svg)
 
-The ContextForge Gateway is the Rust dataplane process for MCP traffic. It is
+The ContextForge Data Plane is the Rust dataplane process for MCP traffic. It is
 not a second ContextForge application. It accepts downstream streamable HTTP MCP
 requests, builds request context, loads runtime config, opens or reuses backend
 MCP client sessions, and returns one merged MCP server view to the caller.
@@ -219,7 +219,7 @@ state in separate ownership scopes. The current ownership model is:
 | State | Owner | Lifetime |
 | --- | --- | --- |
 | CLI `Config` | Binary startup and `Gateway` | Process lifetime. |
-| JWT decoders | `ContextForgeGatewayAppState` | Process lifetime. |
+| JWT decoders | `ContextForgeDataPlaneAppState` | Process lifetime. |
 | User config | `UserConfigStore`, currently Redis plus in-process LRU | Control-plane authored, request-path consumed. |
 | Request identity | Request extensions | One HTTP request. |
 | Virtual host id | Request extensions | One HTTP request. |

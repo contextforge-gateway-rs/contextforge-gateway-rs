@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 //use tracing::debug;
 use crate::{
-    common::{ContextForgeClaims, ContextForgeGatewayAppState, Scopes, User},
+    common::{ContextForgeClaims, ContextForgeDataPlaneAppState, Scopes, User},
     const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
 };
 
@@ -58,7 +58,7 @@ impl ContextForgeClaims {
     }
 }
 
-pub fn add_tools(router: Router<ContextForgeGatewayAppState>) -> Router<ContextForgeGatewayAppState> {
+pub fn add_tools(router: Router<ContextForgeDataPlaneAppState>) -> Router<ContextForgeDataPlaneAppState> {
     router
         .route("/admin/tokens/{user_id}", get(get_token))
         .route("/admin/userconfigs/{user_id}", post(configure_user))
@@ -74,7 +74,7 @@ pub async fn health() -> Response {
 }
 
 pub async fn get_token(
-    State(state): State<ContextForgeGatewayAppState>,
+    State(state): State<ContextForgeDataPlaneAppState>,
     Path(user_id): Path<String>,
     Query(query): Query<TokenQuery>,
 ) -> Response {
@@ -95,7 +95,7 @@ pub async fn get_token(
 //#[debug_handler]
 pub async fn configure_user(
     Path(user_id): Path<String>,
-    State(state): State<ContextForgeGatewayAppState>,
+    State(state): State<ContextForgeDataPlaneAppState>,
     Json(user_config): Json<UserConfig>,
 ) -> Response {
     if state.config_store.set_config(&CFUser::new(&user_id), &user_config).await.is_ok() {

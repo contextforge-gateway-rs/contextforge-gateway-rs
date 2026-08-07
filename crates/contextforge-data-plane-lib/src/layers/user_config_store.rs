@@ -5,12 +5,12 @@ use http::{StatusCode, header};
 use tracing::{debug, info, warn};
 
 use crate::{
-    common::{ContextForgeClaims, ContextForgeGatewayAppState},
+    common::{ContextForgeClaims, ContextForgeDataPlaneAppState},
     user_config_store::ConfigStoreError,
 };
 
 pub async fn user_config_store_layer(
-    State(state): State<ContextForgeGatewayAppState>,
+    State(state): State<ContextForgeDataPlaneAppState>,
     mut request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {

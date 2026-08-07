@@ -8,7 +8,7 @@ use http::{StatusCode, header};
 use jsonwebtoken::Validation;
 
 use crate::{
-    common::{ContextForgeClaims, ContextForgeGatewayAppState},
+    common::{ContextForgeClaims, ContextForgeDataPlaneAppState},
     const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
 };
 
@@ -21,7 +21,7 @@ fn unauthorized_response() -> Response {
 }
 
 pub async fn claims_layer(
-    State(state): State<ContextForgeGatewayAppState>,
+    State(state): State<ContextForgeDataPlaneAppState>,
     request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
@@ -87,7 +87,7 @@ mod test {
 
     use crate::{
         Config,
-        common::{self, ContextForgeClaims, ContextForgeGatewayAppState, JwtTokenDecoders, Scopes},
+        common::{self, ContextForgeClaims, ContextForgeDataPlaneAppState, JwtTokenDecoders, Scopes},
         const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
         layers::claims_id::claims_layer,
         user_config_store::{ConfigStoreError, UserConfigStore},
@@ -165,7 +165,7 @@ mod test {
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
-        let state = ContextForgeGatewayAppState {
+        let state = ContextForgeDataPlaneAppState {
             jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
@@ -200,7 +200,7 @@ mod test {
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
-        let state = ContextForgeGatewayAppState {
+        let state = ContextForgeDataPlaneAppState {
             jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
@@ -242,7 +242,7 @@ mod test {
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
-        let state = ContextForgeGatewayAppState {
+        let state = ContextForgeDataPlaneAppState {
             jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
@@ -277,7 +277,7 @@ mod test {
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
-        let state = ContextForgeGatewayAppState {
+        let state = ContextForgeDataPlaneAppState {
             jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),

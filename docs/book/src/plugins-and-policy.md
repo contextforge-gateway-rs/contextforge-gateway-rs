@@ -17,6 +17,61 @@ ContextForgeGatewayRuntimePluginConfig
 The runtime registry builds an initialized immutable plugin manager from that
 configuration. Reloading swaps the manager instead of mutating a live one.
 
+## Built-In Demo Factories
+
+The optional `test-plugins` feature compiles three demo factories from the
+independently hosted `cpex-plugins-rs` repository. Redis configuration activates
+factories already present in the binary; it never loads new Rust code into a
+running process.
+
+Start the lightweight dependencies:
+
+```bash
+docker compose -f docker/docker-compose-local.yaml up -d redis gateway-one gateway-two
+```
+
+Register the payload-marker configuration before starting the data plane:
+
+```bash
+docker compose -f docker/docker-compose-local.yaml exec -T redis \
+  redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
+    "version": 1,
+    "cpex": {
+      "plugins": [
+        {
+          "name": "payload-marker",
+          "kind": "contextforge/payload-marker",
+          "hooks": ["cmf.tool_post_invoke"]
+        }
+      ]
+    }
+  }'
+```
+
+Build and run with the demo factories and runtime execution enabled:
+
+```bash
+cargo run -p contextforge-data-plane \
+  --features 'contextforge-data-plane-lib/with_tools,test-plugins' \
+  --bin contextforge-data-plane -- \
+  --address 127.0.0.1:8001 \
+  --redis-address 127.0.0.1 \
+  --redis-port 6379 \
+  --redis-mode plain-text \
+  --token-verification-public-key assets/jwt.key.pub \
+  --token-verification-private-key assets/jwt.key \
+  --upstream-connection-mode plain-text-or-tls \
+  --runtime-plugins-enabled true
+```
+
+Startup should log successful CPEX initialization. The payload marker appends
+`[cpex:payload-marker]` to successful tool results. The supported hook path is
+also covered by:
+
+```bash
+cargo nextest run --locked -p contextforge-data-plane-lib --test gateway_plugins
+```
+
 ## Supported Hooks
 
 The supported surface is deliberately narrow:

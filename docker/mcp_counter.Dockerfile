@@ -17,11 +17,15 @@ git checkout --detach FETCH_HEAD
 sed -i 's/127\.0\.0\.1:8000/0.0.0.0:5555/' examples/servers/src/counter_streamhttp.rs
 EOF
 
+# The official SDK does not commit a workspace lockfile. Keep its dependency
+# graph reproducible while building the pinned revision.
+COPY mcp-rust-sdk.Cargo.lock /tmp/rust-sdk/Cargo.lock
+
 WORKDIR /tmp/rust-sdk/examples/servers
 RUN \
     --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo fetch
+    cargo fetch --locked
 # Keep dependency fetching in its own cacheable layer.
 # hadolint ignore=DL3059
 RUN \

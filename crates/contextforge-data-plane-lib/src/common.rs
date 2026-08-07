@@ -26,7 +26,7 @@ pub struct JwtTokenDecoders {
 
 #[allow(unused)]
 #[derive(Clone)]
-pub struct ContextForgeGatewayAppState {
+pub struct ContextForgeDataPlaneAppState {
     pub(crate) jwt_token_decoding_keys: JwtTokenDecoders,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
     pub(crate) config: Config,
