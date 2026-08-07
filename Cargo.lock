@@ -570,8 +570,8 @@ dependencies = [
  "contextforge-gateway-rs-apis",
  "contextforge-gateway-rs-cpex",
  "contextforge-gateway-rs-lib",
- "contextforge-gateway-rs-secrets-detection",
  "cpex-payload-marker",
+ "cpex-secrets-detection",
  "cpex-text-prefixer",
  "cpex-tool-namespace",
  "http",
@@ -636,8 +636,8 @@ dependencies = [
  "clap",
  "contextforge-gateway-rs-apis",
  "contextforge-gateway-rs-cpex",
- "contextforge-gateway-rs-secrets-detection",
  "cpex",
+ "cpex-secrets-detection",
  "futures",
  "http",
  "hyper",
@@ -667,17 +667,6 @@ dependencies = [
  "tracing-opentelemetry",
  "typed-builder",
  "uuid",
-]
-
-[[package]]
-name = "contextforge-gateway-rs-secrets-detection"
-version = "0.1.0"
-dependencies = [
- "cpex",
- "regex",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -797,6 +786,17 @@ version = "0.1.0"
 source = "git+https://github.com/contextforge-gateway-rs/cpex-plugins-rs?rev=ab47801daccfbba44ea07b033034a347e7b5afdd#ab47801daccfbba44ea07b033034a347e7b5afdd"
 dependencies = [
  "cpex",
+]
+
+[[package]]
+name = "cpex-secrets-detection"
+version = "0.1.0"
+dependencies = [
+ "cpex",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

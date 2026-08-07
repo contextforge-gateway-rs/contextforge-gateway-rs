@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use contextforge_gateway_rs_secrets_detection::{KIND, SecretsDetectionFactory};
 use cpex::{
     PluginManager,
     cpex_core::{
@@ -16,6 +15,7 @@ use cpex::{
         hooks::Extensions,
     },
 };
+use cpex_secrets_detection::{KIND, SecretsDetectionFactory};
 use serde_json::{Value, json};
 
 #[tokio::test]

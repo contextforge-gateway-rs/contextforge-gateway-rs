@@ -147,15 +147,12 @@ fn reflect_text_request(text: String) -> CallToolRequestParams {
 async fn runtime_with_secrets_detection(hooks: Vec<&'static str>, plugin_config: Value) -> Arc<CpexRuntimeRegistry> {
     let mut runtime = CpexRuntimeRegistry::default();
     runtime
-        .register_factory(
-            contextforge_gateway_rs_secrets_detection::KIND,
-            Box::new(contextforge_gateway_rs_secrets_detection::SecretsDetectionFactory),
-        )
+        .register_factory(cpex_secrets_detection::KIND, Box::new(cpex_secrets_detection::SecretsDetectionFactory))
         .expect("secrets detection factory registers");
     let config: CpexConfig = serde_json::from_value(json!({
         "plugins": [{
             "name": "secrets-detection",
-            "kind": contextforge_gateway_rs_secrets_detection::KIND,
+            "kind": cpex_secrets_detection::KIND,
             "hooks": hooks,
             "config": plugin_config,
         }]

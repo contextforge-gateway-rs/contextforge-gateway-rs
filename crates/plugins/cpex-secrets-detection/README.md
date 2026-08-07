@@ -71,7 +71,7 @@ those fields are lost at the manager/executor boundary in CPEX 0.2.2.
 From the workspace root:
 
 ```bash
-cargo +1.96 test -p contextforge-gateway-rs-secrets-detection
+cargo +1.96 test -p cpex-secrets-detection
 cargo +1.96 check -p contextforge-gateway-rs --features secrets-detection-plugin
 cargo +1.96 test -p contextforge-gateway-rs-cpex
 cargo +1.96 test -p contextforge-gateway-rs-lib --test gateway_plugins -- --nocapture

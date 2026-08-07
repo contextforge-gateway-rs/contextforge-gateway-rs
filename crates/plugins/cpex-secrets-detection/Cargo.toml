@@ -1,5 +1,5 @@
 [package]
-name = "contextforge-gateway-rs-secrets-detection"
+name = "cpex-secrets-detection"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
