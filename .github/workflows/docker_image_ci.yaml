@@ -31,6 +31,8 @@ jobs:
     - name: Push image
       run: |        
         IMAGE_ID="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
+        docker tag "${IMAGE_NAME}:latest" "${IMAGE_ID}:${CF_VERSION}"
         docker tag "${IMAGE_NAME}:latest" "${IMAGE_ID}:v${CF_VERSION}"
+        docker push "${IMAGE_ID}:${CF_VERSION}"
         docker push "${IMAGE_ID}:v${CF_VERSION}"
 
