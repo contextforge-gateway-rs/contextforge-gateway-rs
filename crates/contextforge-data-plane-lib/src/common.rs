@@ -325,11 +325,30 @@ impl Config {
     /// completes so the middleware can compare against pre-parsed values
     /// instead of re-parsing on every request.
     ///
-    /// Invalid entries are logged and skipped; they do not cause startup
-    /// failure so a single misconfigured origin does not take down the gateway.
-    pub fn finalize(&mut self) {
-        use crate::layers::mcp_origin::parse_allowed_origins;
-        self.mcp_parsed_origins = parse_allowed_origins(&self.mcp_allowed_origins);
+    /// Returns an error if any configured origin string is invalid.
+    /// The error message names all invalid entries so the operator can correct
+    /// the configuration without restarting repeatedly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigValidationError::InvalidMcpAllowedOrigins`] when one or
+    /// more entries in `mcp_allowed_origins` cannot be parsed as a valid
+    /// serialized origin.
+    pub fn finalize(&mut self) -> Result<(), ConfigValidationError> {
+        use crate::layers::mcp_origin::parse_origin_str;
+        let mut parsed = Vec::with_capacity(self.mcp_allowed_origins.len());
+        let mut invalid = Vec::new();
+        for s in &self.mcp_allowed_origins {
+            match parse_origin_str(s) {
+                Some(origin) => parsed.push(origin),
+                None => invalid.push(s.as_str()),
+            }
+        }
+        if !invalid.is_empty() {
+            return Err(ConfigValidationError::InvalidMcpAllowedOrigins(invalid.join(", ")));
+        }
+        self.mcp_parsed_origins = parsed;
+        Ok(())
     }
 }
 
@@ -337,6 +356,8 @@ impl Config {
 pub enum ConfigValidationError {
     #[error("Redis Configuration Error")]
     RedisConfigurationError(String),
+    #[error("Invalid mcp_allowed_origins entries: {0}")]
+    InvalidMcpAllowedOrigins(String),
 }
 
 impl TryFrom<&Config> for RedisConfig {

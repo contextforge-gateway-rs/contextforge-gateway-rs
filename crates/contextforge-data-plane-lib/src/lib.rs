@@ -67,7 +67,8 @@ pub struct Gateway {
 impl Gateway {
     pub async fn run_gateway(mut self) -> Result<()> {
         // Parse mcp_allowed_origins into typed url::Origin values once at startup.
-        self.config.finalize();
+        // Returns an error (and aborts startup) if any configured origin is invalid.
+        self.config.finalize()?;
         let config = &self.config;
         let session_manager = self.session_manager;
         let user_config_store = match self.user_config_store_type {

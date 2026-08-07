@@ -62,7 +62,7 @@ TCP/TLS listener
   -> HttpMetricsLayer
   -> TraceLayer
   -> /contextforge-rs nested router
-  -> mcp_origin_layer          (MCP 2026-07-28: Host allowlist check, then Origin allowlist or same-origin fallback)
+  -> mcp_origin_layer          (MCP 2026-07-28: Host allowlist check, then Origin allowlist; absent Origin passes, empty allowlist rejects every present Origin)
   -> CORS layer
   -> virtual_host_id_layer
   -> claims_layer
@@ -104,7 +104,7 @@ The request layers insert the context used later by RMCP handlers:
 
 | Layer | Request behavior | Failure behavior |
 | --- | --- | --- |
-| `mcp_origin_layer` | (1) If `mcp_allowed_hosts` is set, rejects `Host` not in the list. (2) Absent `Origin` passes. (3) If `mcp_allowed_origins` is set, `Origin` must be in the list; otherwise `Origin` must equal `Host` (same-origin). Ports normalized per RFC 3986. | Returns `403` for disallowed `Host`, cross-origin, opaque (`null`), or malformed `Origin`. |
+| `mcp_origin_layer` | (1) If `mcp_allowed_hosts` is set, rejects `Host` not in the list. (2) Absent `Origin` passes. (3) `Origin` must be in `mcp_allowed_origins`; an empty allowlist rejects every present `Origin` (no same-origin fallback). Strict serialized-origin syntax enforced; ports normalized per RFC 3986. | Returns `403` for disallowed `Host`, non-allowlisted, opaque (`null`), malformed, or extra-slash `Origin`. |
 | `virtual_host_id_layer` | Extracts `/servers/{virtual_host_id}/mcp` and inserts `VirtualHostId`. | Returns `400` when the inner path does not match. |
 | `claims_layer` | Validates `Authorization: Bearer ...` with configured RS/HMAC decoder, issuer, audience, and expiration. Inserts `ContextForgeClaims`. | Returns `401` for missing or invalid bearer auth. |
 | `session_id_layer` | Reads `Mcp-session-id` and inserts `SessionId` when present. | Missing session id is allowed here; authorized MCP handlers reject it later when required. |

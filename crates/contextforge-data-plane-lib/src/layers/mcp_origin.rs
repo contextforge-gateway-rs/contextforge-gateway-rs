@@ -20,15 +20,6 @@ use crate::common::Config;
 /// - Contains `@` before the first `/` → rejected (userinfo present).
 /// - Contains `?` or `#` → rejected (query / fragment present).
 ///
-/// After parsing, additional structural checks are applied:
-///
-/// - Parsed URL has non-empty username or a password → rejected.
-/// - Parsed URL has a path other than `"/"` (from the slash we appended) →
-///   rejected (path component present).
-/// - Parsed URL has a query or fragment → rejected.
-/// - Parsed URL has no host → rejected (e.g. `data:`, `blob:`).
-/// - `url::Origin` is opaque → rejected.
-///
 /// Returns `None` for the literal `"null"` opaque origin (RFC 6454 §6.2) and
 /// for any value that fails the checks above.
 ///
@@ -36,11 +27,18 @@ use crate::common::Config;
 /// and `https://blah.com` produce the same `Origin::Tuple`; `https://blah.com:8443`
 /// is distinct.
 fn parse_origin(raw: &str) -> Option<Origin> {
+    // ── Pre-parse structural checks on the raw string ─────────────────────
+
+    // Leading/trailing whitespace is not valid in a serialized origin
+    // (RFC 6454 §6.1) and the url crate silently trims it, so reject early.
+    if raw != raw.trim() {
+        return None;
+    }
+
     if raw.trim().eq_ignore_ascii_case("null") {
         return None;
     }
 
-    // ── Pre-parse structural checks on the raw string ─────────────────────
     // Backslash — the url crate treats it as a slash (WHATWG URL §5.1).
     if raw.contains('\\') {
         return None;
@@ -52,6 +50,25 @@ fn parse_origin(raw: &str) -> Option<Origin> {
     }
     // Query / fragment.
     if raw.contains('?') || raw.contains('#') {
+        return None;
+    }
+
+    // A serialized origin is exactly `scheme "://" host [":" port]`.
+    // This rejects "https:///…" and "https:////…" where the url crate silently
+    // collapses the extra slashes into a valid URL.
+    let Some((_, authority_part)) = raw.split_once("://") else {
+        return None; // no "://" at all
+    };
+    // Extra leading slashes after "://" mean the authority is empty or wrong.
+    if authority_part.starts_with('/') || authority_part.is_empty() {
+        return None;
+    }
+    // A trailing ":" with no port digits is malformed (e.g. "https://host:").
+    // Strip any IPv6 brackets first so "[::1]:" is also caught.
+    let host_for_port_check = authority_part.trim_start_matches('[');
+    if let Some((_, port_part)) = host_for_port_check.rsplit_once(':')
+        && port_part.is_empty()
+    {
         return None;
     }
 
@@ -79,6 +96,12 @@ fn parse_origin(raw: &str) -> Option<Origin> {
         Origin::Tuple(_, _, _) => Some(url.origin()),
         Origin::Opaque(_) => None,
     }
+}
+
+/// Public-to-crate entry point for [`Config::finalize`] to validate configured
+/// origins at startup without exposing the private `parse_origin` function.
+pub(crate) fn parse_origin_str(raw: &str) -> Option<Origin> {
+    parse_origin(raw)
 }
 
 // ── Host allowlist ────────────────────────────────────────────────────────────
@@ -118,23 +141,6 @@ fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[String]) -> bo
         };
         entry_host == request_host && entry_port.is_none_or(|p| Some(p) == request_port)
     })
-}
-
-// ── Allowed-origins cache ─────────────────────────────────────────────────────
-
-/// Parses the operator-configured origin strings once and returns the valid
-/// [`Origin`] values.  Invalid entries are logged and skipped so a single
-/// misconfigured entry does not silently disable all protection.
-pub fn parse_allowed_origins(raw: &[String]) -> Vec<Origin> {
-    raw.iter()
-        .filter_map(|s| {
-            let origin = parse_origin(s);
-            if origin.is_none() {
-                warn!("mcp_origin_layer - configured origin is invalid and will be ignored origin = {s}");
-            }
-            origin
-        })
-        .collect()
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────
@@ -252,7 +258,7 @@ mod tests {
     fn config_origins(origins: &[&str]) -> Config {
         let mut c =
             Config { mcp_allowed_origins: origins.iter().map(|s| (*s).to_owned()).collect(), ..Config::default() };
-        c.finalize();
+        c.finalize().expect("test origins should be valid");
         c
     }
 
@@ -266,7 +272,7 @@ mod tests {
             mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(),
             ..Config::default()
         };
-        c.finalize();
+        c.finalize().expect("test origins should be valid");
         c
     }
 
@@ -374,18 +380,69 @@ mod tests {
         assert!(matches!(o, Origin::Tuple(_, _, 8080)));
     }
 
-    // ── parse_allowed_origins unit tests ─────────────────────────────────────
+    // ── parse_origin: new strict syntax regressions ───────────────────────────
 
     #[test]
-    fn invalid_configured_origin_is_skipped() {
-        let parsed = parse_allowed_origins(&["https://valid.example.com".to_owned(), r"https:\bad".to_owned()]);
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0], parse_origin("https://valid.example.com").unwrap());
+    fn extra_slashes_after_scheme_returns_none() {
+        // "https:///…" and "https:////…" — url crate collapses these to a valid
+        // host but they are not valid serialized origins.
+        assert!(parse_origin("https:///app.example.com").is_none());
+        assert!(parse_origin("https:////app.example.com").is_none());
     }
 
     #[test]
-    fn empty_configured_origins_produces_empty_list() {
-        assert!(parse_allowed_origins(&[]).is_empty());
+    fn trailing_colon_without_port_returns_none() {
+        // "https://app.example.com:" — url crate accepts this as no-port.
+        assert!(parse_origin("https://app.example.com:").is_none());
+    }
+
+    #[test]
+    fn leading_whitespace_returns_none() {
+        // url crate silently trims leading/trailing whitespace.
+        assert!(parse_origin("  https://app.example.com").is_none());
+        assert!(parse_origin("https://app.example.com  ").is_none());
+    }
+
+    // ── parse_origin_str / Config::finalize unit tests ────────────────────────
+
+    #[test]
+    fn empty_configured_origins_produces_empty_parsed_list() {
+        let mut c = Config::default();
+        assert!(c.finalize().is_ok());
+        assert!(c.mcp_parsed_origins.is_empty());
+    }
+
+    // ── Config::finalize startup-error tests ──────────────────────────────────
+
+    #[test]
+    fn finalize_with_valid_origins_succeeds() {
+        let mut c = Config { mcp_allowed_origins: vec!["https://app.example.com".to_owned()], ..Config::default() };
+        assert!(c.finalize().is_ok());
+        assert_eq!(c.mcp_parsed_origins.len(), 1);
+    }
+
+    #[test]
+    fn finalize_with_invalid_origin_returns_error() {
+        let mut c = Config {
+            mcp_allowed_origins: vec!["https://valid.example.com".to_owned(), r"https:\bad".to_owned()],
+            ..Config::default()
+        };
+        let err = c.finalize().unwrap_err();
+        assert!(err.to_string().contains(r"https:\bad"));
+        // mcp_parsed_origins must not be partially populated on error.
+        assert!(c.mcp_parsed_origins.is_empty());
+    }
+
+    #[test]
+    fn finalize_reports_all_invalid_origins_in_error() {
+        let mut c = Config {
+            mcp_allowed_origins: vec![r"https:\bad1".to_owned(), "https:////bad2.example.com".to_owned()],
+            ..Config::default()
+        };
+        let err = c.finalize().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains(r"https:\bad1"), "expected bad1 in: {msg}");
+        assert!(msg.contains("https:////bad2.example.com"), "expected bad2 in: {msg}");
     }
 
     // ── authority_in_allowlist unit tests ─────────────────────────────────────
