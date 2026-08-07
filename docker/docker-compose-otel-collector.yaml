@@ -1,4 +1,4 @@
-# ContextForge Gateway (Rust) + OpenTelemetry Collector overlay for local
+# ContextForge Data Plane + OpenTelemetry Collector overlay for local
 # metrics verification (issue #4721 follow-up).
 #
 # Langfuse only ingests traces (see docker-compose-langfuse.yaml). To verify

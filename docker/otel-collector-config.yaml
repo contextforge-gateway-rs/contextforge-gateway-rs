@@ -1,7 +1,7 @@
 # OpenTelemetry Collector configuration for local metrics verification
 # (issue #4721 follow-up).
 #
-# Receives OTLP/HTTP from the host-side ContextForge Gateway and dumps
+# Receives OTLP/HTTP from the host-side ContextForge Data Plane and dumps
 # everything to stdout via the `debug` exporter so we can eyeball the
 # semantic-convention HTTP metrics emitted by axum-otel-metrics:
 #   - http.server.active_requests

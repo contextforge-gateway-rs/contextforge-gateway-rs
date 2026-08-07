@@ -1,0 +1,64 @@
+
+[package]
+name = "contextforge-data-plane-lib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+
+
+[dependencies]
+contextforge-data-plane-apis.workspace = true
+contextforge-data-plane-cpex.workspace = true
+rmcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
+tokio.workspace = true
+tokio-util = "0.7"
+axum.workspace = true
+axum-otel-metrics = "0.14"
+tower-http = { version = "0.7.0", features = ["full"] }
+tower = "0.5.3"
+http.workspace = true
+futures = { version = "0.3", features = ["std", "alloc"] }
+jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }
+chrono = "0.4.44"
+redis.workspace = true
+clap.workspace = true
+thiserror.workspace = true
+rmp-serde.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+uuid.workspace = true
+lru_time_cache = "0.11.11"
+hyper-util = "0.1.20"
+hyper = "1.4.0"
+rustls.workspace = true
+rustls-pki-types = { version = "1.14.1", features = ["std", "alloc"] }
+tokio-rustls = "0.26.4"
+typed-builder = "0.23.2"
+secret-string = "0.0.2"
+
+
+[features]
+default = []
+with_tools = []
+
+
+[dev-dependencies]
+opentelemetry_sdk.workspace = true
+cpex.workspace = true
+openport.workspace = true
+secrets_detection_rust.workspace = true
+test-log = "0.2.20"
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

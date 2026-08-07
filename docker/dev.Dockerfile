@@ -6,7 +6,7 @@ RUN <<EOF
 apt update
 apt install -y git ca-certificates git
 EOF
-WORKDIR /tmp/contextforge-gateway-rs
+WORKDIR /tmp/contextforge-data-plane
 COPY .cargo/config.toml ./.cargo/config.toml
 COPY crates ./crates
 COPY Cargo.toml ./Cargo.toml
@@ -29,7 +29,7 @@ apt install -y python3
 EOF
 
 WORKDIR /
-COPY --from=builder /tmp/contextforge-gateway-rs/target/release/contextforge-gateway-rs /contextforge-gateway-rs
-LABEL org.opencontainers.image.source=https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
-LABEL org.opencontainers.image.description="contextforge-gateway-rs - open source highly experimental dataplane for Contextforge Gateway."
-ENTRYPOINT ["/contextforge-gateway-rs"]
+COPY --from=builder /tmp/contextforge-data-plane/target/release/contextforge-data-plane /contextforge-data-plane
+LABEL org.opencontainers.image.source=https://github.com/contextforge-org/contextforge-data-plane
+LABEL org.opencontainers.image.description="contextforge-data-plane - open source experimental data plane for ContextForge."
+ENTRYPOINT ["/contextforge-data-plane"]

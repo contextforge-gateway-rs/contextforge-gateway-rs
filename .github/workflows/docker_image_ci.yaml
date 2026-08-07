@@ -6,7 +6,7 @@ on:
    # tags: ["2.0.0"]
     
 env:
-  IMAGE_NAME: contextforge-gateway-rs
+  IMAGE_NAME: contextforge-data-plane
   
 jobs:
 

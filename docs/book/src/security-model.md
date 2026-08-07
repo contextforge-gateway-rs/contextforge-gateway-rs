@@ -55,7 +55,7 @@ apply, but expect this to tighten as policy work lands.
 
 ## Local Bootstrap Helpers
 
-The `contextforge-gateway-rs-lib/with_tools` feature compiles in
+The `contextforge-data-plane-lib/with_tools` feature compiles in
 `/contextforge-rs/admin/tokens/{user}`,
 `/contextforge-rs/admin/userconfigs/{user}`, and `/contextforge-rs/health`.
 These routes are registered outside the authentication middleware, so token

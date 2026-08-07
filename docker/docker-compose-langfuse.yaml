@@ -1,4 +1,4 @@
-# ContextForge Gateway (Rust) + self-hosted Langfuse for OpenTelemetry trace
+# ContextForge Data Plane + self-hosted Langfuse for OpenTelemetry trace
 # verification (issue #4721).
 #
 # This overlay layers Langfuse on top of the local gateway compose stack so the
@@ -106,8 +106,8 @@ services:
       # ── Auto-provision org, project, and API keys on first boot ──
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-contextforge}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-ContextForge}
-      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-contextforge-gateway-rs}
-      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-ContextForge Gateway (Rust)}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-contextforge-data-plane}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-ContextForge Data Plane}
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-contextforge}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-contextforge}
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}

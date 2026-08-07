@@ -28,7 +28,7 @@ migration inventory and should be replaced as the modern implementation lands.
 
 ## In-Repo Integration Tests
 
-`crates/contextforge-gateway-rs-lib/tests/` exercises the gateway against
+`crates/contextforge-data-plane-lib/tests/` exercises the gateway against
 in-process mock MCP backends (shared helpers live in `tests/support/`):
 
 | Test file | Covers |
@@ -42,7 +42,7 @@ These run in `cargo nextest run` with no Docker dependencies.
 
 ## Full-Stack Integration Harness
 
-[`cf-integration`](https://github.com/contextforge-gateway-rs/cf-integration)
+[`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools)
 wires the external ContextForge control plane (`cf-controlplane`) to this
 dataplane the way production intends: the stock upstream Compose stack, plus
 exactly two intentional differences — nginx routes only

@@ -1,6 +1,6 @@
-# The ContextForge Gateway Book
+# The ContextForge Data Plane Book
 
-- [🌉 What is ContextForge Gateway?](what-is-contextforge-gateway.md)
+- [🌉 What is ContextForge Data Plane?](what-is-contextforge-data-plane.md)
 - [🚀 Getting Started](usage.md)
   - [Run the Gateway Locally](running-the-gateway.md)
   - [Configuration Reference](gateway-options.md)

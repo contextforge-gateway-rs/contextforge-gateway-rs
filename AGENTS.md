@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for agents working on `contextforge-gateway-rs`.
+Guidance for agents working on `contextforge-data-plane`.
 
 This repo is the Rust dataplane part of ContextForge. It must stay compatible
 with the external ContextForge control plane in
@@ -25,13 +25,13 @@ control-plane, UI, IAM, or metrics-storage app.
 
 ## Architecture
 
-Architecture documentation lives in The ContextForge Gateway Book under
+Architecture documentation lives in The ContextForge Data Plane Book under
 [docs/book](docs/book/README.md). Read the relevant page before changing the
 hot path:
 
 | Page | Read it for |
 | --- | --- |
-| [What is ContextForge Gateway?](docs/book/src/what-is-contextforge-gateway.md) | Scope, boundaries, key terms, and the mental model. |
+| [What is ContextForge Data Plane?](docs/book/src/what-is-contextforge-data-plane.md) | Scope, boundaries, key terms, and the mental model. |
 | [System Shape](docs/book/src/system-shape.md) | Crate layout, control-plane boundary, pipeline shape, state ownership, and module boundaries. |
 | [Request Flow](docs/book/src/request-flow.md) | Startup, middleware order, initialize fanout, authorized calls, and the response path. |
 | [Concurrency And Runtime Model](docs/book/src/concurrency-and-runtime.md) | Executor shapes, shared state and locks, fanout, and cancellation. |
@@ -49,7 +49,7 @@ see [docs/book/README.md](docs/book/README.md) for build and validation steps.
 
 ## Working Rules
 
-- Most product behavior belongs in `contextforge-gateway-rs-lib`; avoid adding
+- Most product behavior belongs in `contextforge-data-plane-lib`; avoid adding
   dataplane logic to the binary crate.
 - Keep persistent config access behind `UserConfigStore`; do not push Redis
   details into routing code.

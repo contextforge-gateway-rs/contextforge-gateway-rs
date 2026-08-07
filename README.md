@@ -1,7 +1,7 @@
-# ContextForge Dataplane
+# ContextForge Data Plane
 
 Architecture, configuration, and operations documentation lives in
-[The ContextForge Gateway Book](docs/book/src/SUMMARY.md) under `docs/book`.
+[The ContextForge Data Plane Book](docs/book/src/SUMMARY.md) under `docs/book`.
 Build it locally with `mdbook serve docs/book`; see
 [docs/book/README.md](docs/book/README.md) for details.
 
@@ -18,7 +18,7 @@ docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-
 
 2. Run gateway
 ```bash 
-    cargo run --bin contextforge-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16 --redis-mode=plain-text --upstream-connection-mode=plain-text-or-tls
+    cargo run --bin contextforge-data-plane -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16 --redis-mode=plain-text --upstream-connection-mode=plain-text-or-tls
 ```
 
 This should spin up Redis instance and two mcp-gateways: a simple counter and a conformance test server from mcp-rust-sdk
@@ -76,7 +76,7 @@ curl --request POST \
 Runtime CPEX plugins are disabled by default. Enable hook execution when starting the gateway:
 
 ```bash
-cargo run --release --bin contextforge-gateway-rs -- \
+cargo run --release --bin contextforge-data-plane -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \
@@ -99,7 +99,7 @@ This demo uses the `test-plugins` feature, which includes the demo plugin crates
 Build the gateway with the demo plugin factories:
 
 ```bash
-cargo check -p contextforge-gateway-rs --features test-plugins
+cargo check -p contextforge-data-plane --features test-plugins
 ```
 
 The `test-plugins` feature registers those demo plugin factories through the gateway's generic CMF factory adapter.
@@ -141,7 +141,7 @@ Run only one gateway process on port `8001` at a time. Stop the current gateway 
 Start the gateway with runtime plugins disabled for a baseline run:
 
 ```bash
-cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
+cargo run --release --features test-plugins --bin contextforge-data-plane -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \
@@ -156,7 +156,7 @@ cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
 Start the gateway with runtime plugins enabled for the marker run:
 
 ```bash
-cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
+cargo run --release --features test-plugins --bin contextforge-data-plane -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \

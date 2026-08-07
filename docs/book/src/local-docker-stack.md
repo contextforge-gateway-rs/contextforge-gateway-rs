@@ -13,7 +13,7 @@ make docker-prod
 make testing-up
 ```
 
-`make docker-prod` builds `dataplane:latest` from `docker/Dockerfile`;
+`make docker-prod` builds `contextforge-data-plane:latest` from `docker/Dockerfile`;
 `testing-up` refuses to start if this image doesn't exist yet. `testing-up`
 starts: `nginx`, `control-plane`, `redis`, `postgres`, `pgbouncer`,
 `data-plane`, `fast_time_server`, `register_fast_time` (see `Makefile`).
@@ -109,5 +109,5 @@ Stops the stack (containers/volumes kept; rerun `testing-up` to resume).
 | --- | --- | --- |
 | `403 {"detail":"Token is invalid: User is no longer a member of the associated team"}` | Hit control-plane instead of dataplane — URL missing `/contextforge-rs` prefix. | Use `/contextforge-rs/servers/<id>/mcp`. |
 | `400 "Problem occurred retrieving the configuration"` | Dataplane has no `UserConfig` yet for the token's subject (`register_fast_time`/publisher hasn't run or synced). | Re-check config propagation above; confirm `register_fast_time` logs completed successfully and wait out the publisher interval. |
-| `tools/list` returns `{"tools": [], "resultType": "complete"}` | Dataplane resolved the `UserConfig` fine, but couldn't connect to a declared backend. | `docker compose logs data-plane \| grep -i "worker quit\|BadScheme\|backend"`. A `BadScheme` error means `CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE` isn't set to `plain-text-or-tls` for a plain-`http://` backend. |
+| `tools/list` returns `{"tools": [], "resultType": "complete"}` | Dataplane resolved the `UserConfig` fine, but couldn't connect to a declared backend. | `docker compose logs data-plane \| grep -i "worker quit\|BadScheme\|backend"`. A `BadScheme` error means `CONTEXTFORGE_DATA_PLANE_UPSTREAM_CONNECTION_MODE` isn't set to `plain-text-or-tls` for a plain-`http://` backend. |
 | `401` on every request | Bad/expired token, or control-plane and dataplane are signing/verifying with different keys or algorithms. | Confirm both sides have matching `JWT_ALGORITHM`/key config — see [Control-Plane Integration](control-plane-integration.md). |

@@ -35,7 +35,7 @@ In text form, the same model is:
 ContextForge control plane
   -> writes runtime config and owns management workflows
 
-contextforge-gateway-rs process
+contextforge-data-plane process
   -> authenticates, loads config, routes, fans out, applies hooks, emits signals
 
 backend MCP servers
@@ -81,7 +81,7 @@ server. Internally, it is a focused proxy, fanout, policy, and merge dataplane.
 
 ## Process Assembly
 
-Startup begins in `crates/contextforge-gateway-rs/src/main.rs`. The binary crate
+Startup begins in `crates/contextforge-data-plane/src/main.rs`. The binary crate
 does process-level assembly:
 
 ```text
@@ -114,7 +114,7 @@ logging, trace export, and metrics export setup.
 
 ## Gateway Assembly
 
-`crates/contextforge-gateway-rs-lib/src/lib.rs` builds the dataplane stack in
+`crates/contextforge-data-plane-lib/src/lib.rs` builds the dataplane stack in
 `Gateway::run_gateway`:
 
 ```text
@@ -146,10 +146,10 @@ The repository is a Cargo workspace with narrow responsibilities:
 
 | Crate | Responsibility |
 | --- | --- |
-| `contextforge-gateway-rs` | Process shell: CLI config, logging, telemetry exporters, Tokio runtime, allocator, plugin registry startup, gateway construction. |
-| `contextforge-gateway-rs-lib` | Dataplane library: Axum stack, request middleware, config lookup, MCP fanout/routing, backend sessions, upstream clients, downstream transports. |
-| `contextforge-gateway-rs-apis` | Shared contract: `UserConfig`, `VirtualHost`, `BackendMCPGateway`, Redis user key, plugin config document, schema generation. |
-| `contextforge-gateway-rs-cpex` | Plugin integration: CPEX runtime registry, Redis plugin config loading, supported tool pre/post hooks, stream event adaptation. |
+| `contextforge-data-plane` | Process shell: CLI config, logging, telemetry exporters, Tokio runtime, allocator, plugin registry startup, gateway construction. |
+| `contextforge-data-plane-lib` | Dataplane library: Axum stack, request middleware, config lookup, MCP fanout/routing, backend sessions, upstream clients, downstream transports. |
+| `contextforge-data-plane-apis` | Shared contract: `UserConfig`, `VirtualHost`, `BackendMCPGateway`, Redis user key, plugin config document, schema generation. |
+| `contextforge-data-plane-cpex` | Plugin integration: CPEX runtime registry, Redis plugin config loading, supported tool pre/post hooks, stream event adaptation. |
 | `contextforge-load-test` | Performance harness: end-to-end MCP traffic driver. |
 
 Keep those boundaries stable. Adding dataplane behavior to the binary crate

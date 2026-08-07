@@ -21,7 +21,7 @@ families the gateway can route.
 ## Initialize Sequence
 
 `McpService::initialize` in
-`crates/contextforge-gateway-rs-lib/src/gateway/mcp_service/initialization.rs`
+`crates/contextforge-data-plane-lib/src/gateway/mcp_service/initialization.rs`
 runs this capability-related flow:
 
 1. The gateway validates the call and resolves the selected virtual host.

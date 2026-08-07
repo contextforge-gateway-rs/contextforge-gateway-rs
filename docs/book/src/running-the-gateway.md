@@ -12,10 +12,10 @@ sample backend MCP servers:
 | `redis` | `6379` | Runtime config store for user config. |
 | `gateway-one` | `5555` | Sample counter MCP backend. |
 | `gateway-two` | `5556` | Sample conformance MCP backend. |
-| `contextforge-gateway-rs` | `8001` | Rust dataplane process you run with Cargo. |
+| `contextforge-data-plane` | `8001` | Rust dataplane process you run with Cargo. |
 
 > 🧪 The token and user-config endpoints below are local bootstrap helpers. They
-> are compiled with `contextforge-gateway-rs-lib/with_tools`. In a real
+> are compiled with `contextforge-data-plane-lib/with_tools`. In a real
 > deployment, the external ContextForge control plane mints tokens and writes
 > config to Redis.
 
@@ -62,9 +62,9 @@ For the local bootstrap flow, run the binary with the `with_tools` dependency
 feature so the admin token and config endpoints are available:
 
 ```bash
-cargo run -p contextforge-gateway-rs \
-  --features contextforge-gateway-rs-lib/with_tools \
-  --bin contextforge-gateway-rs -- \
+cargo run -p contextforge-data-plane \
+  --features contextforge-data-plane-lib/with_tools \
+  --bin contextforge-data-plane -- \
   --address 127.0.0.1:8001 \
   --redis-address 127.0.0.1 \
   --redis-port 6379 \
