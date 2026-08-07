@@ -76,7 +76,8 @@ curl --request POST \
 Runtime CPEX plugins are disabled by default. Enable hook execution when starting the gateway:
 
 ```bash
-cargo run --release --bin contextforge-gateway-rs -- \
+cargo run --release \
+  --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \
@@ -91,6 +92,38 @@ cargo run --release --bin contextforge-gateway-rs -- \
 Plugin configuration is stored in Redis at key `ContextForgeGatewayRuntimePluginConfig`. The value can be JSON or MessagePack with `version: 1` and `cpex` containing the CPEX config. When runtime plugins are enabled with Redis config, this key must exist before startup. The gateway reloads that key while running, builds a new initialized CPEX runtime, and swaps the runtime registry to the new immutable `PluginManager`. The existing `PluginManager` is not mutated after initialization.
 
 This integration currently passes only tool payloads. CPEX configs that enable route-based plugin selection, plugin directories, global policies/defaults, non-tool hooks, or plugin conditions are rejected in this PR. Redis write access to this key is a control-plane trust boundary because it controls which registered hooks run.
+
+### Experimental Secrets Detection Plugin
+
+The bundled secrets detection CPEX plugin is experimental. It is compiled into
+the gateway with `contextforge-gateway-rs/plugins`; Redis config only activates
+plugin factories that are already present in the binary.
+
+Activation requires all three pieces:
+
+- Compile-time feature: `contextforge-gateway-rs/plugins`
+- Runtime flag: `--runtime-plugins-enabled true`
+- Redis config key: `ContextForgeGatewayRuntimePluginConfig`
+
+The plugin kind is `validator/secrets-detection`. The dataplane currently wires
+only `cmf.tool_pre_invoke` and `cmf.tool_post_invoke`.
+
+Example run command:
+
+```bash
+cargo run --release \
+  --features contextforge-gateway-rs/plugins \
+  --bin contextforge-gateway-rs -- \
+  --address 0.0.0.0:8001 \
+  --redis-port 6379 \
+  --redis-address 127.0.0.1 \
+  --token-verification-public-key assets/jwt.key.pub \
+  --token-verification-private-key assets/jwt.key \
+  --number-of-cpus 16 \
+  --redis-mode=plain-text \
+  --upstream-connection-mode=plain-text-or-tls \
+  --runtime-plugins-enabled true
+```
 
 ### Payload Marker Demo
 
