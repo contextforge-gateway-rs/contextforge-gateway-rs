@@ -1,65 +1,55 @@
 # Run the Gateway Locally
 
-This page walks through a local run that proves the dataplane can authenticate a
-caller, load runtime config from Redis, initialize backend MCP sessions, and
-return merged MCP results to a downstream client.
+Use one of the two local workflows below. Both use the current Fast Time MCP
+backend from `IBM/contextforge-examples`.
 
-The local flow uses the repository's Docker Compose stack for Redis and two
-sample backend MCP servers:
+## Recommended End-to-End Stack
 
-| Service | Local port | Role |
-| --- | --- | --- |
-| `redis` | `6379` | Runtime config store for user config. |
-| `gateway-one` | `5555` | Sample counter MCP backend. |
-| `gateway-two` | `5556` | Sample conformance MCP backend. |
-| `contextforge-data-plane` | `8001` | Rust dataplane process you run with Cargo. |
+The supported smoke environment includes the external ContextForge control
+plane, Redis, PostgreSQL, PgBouncer, the Rust data plane, and
+`fast_time_server`:
 
-> 🧪 The token and user-config endpoints below are local bootstrap helpers. They
-> are compiled with `contextforge-data-plane-lib/with_tools`. In a real
-> deployment, the external ContextForge control plane mints tokens and writes
-> config to Redis.
+```bash
+make docker-prod
+make testing-up
+```
 
-Run the numbered steps in order, in the same terminal. Later steps reuse shell
-variables such as `${TOKEN}` and `${SESSION_ID}` that earlier steps set, so a
-fresh shell will not have them.
+Confirm the services and one-shot registration job:
 
-## Prerequisites
+```bash
+docker compose -f docker/docker-compose.yml ps -a
+docker compose -f docker/docker-compose.yml logs register_fast_time
+```
 
-- Rust toolchain matching the workspace `rust-version`.
-- Docker Compose.
-- Free local ports: `6379`, `16379`, `5555`, `5556`, and `8001`. The Compose
-  stack maps both plain (`6379`) and TLS (`16379`) Redis ports.
-- Test keys under `assets/`: `jwt.key` and `jwt.key.pub`.
+Continue with [Local Docker Stack](local-docker-stack.md) for token creation,
+config propagation, and an MCP smoke test through the complete control-plane to
+data-plane path.
 
-## 1. Start Redis and Backend MCP Servers
+Stop the stack without deleting its containers or volumes:
+
+```bash
+make testing-down
+```
+
+## Run the Rust Binary from Cargo
+
+For debugger, profiler, or rapid host-development loops, start only Redis and
+the current test backend:
 
 ```bash
 docker compose -f docker/docker-compose-local.yaml up -d
+docker compose -f docker/docker-compose-local.yaml ps redis fast_time_server
 ```
 
-The sample backends default to a CPU limit of `8` and a reservation of `4`,
-which Docker rejects on hosts with fewer CPUs
-(`range of CPUs is from 0.01 to ...`). On smaller machines, override the
-sizing knobs:
+The services are available at:
 
-```bash
-GATEWAY_CPU_LIMIT=2 GATEWAY_CPU_RESERVATION=0.5 \
-  docker compose -f docker/docker-compose-local.yaml up -d
-```
+| Service | Local endpoint | Role |
+| --- | --- | --- |
+| `redis` | `127.0.0.1:6379` | Runtime configuration store. |
+| `fast_time_server` | `http://127.0.0.1:8880/mcp` | Current sample MCP backend. |
 
-Check that the local dependencies are running:
-
-```bash
-docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-two
-```
-
-The backends listen on the host so the gateway can reach them at
-`http://127.0.0.1:5555/mcp` and `http://127.0.0.1:5556/mcp`.
-
-## 2. Start the Gateway
-
-For the local bootstrap flow, run the binary with the `with_tools` dependency
-feature so the admin token and config endpoints are available:
+Run the binary with the local bootstrap helpers when direct token/config setup
+is needed during development:
 
 ```bash
 cargo run -p contextforge-data-plane \
@@ -75,199 +65,19 @@ cargo run -p contextforge-data-plane \
   --number-of-cpus 4
 ```
 
-Keep this process running. The gateway exposes MCP traffic under:
+The client-facing route is:
 
 ```text
 http://127.0.0.1:8001/contextforge-rs/servers/{virtual_host_id}/mcp
 ```
 
-The local command uses `--upstream-connection-mode plain-text-or-tls` because
-the sample backend URLs are plain HTTP. Without that option, the default
-upstream client is HTTPS-only.
+The target downstream contract is MCP `2026-07-28` over Streamable HTTP using
+`server/discover` and per-request client metadata. Older protocol versions,
+legacy session initialization, and SSE remain control-plane responsibilities;
+see [MCP Behavior](mcp-behavior.md) and
+[Control-Plane Integration](control-plane-integration.md).
 
-## 3. Mint a Test Token
-
-In another terminal, request a JWT for the test subject:
-
-```bash
-USER_ID=11111111-1111-1111-1111-111111111111
-USER_EMAIL=admin@example.com
-
-TOKEN=$(curl --silent --show-error \
-  --url "http://127.0.0.1:8001/contextforge-rs/admin/tokens/${USER_ID}?email=${USER_EMAIL}")
-
-printf '%s\n' "${TOKEN}"
-```
-
-The token's `sub` claim is the UUID in `USER_ID`. The gateway uses that subject
-as the Redis user-config key; email metadata, when present, is not used for MCP
-routing.
-
-## 4. Write User Config
-
-Seed Redis with one virtual host and two backend MCP servers:
-
-```bash
-curl --silent --show-error --request POST \
-  --url "http://127.0.0.1:8001/contextforge-rs/admin/userconfigs/${USER_ID}" \
-  --header 'content-type: application/json' \
-  --data '{
-    "virtual_hosts": {
-      "c0ffee00f001f00lf00ldeadbeefdead": {
-        "backends": {
-          "gateway-one": {
-            "name": "gateway-one",
-            "url": "http://127.0.0.1:5555/mcp",
-            "transport": "STREAMABLEHTTP",
-            "passthrough_headers": [],
-            "allowed_tool_names": [],
-            "allowed_resource_names": [],
-            "allowed_prompt_names": []
-          },
-          "gateway-two": {
-            "name": "gateway-two",
-            "url": "http://127.0.0.1:5556/mcp",
-            "transport": "STREAMABLEHTTP",
-            "passthrough_headers": [],
-            "allowed_tool_names": [],
-            "allowed_resource_names": [],
-            "allowed_prompt_names": []
-          }
-        }
-      }
-    }
-  }'
-```
-
-The important relationship is:
-
-```text
-JWT subject 11111111-1111-1111-1111-111111111111
-  -> Redis user config
-  -> virtual host c0ffee00f001f00lf00ldeadbeefdead
-  -> backend MCP URLs
-```
-
-## 5. Temporary Legacy Smoke Flow
-
-> This section exercises the current migration-era implementation. It is not
-> the supported downstream client contract. New clients must target MCP
-> `2026-07-28` over Streamable HTTP with `server/discover` and per-request
-> client context. Legacy clients and SSE remain on control-plane routes and do
-> not use this dataplane endpoint; this smoke flow will be replaced as the
-> dataplane migration lands.
-
-Open a streamable HTTP MCP session and save the returned `mcp-session-id`
-header:
-
-```bash
-INIT_HEADERS=$(mktemp)
-
-curl --silent --show-error \
-  --dump-header "${INIT_HEADERS}" \
-  --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
-  --header "authorization: Bearer ${TOKEN}" \
-  --header 'content-type: application/json' \
-  --header 'accept: application/json, text/event-stream' \
-  --data '{
-    "jsonrpc": "2.0",
-    "id": 0,
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-11-25",
-      "capabilities": {},
-      "clientInfo": { "name": "curl", "version": "0.1.0" }
-    }
-  }'
-
-SESSION_ID=$(awk 'tolower($1) == "mcp-session-id:" { gsub("\r", "", $2); print $2 }' "${INIT_HEADERS}")
-printf '%s\n' "${SESSION_ID}"
-```
-
-During `initialize`, the gateway opens upstream MCP client sessions to the
-configured backends and stores them under the downstream session id.
-
-Send the MCP initialized notification:
-
-```bash
-curl --silent --show-error \
-  --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
-  --header "authorization: Bearer ${TOKEN}" \
-  --header "mcp-session-id: ${SESSION_ID}" \
-  --header 'mcp-protocol-version: 2025-11-25' \
-  --header 'content-type: application/json' \
-  --header 'accept: application/json, text/event-stream' \
-  --data '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-```
-
-## 6. List Tools
-
-```bash
-curl --silent --show-error \
-  --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
-  --header "authorization: Bearer ${TOKEN}" \
-  --header "mcp-session-id: ${SESSION_ID}" \
-  --header 'mcp-protocol-version: 2025-11-25' \
-  --header 'content-type: application/json' \
-  --header 'accept: application/json, text/event-stream' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
-
-The response should contain tool names prefixed with their backend name, such as
-`gateway-one-increment`. That prefix is the routing contract for later
-`tools/call` requests.
-
-## 7. Call a Tool
-
-```bash
-curl --silent --show-error \
-  --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
-  --header "authorization: Bearer ${TOKEN}" \
-  --header "mcp-session-id: ${SESSION_ID}" \
-  --header 'mcp-protocol-version: 2025-11-25' \
-  --header 'content-type: application/json' \
-  --header 'accept: application/json, text/event-stream' \
-  --data '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-      "name": "gateway-one-increment",
-      "arguments": {}
-    }
-  }'
-```
-
-The gateway strips `gateway-one-`, forwards `increment` to the `gateway-one`
-backend session, and returns the backend result to the client.
-
-## 8. End the Session
-
-```bash
-curl --silent --show-error --request DELETE \
-  --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
-  --header "authorization: Bearer ${TOKEN}" \
-  --header "mcp-session-id: ${SESSION_ID}"
-```
-
-The gateway removes local session state and backend transports for that user
-and MCP session id.
-
-## Troubleshooting
-
-| Symptom | Likely boundary |
-| --- | --- |
-| `401 Unauthorized` | Missing bearer token, invalid signature, expired token, wrong issuer, wrong audience, or no configured decoder key. |
-| `400 Problem occurred retrieving the configuration` | Redis has no config for the JWT subject, or the Redis lookup returned no data. |
-| `500 Problem occurred retrieving the configuration` | The stored config could not be decoded, the Redis key could not be encoded, or another non-missing config-store error occurred. |
-| `404` with `{"detail":"Server not found"}` | The path virtual host id is not present in that user's config. |
-| MCP session id is empty | The `initialize` call failed before RMCP created a downstream session. |
-| Backend calls fail | Backend URL is wrong, backend process is down, or `--upstream-connection-mode` rejects the URL scheme. |
-| Calls fail after gateway restart | Backend MCP session state is local process state today. Re-run `initialize`. |
-
-## Tear Down
-
-Stop the gateway with `Ctrl-C`, then stop local dependencies:
+Stop the host process with `Ctrl-C`, then remove the lightweight dependencies:
 
 ```bash
 docker compose -f docker/docker-compose-local.yaml down

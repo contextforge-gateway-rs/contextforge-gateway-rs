@@ -19,7 +19,7 @@
 # this repo:
 #   * No `gateway:` overrides (Rust gateway runs on the host, not in compose).
 #   * No fast-test / a2a sidecar overrides.
-#   * Reuses `gateways-net` already declared by docker-compose-local.yaml.
+#   * Reuses `contextforge-data-plane-net` from docker-compose-local.yaml.
 #
 # All credentials below are local-only development defaults and may be
 # overridden via environment variables before `docker compose up`.
@@ -53,7 +53,7 @@ services:
   langfuse-web:
     image: docker.io/langfuse/langfuse:3
     restart: unless-stopped
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     depends_on:
       langfuse-db:
         condition: service_healthy
@@ -135,7 +135,7 @@ services:
   langfuse-worker:
     image: docker.io/langfuse/langfuse-worker:3
     restart: unless-stopped
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     depends_on:
       langfuse-db:
         condition: service_healthy
@@ -162,7 +162,7 @@ services:
   langfuse-db:
     image: docker.io/postgres:${LANGFUSE_POSTGRES_VERSION:-17}
     restart: unless-stopped
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-langfuse}
@@ -191,7 +191,7 @@ services:
   langfuse-clickhouse:
     image: docker.io/clickhouse/clickhouse-server
     restart: unless-stopped
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
@@ -221,7 +221,7 @@ services:
   langfuse-minio:
     image: cgr.dev/chainguard/minio
     restart: unless-stopped
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
@@ -250,7 +250,7 @@ services:
   langfuse-cache:
     image: docker.io/redis:7
     restart: unless-stopped
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     command: >
       --requirepass ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}
       --maxmemory-policy noeviction
