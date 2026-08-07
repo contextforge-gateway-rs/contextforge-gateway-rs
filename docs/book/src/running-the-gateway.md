@@ -1,7 +1,7 @@
 # Run the Gateway Locally
 
 Use one of the two local workflows below. The end-to-end stack uses the current
-Fast Time MCP backend, while the lightweight stack uses official MCP Rust SDK
+Fast Time MCP backend, while the lightweight stack uses counter and conformance
 test fixtures.
 
 ## Prerequisites
@@ -56,9 +56,6 @@ The services are available at:
 | `redis` | `127.0.0.1:6379` | Runtime configuration store. |
 | `gateway-one` | `http://127.0.0.1:5555/mcp` | MCP Rust SDK counter fixture. |
 | `gateway-two` | `http://127.0.0.1:5556/mcp` | MCP Rust SDK conformance fixture. |
-
-Both fixtures build from a pinned revision of the official
-`modelcontextprotocol/rust-sdk` repository, not the retired SDK fork.
 
 Run the binary with the local bootstrap helpers when direct token/config setup
 is needed during development:

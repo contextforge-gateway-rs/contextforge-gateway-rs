@@ -1,20 +1,28 @@
-# Lightweight dependencies for running the dataplane binary from Cargo.
+#version: "3.9"          # Supported by both podman-compose and Docker Compose v2+
 name: contextforge-data-plane-local
+  
 
 networks:
-  contextforge-data-plane-net:
+  contextforge-data-plane-net: # Single user-defined bridge network keeps traffic private
     driver: bridge
 
+###############################################################################
+#  CORE SERVICE - ContextForge
+###############################################################################
 services:
   gateway-one:
     image: mcp_counter
     build:
       dockerfile: mcp_counter.Dockerfile
+
     networks: [contextforge-data-plane-net]
-    ports:
-      - "5555:5555"
+    ports: [5555:5555]
+
     environment:
       - RUST_LOG=warn
+      - MCP_SERVER_BIND_ADDRESS=0.0.0.0:5555
+      - MCP_SERVER_ALLOWED_HOSTS=127.0.0.1,9.85.219.104,192.168.1.14
+            
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -22,20 +30,31 @@ services:
       nofile:
         soft: 65535
         hard: 65535
+
     depends_on:
       redis:
-        condition: service_healthy
+        condition: service_started
+
+    deploy:      
+      resources:
+        limits:
+          cpus: '${GATEWAY_CPU_LIMIT:-8}'
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}
 
   gateway-two:
     image: mcp_conformance
     build:
       dockerfile: mcp_conformance.Dockerfile
     networks: [contextforge-data-plane-net]
-    ports:
-      - "5556:5556"
+    ports: [5556:5556]
+
     environment:
       - RUST_LOG=warn
       - PORT=5556
+      
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
@@ -43,10 +62,28 @@ services:
       nofile:
         soft: 65535
         hard: 65535
+
     depends_on:
       redis:
-        condition: service_healthy
+        condition: service_started
 
+    deploy:      
+      resources:
+        limits:
+          cpus: '${GATEWAY_CPU_LIMIT:-8}'
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: '${GATEWAY_CPU_RESERVATION:-4}'
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}          
+
+
+    
+
+
+
+###############################################################################
+#  CACHE
+###############################################################################
   redis:
     image: redis:latest
     ulimits:
@@ -80,17 +117,12 @@ services:
       - "no"
       # - "--tls-ca-cert-file"
       # - "/tls_config/contextforge.intermediate.cert.pem"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
     ports:
-      - "6379:6379"
-      - "16379:16379"
-    volumes:
+      - "6379:6379"      # expose only if you want host access
+      - "16379:16379"      # expose only if you want host access
+    volumes: 
       - ../assets/contextforgeCA/:/tls_config:z
+    
 
     networks: [contextforge-data-plane-net]
     deploy:
@@ -101,3 +133,4 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+
