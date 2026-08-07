@@ -138,6 +138,11 @@ RuntimePluginConfigDocument
   cpex: CpexConfig
 ```
 
+Runtime config activates plugin factories that were compiled into the gateway
+binary; it does not load new Rust code. The experimental secrets detection
+plugin is included with the `contextforge-data-plane/plugins` Cargo feature and
+activated with plugin kind `validator/secrets-detection`.
+
 The plugin config loader accepts JSON bytes or MessagePack bytes. It rejects
 documents with the wrong version, missing `cpex` config, unsupported CPEX
 features, or an unavailable config store.

@@ -83,6 +83,16 @@ http://127.0.0.1:8001/contextforge-rs/servers/{virtual_host_id}/mcp
 Keep the data-plane process running. Use another terminal for the remaining
 steps.
 
+Runtime CPEX plugins need both a compile-time feature and runtime config. To
+try the experimental secrets detection plugin locally, build with
+`contextforge-data-plane/plugins`, start the data plane with
+`--runtime-plugins-enabled true`, and write the Redis plugin config before
+startup.
+
+The local command uses `--upstream-connection-mode plain-text-or-tls` because
+the sample backend URLs are plain HTTP. Without that option, the default
+upstream client is HTTPS-only.
+
 ### Mint a Local Test Token
 
 The local token helper signs an RS256 token with `assets/jwt.key`. Its `sub`

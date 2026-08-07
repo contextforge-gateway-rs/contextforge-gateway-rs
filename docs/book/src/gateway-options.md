@@ -122,7 +122,10 @@ before reaching that backend because the reqwest client is HTTPS-only.
 
 When runtime plugins are enabled, plugin config is read from Redis key
 `ContextForgeGatewayRuntimePluginConfig`. That key is a control-plane trust
-boundary because it decides which registered hooks run.
+boundary because it decides which registered hooks run. The flag only enables
+execution for plugin factories compiled into the binary. For the experimental
+secrets detection plugin, also build the gateway with
+`contextforge-data-plane/plugins`.
 
 ## Telemetry Options
 

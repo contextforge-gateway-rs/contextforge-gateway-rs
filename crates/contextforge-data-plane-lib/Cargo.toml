@@ -28,7 +28,7 @@ tower-http = { version = "0.7.0", features = ["full"] }
 tower = "0.5.3"
 http.workspace = true
 futures = { version = "0.3", features = ["std", "alloc"] }
-jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }
+jsonwebtoken.workspace = true
 chrono = "0.4.44"
 redis.workspace = true
 clap.workspace = true
@@ -56,7 +56,7 @@ with_tools = []
 opentelemetry_sdk.workspace = true
 cpex.workspace = true
 openport.workspace = true
-secrets_detection_rust.workspace = true
+cpex-secrets-detection.workspace = true
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 

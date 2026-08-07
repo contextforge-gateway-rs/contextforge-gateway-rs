@@ -58,12 +58,12 @@ fn plugin_runtime_from_config(
 ) -> Result<CpexRuntimeRegistry, Box<dyn std::error::Error + Send + Sync>> {
     let redis_client = RedisClient::try_from(RedisConfig::try_from(config)?)?;
     let plugin_runtime = CpexRuntimeRegistry::with_redis_config(redis_client);
-    #[cfg(any(feature = "test-plugins", feature = "secrets-detection-plugin"))]
+    #[cfg(any(feature = "test-plugins", feature = "plugins"))]
     let plugin_runtime = register_builtin_factories(plugin_runtime)?;
     Ok(plugin_runtime)
 }
 
-#[cfg(any(feature = "test-plugins", feature = "secrets-detection-plugin"))]
+#[cfg(any(feature = "test-plugins", feature = "plugins"))]
 fn register_builtin_factories(
     mut plugin_runtime: CpexRuntimeRegistry,
 ) -> Result<CpexRuntimeRegistry, Box<dyn std::error::Error + Send + Sync>> {
@@ -71,11 +71,11 @@ fn register_builtin_factories(
     {
         test_plugins::register(&mut plugin_runtime)?;
     }
-    #[cfg(feature = "secrets-detection-plugin")]
+    #[cfg(feature = "plugins")]
     {
         plugin_runtime.register_factory(
-            secrets_detection_rust::KIND,
-            Box::new(secrets_detection_rust::SecretsDetectionFactory),
+            cpex_secrets_detection::KIND,
+            Box::new(cpex_secrets_detection::SecretsDetectionFactory),
         )?;
     }
     Ok(plugin_runtime)

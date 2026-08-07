@@ -49,6 +49,38 @@ documented in [Plugins And Policy](docs/book/src/plugins-and-policy.md).
 The optional demo plugin crates still come from their independently hosted
 `cpex-plugins-rs` repository; they are unrelated to the retired MCP SDK fork.
 
+### Experimental Secrets Detection Plugin
+
+The bundled secrets detection CPEX plugin is experimental. It is compiled into
+the data plane with `contextforge-data-plane/plugins`; Redis config only
+activates plugin factories that are already present in the binary.
+
+Activation requires all three pieces:
+
+- Compile-time feature: `contextforge-data-plane/plugins`
+- Runtime flag: `--runtime-plugins-enabled true`
+- Redis config key: `ContextForgeGatewayRuntimePluginConfig`
+
+The plugin kind is `validator/secrets-detection`. The data plane currently
+wires only `cmf.tool_pre_invoke` and `cmf.tool_post_invoke`.
+
+Example run command:
+
+```bash
+cargo run --release \
+  --features contextforge-data-plane/plugins \
+  --bin contextforge-data-plane -- \
+  --address 0.0.0.0:8001 \
+  --redis-port 6379 \
+  --redis-address 127.0.0.1 \
+  --token-verification-public-key assets/jwt.key.pub \
+  --token-verification-private-key assets/jwt.key \
+  --number-of-cpus 16 \
+  --redis-mode=plain-text \
+  --upstream-connection-mode=plain-text-or-tls \
+  --runtime-plugins-enabled true
+```
+
 ## Tracing and Metrics
 
 The data plane exports OTLP traces and metrics. The local Langfuse,

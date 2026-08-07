@@ -12,7 +12,7 @@ RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked 
     cargo fetch --locked
 RUN --mount=type=cache,id=cargo,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo build --release --features contextforge-data-plane-lib/with_tools
+    cargo build --release --features "contextforge-data-plane-lib/with_tools contextforge-data-plane/plugins"
 
 FROM debian:trixie-slim
 RUN <<EOF

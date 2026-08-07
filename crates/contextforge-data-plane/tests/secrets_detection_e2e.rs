@@ -1,7 +1,7 @@
 // Copyright 2026
 // SPDX-License-Identifier: Apache-2.0
 
-#![cfg(feature = "secrets-detection-plugin")]
+#![cfg(feature = "plugins")]
 
 use std::{
     collections::HashMap,
