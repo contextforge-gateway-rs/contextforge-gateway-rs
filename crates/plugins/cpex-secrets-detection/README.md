@@ -4,7 +4,7 @@ Rust CPEX secrets detection plugin for the ContextForge dataplane.
 
 This crate is a first-class member of the `contextforge-data-plane` workspace.
 It provides the `SecretsDetectionFactory` registered by the gateway binary when
-the `secrets-detection-plugin` Cargo feature is enabled.
+the `plugins` Cargo feature is enabled.
 
 ## Runtime Activation
 
@@ -72,8 +72,8 @@ From the workspace root:
 
 ```bash
 cargo +1.96 test -p cpex-secrets-detection
-cargo +1.96 check -p contextforge-gateway-rs --features secrets-detection-plugin
+cargo +1.96 check -p contextforge-gateway-rs --features plugins
 cargo +1.96 test -p contextforge-gateway-rs-cpex
 cargo +1.96 test -p contextforge-gateway-rs-lib --test gateway_plugins -- --nocapture
-cargo +1.96 test -p contextforge-gateway-rs --features secrets-detection-plugin --test secrets_detection_e2e -- --ignored --nocapture
+cargo +1.96 test -p contextforge-gateway-rs --features plugins --test secrets_detection_e2e -- --ignored --nocapture
 ```
