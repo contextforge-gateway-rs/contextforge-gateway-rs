@@ -2,7 +2,7 @@
 name: contextforge-data-plane
 
 networks:
-  contextforge-data-plane-net:
+  contextforge-stack-net:
     # Single user-defined bridge network keeps traffic private
     driver: bridge
 
@@ -25,7 +25,7 @@ services:
 
     ports:
       - "8080:80"
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     dns:
       - 127.0.0.11
     command: [nginx, '-g', 'daemon off;']
@@ -66,7 +66,7 @@ services:
     labels:
       name: contextforge-data-plane
     image: ${IMAGE_LOCAL:-contextforge-data-plane:latest}
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
 
     environment:
       - CONTEXTFORGE_DATA_PLANE_ADDRESS=0.0.0.0:4445
@@ -132,7 +132,7 @@ services:
   contextforge-data-plane-one:
     image: ${IMAGE_LOCAL:-contextforge-data-plane:latest}
     container_name: contextforge-data-plane-one
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ports: [5551:4445]
 
     environment:
@@ -176,7 +176,7 @@ services:
   contextforge-data-plane-two:
     image: ${IMAGE_LOCAL:-contextforge-data-plane:latest}
     container_name: contextforge-data-plane-two
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ports: [5552:4445]
 
     environment:
@@ -220,7 +220,7 @@ services:
   mcp-counter-tool-one:
     image: ghcr.io/mcp-counter-tool:latest
     container_name: mcp-counter-tool-one
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ports: [5601:5555]
 
     environment:
@@ -250,7 +250,7 @@ services:
   mcp-counter-tool-two:
     image: ghcr.io/mcp-counter-tool:latest
     container_name: mcp-counter-tool-two
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ports: [5602:5555]
 
     environment:
@@ -310,7 +310,7 @@ services:
       start_period: 10s
     ports:
       - "6379:6379" # expose only if you want host access
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     deploy:
       resources:
         limits:
@@ -342,7 +342,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     restart: "no"
 
   ###############################################################################
@@ -354,7 +354,7 @@ services:
     image: ghcr.io/ibm/mcp-context-forge:d24df05e7985787bfa3264ab45cee411e308a111
     container_name: control-plane
     restart: unless-stopped
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ports:
       - "4444:4444"
     environment:
@@ -461,7 +461,7 @@ services:
       - POSTGRES_DB=mcp
     volumes:
       - pgdata:/var/lib/postgresql
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 30s
@@ -481,7 +481,7 @@ services:
     image: edoburu/pgbouncer:latest
     container_name: pgbouncer
     restart: unless-stopped
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ulimits:
       nofile:
         soft: 65536
@@ -535,7 +535,7 @@ services:
     image: ghcr.io/ibm/cfex-mcp-fast-time-server:latest
     container_name: fast_time_server
     restart: unless-stopped
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     ports:
       - "8880:8880"
     environment:
@@ -574,7 +574,7 @@ services:
   register_fast_time:
     image: ghcr.io/ibm/mcp-context-forge:d24df05e7985787bfa3264ab45cee411e308a111
     container_name: register_fast_time
-    networks: [contextforge-data-plane-net]
+    networks: [contextforge-stack-net]
     depends_on:
       control-plane:
         condition: service_healthy
