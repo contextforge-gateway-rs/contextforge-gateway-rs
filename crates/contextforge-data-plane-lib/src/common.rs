@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+use url::Origin;
 
 use clap::{Parser, ValueEnum};
 use http::uri::Authority;
@@ -273,8 +274,8 @@ pub struct Config {
     ///
     /// Behaviour when this list is **empty** (default):
     /// - No `Origin` header → accepted.
-    /// - `Origin` present and matching the request `Host` (same-origin) → accepted.
-    /// - `Origin` present and not matching `Host`, malformed, or `null` → HTTP 403.
+    /// - `Origin` present → **HTTP 403** (no same-origin fallback; an empty
+    ///   allowlist is not a bypass).
     ///
     /// Supply multiple origins as a comma-separated string:
     /// `https://app.example.com,https://other.example.com`
@@ -285,6 +286,13 @@ pub struct Config {
         num_args = 0..
     )]
     pub mcp_allowed_origins: Vec<String>,
+
+    /// Pre-parsed form of `mcp_allowed_origins`, populated by [`Config::finalize`].
+    ///
+    /// Using `#[clap(skip)]` keeps this invisible to the CLI / env-var parser;
+    /// it is always derived from `mcp_allowed_origins` and never set directly.
+    #[clap(skip)]
+    pub mcp_parsed_origins: Vec<Origin>,
 
     /// Allowlist of `Host` header values (authorities) trusted on inbound MCP
     /// requests, used as the companion DNS-rebinding control.
@@ -309,6 +317,20 @@ pub struct Config {
         num_args = 0..
     )]
     pub mcp_allowed_hosts: Vec<String>,
+}
+
+impl Config {
+    /// Parses `mcp_allowed_origins` into typed [`Origin`] values and stores
+    /// them in `mcp_parsed_origins`.  Call this once after clap parsing
+    /// completes so the middleware can compare against pre-parsed values
+    /// instead of re-parsing on every request.
+    ///
+    /// Invalid entries are logged and skipped; they do not cause startup
+    /// failure so a single misconfigured origin does not take down the gateway.
+    pub fn finalize(&mut self) {
+        use crate::layers::mcp_origin::parse_allowed_origins;
+        self.mcp_parsed_origins = parse_allowed_origins(&self.mcp_allowed_origins);
+    }
 }
 
 #[derive(Error, Debug)]

@@ -77,23 +77,30 @@ alongside `mcp_allowed_origins` for public-internet deployments.
 
 ### Origin allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS`)
 
-An optional comma-separated list of fully-qualified browser origins
+A comma-separated list of fully-qualified browser origins
 (`https://app.example.com`, `http://localhost:3000`).
 
 | `mcp_allowed_origins` | `Origin` absent | `Origin` in list | `Origin` not in list | `null` / malformed |
 | --- | --- | --- | --- | --- |
 | **non-empty** | ✅ accepted | ✅ accepted | ❌ HTTP 403 | ❌ HTTP 403 |
-| **empty** (default) | ✅ accepted | ✅ if same-origin (Origin == Host) | ❌ HTTP 403 | ❌ HTTP 403 |
+| **empty** (default) | ✅ accepted | ❌ HTTP 403 | ❌ HTTP 403 | ❌ HTTP 403 |
 
-Port comparison is exact after RFC 3986 default-port normalization:
-`https://app.example.com` and `https://app.example.com:443` are the same
-origin; `https://app.example.com:8443` is a different origin.
+**An empty allowlist is not a bypass.** When `mcp_allowed_origins` is not
+configured, every request that carries an `Origin` header is rejected with HTTP
+403. There is no same-origin fallback: comparing `Origin` with `Host` would let
+a DNS-rebinding attacker satisfy both values simultaneously, defeating the
+protection entirely.
 
-When the list is empty the middleware falls back to a **same-origin check**:
-the normalized `Origin` must equal the normalized `Host`. This ensures that
-DNS-rebinding protection is always active regardless of operator configuration,
-while cross-origin browser clients can be admitted by adding an explicit
-allowlist entry.
+Origins are strictly validated before comparison: backslash sequences, userinfo
+(`@`), path, query, and fragment components cause immediate rejection, preventing
+the `url` crate's WHATWG-compliant normalization from silently repairing
+malformed inputs into a valid origin.
+
+Port comparison uses typed `url::Origin` equality after RFC 3986 default-port
+normalization: `https://app.example.com` and `https://app.example.com:443` are
+the same origin; `https://app.example.com:8443` is a different origin.
+Configured origins are parsed once at startup; invalid entries are logged and
+skipped.
 
 ## Local Bootstrap Helpers
 

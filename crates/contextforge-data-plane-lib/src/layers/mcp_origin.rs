@@ -1,71 +1,101 @@
 use axum::{body::Body, extract::State, middleware::Next, response::Response};
-use http::{StatusCode, header};
+use http::{StatusCode, header, uri::Authority};
 use tracing::{debug, warn};
-use url::Url;
+use url::{Origin, Url};
 
 use crate::common::Config;
 
-/// Parses an Origin header value into a canonical [`Url`].
+// ── Origin parsing ────────────────────────────────────────────────────────────
+
+/// Strictly parses a serialized RFC 6454 origin string into a typed
+/// [`url::Origin`].
 ///
-/// Returns `None` for the opaque `"null"` origin and for any string that
-/// cannot be parsed as a valid `scheme://host[:port]` origin (no path allowed).
+/// A valid serialized origin is exactly `scheme "://" host [":" port]` with
+/// **no** userinfo, path, query, or fragment component.  The `url` crate
+/// silently repairs many malformed inputs (backslashes, userinfo stripping,
+/// etc.), so this function validates the raw string before handing it to the
+/// parser:
 ///
-/// The `url` crate normalises scheme and host to lowercase and silently
-/// strips default ports (`https` → 443, `http` → 80), so two `Url` values
-/// compare equal if and only if they represent the same RFC 6454 origin:
+/// - Contains `\` → rejected (backslash normalization attack).
+/// - Contains `@` before the first `/` → rejected (userinfo present).
+/// - Contains `?` or `#` → rejected (query / fragment present).
 ///
-/// - `https://blah.com` == `https://blah.com:443`   (`:443` is the https default)
-/// - `https://blah.com` != `https://blah.com:8443`  (non-default port)
-/// - `HTTPS://BLAH.COM` == `https://blah.com`        (case-folded by the crate)
-fn origin_to_url(origin: &str) -> Option<Url> {
-    if origin.trim().eq_ignore_ascii_case("null") {
+/// After parsing, additional structural checks are applied:
+///
+/// - Parsed URL has non-empty username or a password → rejected.
+/// - Parsed URL has a path other than `"/"` (from the slash we appended) →
+///   rejected (path component present).
+/// - Parsed URL has a query or fragment → rejected.
+/// - Parsed URL has no host → rejected (e.g. `data:`, `blob:`).
+/// - `url::Origin` is opaque → rejected.
+///
+/// Returns `None` for the literal `"null"` opaque origin (RFC 6454 §6.2) and
+/// for any value that fails the checks above.
+///
+/// Port normalization is handled by the `url` crate: `https://blah.com:443`
+/// and `https://blah.com` produce the same `Origin::Tuple`; `https://blah.com:8443`
+/// is distinct.
+fn parse_origin(raw: &str) -> Option<Origin> {
+    if raw.trim().eq_ignore_ascii_case("null") {
         return None;
     }
-    // Origin values are `scheme "://" host [":" port]` with no path.
-    // Appending "/" makes the string a valid absolute URL that the parser accepts.
-    let url = Url::parse(&format!("{origin}/")).ok()?;
-    // Reject any path beyond the root "/" we appended.
+
+    // ── Pre-parse structural checks on the raw string ─────────────────────
+    // Backslash — the url crate treats it as a slash (WHATWG URL §5.1).
+    if raw.contains('\\') {
+        return None;
+    }
+    // Userinfo — "@" before the first "/" after the scheme separator.
+    // A valid origin has no path, so any "@" means userinfo.
+    if raw.contains('@') {
+        return None;
+    }
+    // Query / fragment.
+    if raw.contains('?') || raw.contains('#') {
+        return None;
+    }
+
+    // Append "/" so the url crate accepts a bare `scheme://host[:port]` string.
+    let url = Url::parse(&format!("{raw}/")).ok()?;
+
+    // ── Post-parse structural checks ──────────────────────────────────────
+    // Path must be exactly the "/" we appended.
     if url.path() != "/" {
         return None;
     }
-    // Reject origins that have no host (data:, blob:, …).
+    // Re-check userinfo fields (defense-in-depth, url crate may strip "@").
+    if !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    // No query or fragment.
+    if url.query().is_some() || url.fragment().is_some() {
+        return None;
+    }
+    // Must have a host.
     url.host()?;
-    Some(url)
+
+    // Reject opaque origins (data:, blob:, …).
+    match url.origin() {
+        Origin::Tuple(_, _, _) => Some(url.origin()),
+        Origin::Opaque(_) => None,
+    }
 }
 
-/// Parses the request `Host` / HTTP/2 `:authority` header into a canonical
-/// [`Url`], using the scheme from the request URI (defaulting to `"http"`).
-fn host_to_url(request: &http::Request<Body>) -> Option<Url> {
-    let authority = request
+// ── Host allowlist ────────────────────────────────────────────────────────────
+
+/// Parses the `Host` header (or HTTP/2 `:authority` pseudo-header) into an
+/// [`Authority`].
+fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
+    request
         .headers()
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
-        .or_else(|| request.uri().authority().map(ToString::to_string))?;
-    let scheme = request.uri().scheme_str().unwrap_or("http");
-    Url::parse(&format!("{scheme}://{authority}/")).ok()
+        .and_then(|s| s.parse::<Authority>().ok())
+        .or_else(|| request.uri().authority().cloned())
 }
 
-/// Returns `true` when `request_origin` matches at least one entry in
-/// `allowed_origins`.
-///
-/// Both sides are parsed through [`origin_to_url`] and compared with [`Url`]
-/// equality, which handles default-port normalization and case-folding
-/// automatically:
-///
-/// - Allowlist entry `https://app.example.com` matches both
-///   `Origin: https://app.example.com` and `Origin: https://app.example.com:443`.
-/// - Allowlist entry `https://app.example.com:8443` matches only
-///   `Origin: https://app.example.com:8443`.
-fn origin_in_allowlist(request_origin: &Url, allowed_origins: &[String]) -> bool {
-    allowed_origins
-        .iter()
-        .filter_map(|raw| origin_to_url(raw))
-        .any(|allowed| allowed == *request_origin)
-}
-
-/// Returns `true` when the request `Host` authority matches at least one entry
-/// in `allowed_hosts`.
+/// Returns `true` when `authority` matches at least one entry in
+/// `allowed_hosts`.
 ///
 /// Entries are plain hostnames (`gateway.example.com`) or `host:port`
 /// authorities (`gateway.example.com:8080`) — no scheme prefix.
@@ -74,9 +104,9 @@ fn origin_in_allowlist(request_origin: &Url, allowed_origins: &[String]) -> bool
 /// - Entry **with** a port → matches only that exact `(host, port)` pair.
 ///
 /// Comparison is case-insensitive on the host component.
-fn host_in_allowlist(host_url: &Url, allowed_hosts: &[String]) -> bool {
-    let request_host = host_url.host_str().unwrap_or("").to_ascii_lowercase();
-    let request_port = host_url.port_or_known_default();
+fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[String]) -> bool {
+    let request_host = authority.host().to_ascii_lowercase();
+    let request_port = authority.port_u16();
 
     allowed_hosts.iter().any(|entry| {
         let (entry_host, entry_port) = match entry.rsplit_once(':') {
@@ -86,10 +116,28 @@ fn host_in_allowlist(host_url: &Url, allowed_hosts: &[String]) -> bool {
             },
             None => (entry.to_ascii_lowercase(), None),
         };
-        entry_host == request_host
-            && entry_port.is_none_or(|p| Some(p) == request_port)
+        entry_host == request_host && entry_port.is_none_or(|p| Some(p) == request_port)
     })
 }
+
+// ── Allowed-origins cache ─────────────────────────────────────────────────────
+
+/// Parses the operator-configured origin strings once and returns the valid
+/// [`Origin`] values.  Invalid entries are logged and skipped so a single
+/// misconfigured entry does not silently disable all protection.
+pub fn parse_allowed_origins(raw: &[String]) -> Vec<Origin> {
+    raw.iter()
+        .filter_map(|s| {
+            let origin = parse_origin(s);
+            if origin.is_none() {
+                warn!("mcp_origin_layer - configured origin is invalid and will be ignored origin = {s}");
+            }
+            origin
+        })
+        .collect()
+}
+
+// ── Response helpers ──────────────────────────────────────────────────────────
 
 fn forbidden_response() -> Response {
     Response::builder()
@@ -98,6 +146,8 @@ fn forbidden_response() -> Response {
         .body(Body::from("Forbidden: Origin header is not allowed"))
         .expect("response should build")
 }
+
+// ── Middleware ────────────────────────────────────────────────────────────────
 
 /// Axum middleware that enforces the MCP 2026-07-28 Streamable HTTP
 /// DNS-rebinding protection requirement.
@@ -108,48 +158,45 @@ fn forbidden_response() -> Response {
 /// > prevent DNS rebinding attacks. If the Origin header is present and
 /// > invalid, servers MUST respond with HTTP 403 Forbidden.
 ///
-/// ## Host check (`mcp_allowed_hosts`)
+/// ## Decision table
 ///
-/// When `Config::mcp_allowed_hosts` is non-empty, every request whose `Host`
-/// header does not match an entry is rejected with **HTTP 403** before Origin
-/// validation.  When the list is empty, Host validation is disabled.
+/// | Condition | Result |
+/// |---|---|
+/// | `mcp_allowed_hosts` set, `Host` not in list | ❌ 403 |
+/// | `Origin` absent | ✅ accept (native / non-browser clients) |
+/// | `Origin: null` | ❌ 403 |
+/// | `Origin` malformed, has backslash / userinfo / path / query / fragment | ❌ 403 |
+/// | `mcp_allowed_origins` non-empty, parsed `Origin` in list | ✅ accept |
+/// | `mcp_allowed_origins` non-empty, parsed `Origin` not in list | ❌ 403 |
+/// | `mcp_allowed_origins` **empty** (default) | ❌ 403 — no fallback |
 ///
-/// ## Origin check (`mcp_allowed_origins`)
+/// **There is no same-origin fallback.** A present `Origin` always requires
+/// an explicit trusted allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS`).
+/// An empty allowlist is not a bypass; it rejects every `Origin` that is present.
 ///
-/// | `mcp_allowed_origins` | `Origin` absent | `Origin` in list | `Origin` not in list | `null` / malformed |
-/// |---|---|---|---|---|
-/// | **non-empty** | ✅ accept | ✅ accept | ❌ 403 | ❌ 403 |
-/// | **empty** (default) | ✅ accept | ✅ if same-origin (`Origin == Host`) | ❌ 403 | ❌ 403 |
-///
-/// Port comparison uses `url::Url` equality, which normalizes default ports:
-/// `https://app.example.com:443` and `https://app.example.com` are the same
-/// origin; `https://app.example.com:8443` is a different origin.
+/// Port comparison uses [`url::Origin`] typed equality, which normalizes
+/// default ports: `https://app.example.com:443` and `https://app.example.com`
+/// are the same origin; `https://app.example.com:8443` is different.
 ///
 /// This layer fires before JWT claims validation, session creation, and any
 /// backend fan-out.
-pub async fn mcp_origin_layer(
-    State(config): State<Config>,
-    request: http::Request<Body>,
-    next: Next,
-) -> Response {
-    // ── 1. Host allowlist check ────────────────────────────────────────────
+pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Request<Body>, next: Next) -> Response {
+    // ── 1. Host allowlist check ───────────────────────────────────────────────
     if !config.mcp_allowed_hosts.is_empty() {
-        match host_to_url(&request) {
+        match request_authority(&request) {
             None => {
                 warn!("mcp_origin_layer - rejected request: Host header missing or unparseable");
                 return forbidden_response();
             },
-            Some(ref host_url) if !host_in_allowlist(host_url, &config.mcp_allowed_hosts) => {
-                warn!(
-                    "mcp_origin_layer - rejected request: Host not in allowlist host = {host_url}"
-                );
+            Some(ref authority) if !authority_in_allowlist(authority, &config.mcp_allowed_hosts) => {
+                warn!("mcp_origin_layer - rejected request: Host not in allowlist host = {authority}");
                 return forbidden_response();
             },
             Some(_) => debug!("mcp_origin_layer - Host is in allowlist"),
         }
     }
 
-    // ── 2. Origin header check ─────────────────────────────────────────────
+    // ── 2. Origin header check ────────────────────────────────────────────────
     let Some(origin_header) = request.headers().get(header::ORIGIN) else {
         // No Origin header → native / non-browser client; always allow.
         debug!("mcp_origin_layer - no Origin header, allowing request");
@@ -161,73 +208,66 @@ pub async fn mcp_origin_layer(
         return forbidden_response();
     };
 
-    // Opaque / sandbox origin — never valid regardless of config.
+    // Opaque / sandbox origin — always rejected regardless of config.
     if origin_str.trim().eq_ignore_ascii_case("null") {
         warn!("mcp_origin_layer - rejected opaque null Origin");
         return forbidden_response();
     }
 
-    let Some(request_origin) = origin_to_url(origin_str) else {
+    let Some(request_origin) = parse_origin(origin_str) else {
         warn!("mcp_origin_layer - rejected malformed Origin header origin = {origin_str}");
         return forbidden_response();
     };
 
-    // ── 3. Accept / reject based on allowlist or same-origin fallback ──────
-    if config.mcp_allowed_origins.is_empty() {
-        // No allowlist configured: fall back to same-origin check (Origin == Host).
-        let Some(host_url) = host_to_url(&request) else {
-            warn!("mcp_origin_layer - rejected request: could not determine Host for same-origin check origin = {origin_str}");
-            return forbidden_response();
-        };
-        if request_origin == host_url {
-            debug!("mcp_origin_layer - same-origin request accepted origin = {origin_str}");
-            next.run(request).await
-        } else {
-            warn!("mcp_origin_layer - rejected cross-origin request origin = {origin_str} host = {host_url}");
-            forbidden_response()
-        }
+    // ── 3. Allowlist check ────────────────────────────────────────────────────
+    // An empty allowlist is not a bypass: any present Origin is rejected until
+    // the operator explicitly configures trusted origins.
+    if config.mcp_parsed_origins.is_empty() {
+        warn!("mcp_origin_layer - rejected Origin: no allowed origins configured origin = {origin_str}");
+        return forbidden_response();
+    }
+
+    if config.mcp_parsed_origins.contains(&request_origin) {
+        debug!("mcp_origin_layer - Origin accepted via allowlist origin = {origin_str}");
+        next.run(request).await
     } else {
-        // Explicit allowlist configured: Origin must appear in it.
-        if origin_in_allowlist(&request_origin, &config.mcp_allowed_origins) {
-            debug!("mcp_origin_layer - Origin accepted via allowlist origin = {origin_str}");
-            next.run(request).await
-        } else {
-            warn!("mcp_origin_layer - rejected Origin not in allowlist origin = {origin_str}");
-            forbidden_response()
-        }
+        warn!("mcp_origin_layer - rejected Origin not in allowlist origin = {origin_str}");
+        forbidden_response()
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use axum::{Router, body::to_bytes, middleware, routing::get};
     use http::{Request, StatusCode};
     use tower::ServiceExt;
+    use url::Origin;
 
     use super::*;
 
-    // ── helpers ──────────────────────────────────────────────────────────────
+    // ── helpers ───────────────────────────────────────────────────────────────
 
     fn config_origins(origins: &[&str]) -> Config {
-        Config {
-            mcp_allowed_origins: origins.iter().map(|s| (*s).to_owned()).collect(),
-            ..Config::default()
-        }
+        let mut c =
+            Config { mcp_allowed_origins: origins.iter().map(|s| (*s).to_owned()).collect(), ..Config::default() };
+        c.finalize();
+        c
     }
 
     fn config_hosts(hosts: &[&str]) -> Config {
-        Config {
-            mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(),
-            ..Config::default()
-        }
+        Config { mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(), ..Config::default() }
     }
 
     fn config_origins_and_hosts(origins: &[&str], hosts: &[&str]) -> Config {
-        Config {
+        let mut c = Config {
             mcp_allowed_origins: origins.iter().map(|s| (*s).to_owned()).collect(),
             mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(),
             ..Config::default()
-        }
+        };
+        c.finalize();
+        c
     }
 
     fn make_app(config: Config) -> axum::Router {
@@ -241,128 +281,145 @@ mod tests {
         StatusCode::NO_CONTENT
     }
 
-    // ── origin_to_url unit tests ─────────────────────────────────────────────
+    // ── parse_origin unit tests ───────────────────────────────────────────────
 
     #[test]
     fn null_origin_returns_none() {
-        assert!(origin_to_url("null").is_none());
-        assert!(origin_to_url("NULL").is_none());
-        assert!(origin_to_url("Null").is_none());
+        assert!(parse_origin("null").is_none());
+        assert!(parse_origin("NULL").is_none());
+        assert!(parse_origin("Null").is_none());
     }
 
     #[test]
     fn empty_origin_returns_none() {
-        assert!(origin_to_url("").is_none());
+        assert!(parse_origin("").is_none());
     }
 
     #[test]
     fn origin_without_scheme_returns_none() {
-        assert!(origin_to_url("app.example.com").is_none());
+        assert!(parse_origin("app.example.com").is_none());
     }
 
     #[test]
     fn origin_with_path_returns_none() {
-        assert!(origin_to_url("https://app.example.com/some/path").is_none());
+        assert!(parse_origin("https://app.example.com/some/path").is_none());
     }
 
     #[test]
     fn origin_with_trailing_slash_returns_none() {
-        assert!(origin_to_url("https://app.example.com/").is_none());
+        assert!(parse_origin("https://app.example.com/").is_none());
+    }
+
+    #[test]
+    fn origin_with_query_returns_none() {
+        assert!(parse_origin("https://app.example.com?q=1").is_none());
+    }
+
+    #[test]
+    fn origin_with_fragment_returns_none() {
+        assert!(parse_origin("https://app.example.com#frag").is_none());
+    }
+
+    #[test]
+    fn origin_with_userinfo_returns_none() {
+        // "@" in the raw string is caught before parsing.
+        assert!(parse_origin("https://user@app.example.com").is_none());
+    }
+
+    #[test]
+    fn origin_with_backslash_returns_none() {
+        // url crate silently normalizes backslash to "/"; pre-parse check blocks it.
+        assert!(parse_origin(r"https:\app.example.com").is_none());
+        assert!(parse_origin(r"https:\\app.example.com").is_none());
+    }
+
+    #[test]
+    fn origin_with_data_scheme_returns_none() {
+        // data: produces an opaque origin.
+        assert!(parse_origin("data:text/plain,foo").is_none());
     }
 
     #[test]
     fn https_default_port_443_equals_portless() {
-        // The url crate silently drops the default port — both parse to the same Url.
-        let portless = origin_to_url("https://app.example.com").unwrap();
-        let explicit = origin_to_url("https://app.example.com:443").unwrap();
+        let portless = parse_origin("https://app.example.com").unwrap();
+        let explicit = parse_origin("https://app.example.com:443").unwrap();
         assert_eq!(portless, explicit, "https://blah.com:443 must equal https://blah.com");
     }
 
     #[test]
     fn http_default_port_80_equals_portless() {
-        let portless = origin_to_url("http://app.example.com").unwrap();
-        let explicit = origin_to_url("http://app.example.com:80").unwrap();
+        let portless = parse_origin("http://app.example.com").unwrap();
+        let explicit = parse_origin("http://app.example.com:80").unwrap();
         assert_eq!(portless, explicit);
     }
 
     #[test]
     fn non_default_port_8443_is_distinct_from_portless() {
-        let portless = origin_to_url("https://app.example.com").unwrap();
-        let non_default = origin_to_url("https://app.example.com:8443").unwrap();
+        let portless = parse_origin("https://app.example.com").unwrap();
+        let non_default = parse_origin("https://app.example.com:8443").unwrap();
         assert_ne!(portless, non_default, "https://blah.com:8443 must NOT equal https://blah.com");
     }
 
     #[test]
-    fn url_equality_is_case_insensitive_on_scheme_and_host() {
-        // The url crate normalises scheme and host to lowercase.
-        let lower = origin_to_url("https://app.example.com").unwrap();
-        let upper = origin_to_url("HTTPS://APP.EXAMPLE.COM").unwrap();
+    fn parse_origin_is_case_insensitive_on_scheme_and_host() {
+        let lower = parse_origin("https://app.example.com").unwrap();
+        let upper = parse_origin("HTTPS://APP.EXAMPLE.COM").unwrap();
         assert_eq!(lower, upper);
     }
 
     #[test]
     fn ipv6_origin_parsed_correctly() {
-        let o = origin_to_url("http://[::1]:8080").unwrap();
-        assert_eq!(o.host_str(), Some("[::1]"));
+        // IPv6 address produces a valid Tuple origin.
+        let o = parse_origin("http://[::1]:8080").unwrap();
+        assert!(matches!(o, Origin::Tuple(_, _, 8080)));
     }
 
-    // ── origin_in_allowlist unit tests ───────────────────────────────────────
+    // ── parse_allowed_origins unit tests ─────────────────────────────────────
 
     #[test]
-    fn allowlist_exact_match() {
-        let req = origin_to_url("https://app.example.com").unwrap();
-        assert!(origin_in_allowlist(&req, &["https://app.example.com".to_owned()]));
-    }
-
-    #[test]
-    fn allowlist_portless_entry_matches_explicit_default_port() {
-        // Entry has no port (→ :443); request sends :443 explicitly — same origin.
-        let req = origin_to_url("https://app.example.com:443").unwrap();
-        assert!(origin_in_allowlist(&req, &["https://app.example.com".to_owned()]));
+    fn invalid_configured_origin_is_skipped() {
+        let parsed = parse_allowed_origins(&["https://valid.example.com".to_owned(), r"https:\bad".to_owned()]);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0], parse_origin("https://valid.example.com").unwrap());
     }
 
     #[test]
-    fn allowlist_entry_with_443_matches_portless_request() {
-        // Entry is :443; browser sends no explicit port — same origin.
-        let req = origin_to_url("https://app.example.com").unwrap();
-        assert!(origin_in_allowlist(&req, &["https://app.example.com:443".to_owned()]));
+    fn empty_configured_origins_produces_empty_list() {
+        assert!(parse_allowed_origins(&[]).is_empty());
+    }
+
+    // ── authority_in_allowlist unit tests ─────────────────────────────────────
+
+    #[test]
+    fn authority_exact_host_match() {
+        let auth = "gateway.example.com".parse::<Authority>().unwrap();
+        assert!(authority_in_allowlist(&auth, &["gateway.example.com".to_owned()]));
     }
 
     #[test]
-    fn allowlist_portless_entry_does_not_match_non_default_port() {
-        // Entry normalizes to :443; :8443 is a different origin.
-        let req = origin_to_url("https://app.example.com:8443").unwrap();
-        assert!(!origin_in_allowlist(&req, &["https://app.example.com".to_owned()]));
+    fn authority_entry_without_port_matches_any_port() {
+        let auth = "gateway.example.com:8080".parse::<Authority>().unwrap();
+        assert!(authority_in_allowlist(&auth, &["gateway.example.com".to_owned()]));
     }
 
     #[test]
-    fn allowlist_8443_entry_does_not_match_default_port() {
-        // Entry is :8443; portless request normalizes to :443 — different origin.
-        let req = origin_to_url("https://app.example.com").unwrap();
-        assert!(!origin_in_allowlist(&req, &["https://app.example.com:8443".to_owned()]));
+    fn authority_entry_with_port_matches_only_that_port() {
+        let auth8080 = "gateway.example.com:8080".parse::<Authority>().unwrap();
+        let auth443 = "gateway.example.com:443".parse::<Authority>().unwrap();
+        assert!(authority_in_allowlist(&auth8080, &["gateway.example.com:8080".to_owned()]));
+        assert!(!authority_in_allowlist(&auth443, &["gateway.example.com:8080".to_owned()]));
     }
 
     #[test]
-    fn allowlist_scheme_mismatch_rejected() {
-        let req = origin_to_url("http://app.example.com").unwrap();
-        assert!(!origin_in_allowlist(&req, &["https://app.example.com".to_owned()]));
+    fn authority_mismatch_returns_false() {
+        let auth = "evil.example.com".parse::<Authority>().unwrap();
+        assert!(!authority_in_allowlist(&auth, &["gateway.example.com".to_owned()]));
     }
 
-    #[test]
-    fn allowlist_multiple_entries() {
-        let allowed = vec![
-            "https://app.example.com".to_owned(),
-            "http://localhost:3000".to_owned(),
-        ];
-        assert!(origin_in_allowlist(&origin_to_url("https://app.example.com").unwrap(), &allowed));
-        assert!(origin_in_allowlist(&origin_to_url("http://localhost:3000").unwrap(), &allowed));
-        assert!(!origin_in_allowlist(&origin_to_url("https://other.example.com").unwrap(), &allowed));
-    }
-
-    // ── middleware integration: no Origin ────────────────────────────────────
+    // ── middleware: no Origin ─────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn no_origin_is_always_accepted_with_empty_config() {
+    async fn no_origin_accepted_with_empty_config() {
         let app = make_app(Config::default());
         let req = Request::builder().uri("/mcp").method("GET").body(Body::empty()).unwrap();
         let res = app.oneshot(req).await.unwrap();
@@ -370,23 +427,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_origin_is_always_accepted_with_allowlist_configured() {
+    async fn no_origin_accepted_with_allowlist_configured() {
         let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder().uri("/mcp").method("GET").body(Body::empty()).unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
     }
 
-    // ── middleware integration: Origin allowlist (non-empty) ─────────────────
+    // ── middleware: empty allowlist rejects any present Origin ────────────────
 
     #[tokio::test]
-    async fn allowlisted_cross_origin_is_accepted() {
-        // Origin differs from Host but is in the allowlist.
+    async fn present_origin_with_empty_allowlist_returns_403() {
+        // Empty allowlist is not a bypass; any present Origin must be rejected.
+        let app = make_app(Config::default());
+        let req = Request::builder()
+            .uri("/mcp")
+            .method("POST")
+            .header(header::ORIGIN, "https://app.example.com")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn attacker_controlled_host_and_origin_match_but_still_rejected_without_allowlist() {
+        // DNS-rebinding: attacker controls both Host and Origin to the same value.
+        // Without an explicit allowlist this must be rejected, not accepted.
+        let app = make_app(Config::default());
+        let req = Request::builder()
+            .uri("http://attacker.invalid/mcp")
+            .method("POST")
+            .header(header::HOST, "attacker.invalid")
+            .header(header::ORIGIN, "http://attacker.invalid")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    // ── middleware: allowlist (non-empty) ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn allowlisted_origin_accepted() {
         let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
-            .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://app.example.com")
             .body(Body::empty())
             .unwrap();
@@ -412,9 +499,8 @@ mod tests {
         // Browser sends :443 explicitly; allowlist has no port — same origin.
         let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
-            .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://app.example.com:443")
             .body(Body::empty())
             .unwrap();
@@ -427,9 +513,8 @@ mod tests {
         // Allowlist has :443; browser sends no port — same origin.
         let app = make_app(config_origins(&["https://app.example.com:443"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
-            .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://app.example.com")
             .body(Body::empty())
             .unwrap();
@@ -488,16 +573,20 @@ mod tests {
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
 
-    // ── middleware integration: same-origin fallback (empty allowlist) ────────
+    // ── middleware: HTTPS origin-form requests ────────────────────────────────
 
     #[tokio::test]
-    async fn same_origin_accepted_when_no_allowlist() {
-        let app = make_app(Config::default());
+    async fn https_origin_accepted_when_allowlisted_origin_form_request() {
+        // A normal HTTP/1.1 request has URI `/mcp` (origin-form, no scheme).
+        // The scheme cannot be inferred from the request URI; only the Origin
+        // header value matters for the allowlist comparison.
+        let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("http://localhost/mcp")
+            // origin-form URI — no scheme
+            .uri("/mcp")
             .method("POST")
-            .header(header::HOST, "localhost")
-            .header(header::ORIGIN, "http://localhost")
+            .header(header::HOST, "app.example.com")
+            .header(header::ORIGIN, "https://app.example.com")
             .body(Body::empty())
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
@@ -505,13 +594,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cross_origin_rejected_when_no_allowlist() {
-        let app = make_app(Config::default());
+    async fn http_origin_rejected_when_only_https_allowlisted_origin_form_request() {
+        // Origin: http://... must not match an allowlist entry for https://...
+        // even when the request URI has no scheme and Host matches.
+        let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("http://localhost/mcp")
+            .uri("/mcp")
             .method("POST")
-            .header(header::HOST, "localhost")
-            .header(header::ORIGIN, "https://attacker.invalid")
+            .header(header::HOST, "app.example.com")
+            .header(header::ORIGIN, "http://app.example.com")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    // ── middleware: malformed-but-normalizable Origins ────────────────────────
+
+    #[tokio::test]
+    async fn backslash_origin_returns_403() {
+        // url crate would normalize https:\app.example.com to https://app.example.com
+        // but pre-parse check must reject it first.
+        let app = make_app(config_origins(&["https://app.example.com"]));
+        let req = Request::builder()
+            .uri("/mcp")
+            .method("POST")
+            .header(header::ORIGIN, r"https:\app.example.com")
             .body(Body::empty())
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
@@ -519,42 +627,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_port_normalization_same_origin_fallback() {
-        // Origin: https://app.example.com:443 ↔ Host: app.example.com — same origin.
-        let app = make_app(Config::default());
+    async fn userinfo_origin_returns_403() {
+        // url crate strips userinfo from the origin; we must reject before that.
+        let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("https://app.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
-            .header(header::HOST, "app.example.com")
-            .header(header::ORIGIN, "https://app.example.com:443")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    }
-
-    #[tokio::test]
-    async fn non_default_port_mismatch_rejected_in_same_origin_fallback() {
-        // Host: app.example.com (→ :443), Origin: :8443 — different origin.
-        let app = make_app(Config::default());
-        let req = Request::builder()
-            .uri("https://app.example.com/mcp")
-            .method("POST")
-            .header(header::HOST, "app.example.com")
-            .header(header::ORIGIN, "https://app.example.com:8443")
+            .header(header::ORIGIN, "https://user@app.example.com")
             .body(Body::empty())
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
 
-    // ── middleware integration: null / malformed (always 403) ────────────────
+    #[tokio::test]
+    async fn origin_with_query_returns_403() {
+        let app = make_app(config_origins(&["https://app.example.com"]));
+        let req = Request::builder()
+            .uri("/mcp")
+            .method("POST")
+            .header(header::ORIGIN, "https://app.example.com?q=1")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn origin_with_fragment_returns_403() {
+        let app = make_app(config_origins(&["https://app.example.com"]));
+        let req = Request::builder()
+            .uri("/mcp")
+            .method("POST")
+            .header(header::ORIGIN, "https://app.example.com#frag")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    // ── middleware: null / malformed (always 403) ─────────────────────────────
 
     #[tokio::test]
     async fn null_origin_returns_403_with_allowlist() {
         let app = make_app(config_origins(&["https://app.example.com"]));
-        let req = Request::builder()
-            .uri("/mcp").method("POST").header(header::ORIGIN, "null").body(Body::empty()).unwrap();
+        let req =
+            Request::builder().uri("/mcp").method("POST").header(header::ORIGIN, "null").body(Body::empty()).unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
@@ -562,8 +680,8 @@ mod tests {
     #[tokio::test]
     async fn null_origin_returns_403_without_allowlist() {
         let app = make_app(Config::default());
-        let req = Request::builder()
-            .uri("/mcp").method("POST").header(header::ORIGIN, "null").body(Body::empty()).unwrap();
+        let req =
+            Request::builder().uri("/mcp").method("POST").header(header::ORIGIN, "null").body(Body::empty()).unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
@@ -572,20 +690,23 @@ mod tests {
     async fn malformed_origin_returns_403() {
         let app = make_app(Config::default());
         let req = Request::builder()
-            .uri("/mcp").method("POST").header(header::ORIGIN, "not-an-origin").body(Body::empty()).unwrap();
+            .uri("/mcp")
+            .method("POST")
+            .header(header::ORIGIN, "not-an-origin")
+            .body(Body::empty())
+            .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
 
-    // ── middleware integration: DELETE method ─────────────────────────────────
+    // ── middleware: DELETE method ─────────────────────────────────────────────
 
     #[tokio::test]
     async fn delete_allowlisted_origin_accepted() {
         let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("DELETE")
-            .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://app.example.com")
             .body(Body::empty())
             .unwrap();
@@ -597,18 +718,22 @@ mod tests {
     async fn delete_non_allowlisted_origin_returns_403() {
         let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("/mcp").method("DELETE").header(header::ORIGIN, "https://attacker.invalid").body(Body::empty()).unwrap();
+            .uri("/mcp")
+            .method("DELETE")
+            .header(header::ORIGIN, "https://attacker.invalid")
+            .body(Body::empty())
+            .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
 
-    // ── middleware integration: Host allowlist ────────────────────────────────
+    // ── middleware: Host allowlist ────────────────────────────────────────────
 
     #[tokio::test]
     async fn request_with_allowed_host_passes_host_check() {
         let app = make_app(config_hosts(&["gateway.example.com"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("GET")
             .header(header::HOST, "gateway.example.com")
             .body(Body::empty())
@@ -621,7 +746,7 @@ mod tests {
     async fn request_with_disallowed_host_returns_403() {
         let app = make_app(config_hosts(&["gateway.example.com"]));
         let req = Request::builder()
-            .uri("https://evil.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
             .header(header::HOST, "evil.example.com")
             .header(header::ORIGIN, "https://app.example.com")
@@ -633,12 +758,9 @@ mod tests {
 
     #[tokio::test]
     async fn host_and_origin_both_valid_accepted() {
-        let app = make_app(config_origins_and_hosts(
-            &["https://app.example.com"],
-            &["gateway.example.com"],
-        ));
+        let app = make_app(config_origins_and_hosts(&["https://app.example.com"], &["gateway.example.com"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
             .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://app.example.com")
@@ -650,12 +772,9 @@ mod tests {
 
     #[tokio::test]
     async fn valid_host_but_invalid_origin_returns_403() {
-        let app = make_app(config_origins_and_hosts(
-            &["https://app.example.com"],
-            &["gateway.example.com"],
-        ));
+        let app = make_app(config_origins_and_hosts(&["https://app.example.com"], &["gateway.example.com"]));
         let req = Request::builder()
-            .uri("https://gateway.example.com/mcp")
+            .uri("/mcp")
             .method("POST")
             .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://attacker.invalid")
@@ -665,11 +784,17 @@ mod tests {
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
 
+    // ── misc ──────────────────────────────────────────────────────────────────
+
     #[tokio::test]
     async fn forbidden_response_body_is_non_empty() {
         let app = make_app(config_origins(&["https://app.example.com"]));
         let req = Request::builder()
-            .uri("/mcp").method("POST").header(header::ORIGIN, "https://attacker.invalid").body(Body::empty()).unwrap();
+            .uri("/mcp")
+            .method("POST")
+            .header(header::ORIGIN, "https://attacker.invalid")
+            .body(Body::empty())
+            .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
         let body = to_bytes(res.into_body(), 256).await.unwrap();
