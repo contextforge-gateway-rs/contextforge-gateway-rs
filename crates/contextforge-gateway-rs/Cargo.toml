@@ -37,7 +37,7 @@ test-plugins = ["dep:cpex-payload-marker", "dep:cpex-text-prefixer", "dep:cpex-t
 axum.workspace = true
 contextforge-gateway-rs-apis.workspace = true
 http.workspace = true
-jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
+jsonwebtoken.workspace = true
 openport.workspace = true
 redis.workspace = true
 reqwest.workspace = true
