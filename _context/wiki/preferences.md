@@ -3,9 +3,24 @@
 ## Validation gate — definition of "done"
 
 A change is not done until:
-1. `cargo test` passes with no failures.
-2. `cargo clippy` is clean — no new warnings.
-3. If the change touches the hot path, the matching book page in [`docs/book/src/`](../../docs/book/src/) is updated in the same change.
+1. `cargo fmt --all --check` passes.
+2. `cargo clippy --locked --workspace --all-targets -- -D warnings` is clean.
+3. `cargo nextest run --locked --workspace` passes (fallback: `cargo test`).
+4. `cargo deny check advisories licenses` passes (pre-commit + CI).
+5. `cargo build --locked --workspace` succeeds.
+6. If the change touches the hot path, the matching book page in [`docs/book/src/`](../../docs/book/src/) is updated in the same change.
+
+CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`.
+
+**By change type:**
+
+| Change type | Minimum extra validation |
+| --- | --- |
+| Docs only | `mdbook build docs/book` + `mdbook test docs/book` |
+| Routing or session behavior | New/updated integration tests in `crates/contextforge-gateway-rs-lib/tests/` against mock backends |
+| Config shape | Schema regeneration (`cargo run -p contextforge-gateway-rs-apis`) + control-plane compatibility check |
+| Plugin behavior | `gateway_plugins.rs` coverage for the new hook path |
+| Performance-sensitive paths | Load-test run before and after |
 
 ## Code style
 
@@ -52,3 +67,9 @@ A change is not done until:
 - **Run validation**: run `cargo test` and `cargo clippy` after changes and report results before declaring done.
 - **Update the book**: when hot-path behavior changes, include the book page update in the same task.
 - **No hallucination**: if something is unclear, ask rather than guess.
+
+
+## Branch naming
+
+Format: `user/<github-username>/<kebab-case-summary>` — e.g. `user/alice/fix-session-cleanup`.
+Open PRs as draft; mark ready only when implementation, tests, and book updates are complete.

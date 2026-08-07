@@ -39,9 +39,14 @@ The architecture book at [`docs/book/src/`](../../docs/book/src/) is the authori
 | [`authentication-and-user-config.md`](../../docs/book/src/authentication-and-user-config.md) | JWT validation, config keying, cache behavior |
 | [`architectural-choices.md`](../../docs/book/src/architectural-choices.md) | Invariants and tradeoffs that must not change accidentally |
 
-**Crate structure:**
-- `contextforge-gateway-rs-lib` — all product/routing logic lives here.
-- Binary crate — thin entrypoint only. Dataplane logic must not accumulate here.
+## Crate ownership
+
+| Crate | Purpose |
+| --- | --- |
+| `contextforge-gateway-rs-lib` | All dataplane behavior: routing, middleware, sessions, transports. Almost everything goes here. |
+| `contextforge-gateway-rs` (binary) | Process shell only: CLI flags, logging, runtime shape. No dataplane logic. |
+| `contextforge-gateway-rs-apis` | Shared config shapes (`UserConfig`, `User`, plugin config). Regenerate JSON schemas with `cargo run -p contextforge-gateway-rs-apis` after any change. |
+| `contextforge-gateway-rs-cpex` | Plugin integration (CPEX hook factories). |
 
 **Key invariants:**
 - Redis/config access goes through `UserConfigStore` only — never leak Redis details into routing code.
