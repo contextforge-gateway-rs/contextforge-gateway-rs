@@ -30,17 +30,18 @@ make testing-down
 
 ## Run the Binary from Cargo
 
-For a lightweight host-development setup, start Redis and the current Fast Time
-MCP backend:
+For a lightweight host-development setup, start Redis and the MCP Rust SDK
+counter and conformance fixtures:
 
 ```bash
 docker compose -f docker/docker-compose-local.yaml up -d
-docker compose -f docker/docker-compose-local.yaml ps redis fast_time_server
+docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-two
 ```
 
 Then follow [Run the Gateway Locally](docs/book/src/running-the-gateway.md). The
-lightweight stack uses the same maintained Fast Time backend as the supported
-end-to-end test stack.
+fixtures build from a pinned revision of the official
+[`modelcontextprotocol/rust-sdk`](https://github.com/modelcontextprotocol/rust-sdk)
+repository; they do not use the retired SDK fork.
 
 ## Runtime CPEX Plugins
 

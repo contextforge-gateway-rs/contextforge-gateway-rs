@@ -1,7 +1,8 @@
 # Run the Gateway Locally
 
-Use one of the two local workflows below. Both use the current Fast Time MCP
-backend from `IBM/contextforge-examples`.
+Use one of the two local workflows below. The end-to-end stack uses the current
+Fast Time MCP backend, while the lightweight stack uses official MCP Rust SDK
+test fixtures.
 
 ## Recommended End-to-End Stack
 
@@ -33,12 +34,12 @@ make testing-down
 
 ## Run the Rust Binary from Cargo
 
-For debugger, profiler, or rapid host-development loops, start only Redis and
-the current test backend:
+For debugger, profiler, or rapid host-development loops, start Redis and the
+counter and conformance fixtures:
 
 ```bash
 docker compose -f docker/docker-compose-local.yaml up -d
-docker compose -f docker/docker-compose-local.yaml ps redis fast_time_server
+docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-two
 ```
 
 The services are available at:
@@ -46,7 +47,11 @@ The services are available at:
 | Service | Local endpoint | Role |
 | --- | --- | --- |
 | `redis` | `127.0.0.1:6379` | Runtime configuration store. |
-| `fast_time_server` | `http://127.0.0.1:8880/mcp` | Current sample MCP backend. |
+| `gateway-one` | `http://127.0.0.1:5555/mcp` | MCP Rust SDK counter fixture. |
+| `gateway-two` | `http://127.0.0.1:5556/mcp` | MCP Rust SDK conformance fixture. |
+
+Both fixtures build from a pinned revision of the official
+`modelcontextprotocol/rust-sdk` repository, not the retired SDK fork.
 
 Run the binary with the local bootstrap helpers when direct token/config setup
 is needed during development:

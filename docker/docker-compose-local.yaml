@@ -6,32 +6,46 @@ networks:
     driver: bridge
 
 services:
-  fast_time_server:
-    image: ghcr.io/ibm/cfex-mcp-fast-time-server:latest
-    restart: unless-stopped
+  gateway-one:
+    image: mcp_counter
+    build:
+      dockerfile: mcp_counter.Dockerfile
     networks: [contextforge-data-plane-net]
     ports:
-      - "8880:8880"
+      - "5555:5555"
     environment:
-      - BIND_ADDRESS=0.0.0.0:8880
-      - RUST_LOG=info
+      - RUST_LOG=warn
     sysctls:
       - net.ipv4.tcp_fin_timeout=15
       - net.ipv4.ip_local_port_range=1024 65535
-      - net.core.somaxconn=65535
     ulimits:
       nofile:
         soft: 65535
         hard: 65535
-      nproc:
-        soft: 5000
-        hard: 5000
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8880/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  gateway-two:
+    image: mcp_conformance
+    build:
+      dockerfile: mcp_conformance.Dockerfile
+    networks: [contextforge-data-plane-net]
+    ports:
+      - "5556:5556"
+    environment:
+      - RUST_LOG=warn
+      - PORT=5556
+    sysctls:
+      - net.ipv4.tcp_fin_timeout=15
+      - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      redis:
+        condition: service_healthy
 
   redis:
     image: redis:latest
