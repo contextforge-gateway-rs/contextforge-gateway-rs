@@ -62,7 +62,7 @@ jobs:
       - uses: taiki-e/install-action@v2.75.27
         with:
           tool: cargo-nextest
-      - run: cargo nextest run --locked --workspace
+      - run: cargo nextest run --locked --workspace --all-features
 
   build:
     runs-on: ubuntu-latest
@@ -70,8 +70,7 @@ jobs:
       - uses: actions/checkout@v6.0.2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
-      - run: cargo build --locked --workspace
-      - run: cargo build --locked -p contextforge-gateway-rs --features plugins
+      - run: cargo build --locked --workspace --all-features
 
   bench:
     runs-on: ubuntu-latest
