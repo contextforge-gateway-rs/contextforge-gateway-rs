@@ -21,7 +21,7 @@ mod tools;
 
 mod user_config_store;
 pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
-use gateway::{BackendTransports, McpService};
+use gateway::{BackendTransports, DownstreamSubscriptionRegistry, McpService};
 use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -75,6 +75,7 @@ impl Gateway {
 
         let user_session_store = LocalUserSessionStore::new();
         let backend_transports = BackendTransports::default();
+        let downstream_subscriptions = DownstreamSubscriptionRegistry::default();
         let session_id_state = SessionIdState {
             user_session_store: Arc::new(user_session_store.clone()),
             backend_transports: backend_transports.clone(),
@@ -89,12 +90,15 @@ impl Gateway {
         let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
             StreamableHttpService::new(
                 move || {
+                    let gateway_context = layers::request_context::current_gateway_request_context();
                     Ok(McpService::builder()
                         .with_user_session_store(user_session_store.clone())
                         .with_http_client(reqwest_backend_client.clone())
                         .with_transports(backend_transports.clone())
                         .with_plugin_runtime(mcp_plugin_runtime.clone())
-                        .build())
+                        .build()
+                        .with_gateway_request_context(gateway_context)
+                        .with_downstream_subscription_registry(downstream_subscriptions.clone()))
                 },
                 session_manager,
                 streamable_config,

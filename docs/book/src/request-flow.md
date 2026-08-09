@@ -94,7 +94,7 @@ as `VirtualHostId`.
 | Path extraction | The inner path matched `/servers/{virtual_host_id}/mcp`. | MCP handlers can resolve a `VirtualHost`. |
 | Claims validation | The bearer token was accepted and `ContextForgeClaims` exists. | Config lookup can use `claims.sub`. |
 | User config lookup | A `UserConfig` exists for the authenticated subject. | The virtual host check can run against that config. |
-| Virtual host check | The path's virtual host id exists in the caller's config. | MCP validators can resolve the selected `VirtualHost`. |
+| Virtual host check | The path's virtual host id exists in the caller's config. | MCP validators can resolve the selected `VirtualHost`; the RMCP service factory can build context-aware server metadata. |
 | RMCP dispatch | The streamable HTTP request is mapped to an MCP method. | The handler chooses initialize, routed backend calls, or local behavior. |
 
 ## Middleware Context
@@ -108,6 +108,15 @@ The request layers insert the context used later by RMCP handlers:
 | `session_id_layer` | Reads `Mcp-session-id` and inserts `SessionId` when present. | Missing session id is allowed here; authorized MCP handlers reject it later when required. |
 | `user_config_store_layer` | Uses `claims.sub` as `User::new(subject)`, loads `UserConfig`, and inserts it. | Returns `400` for missing config, `500` for other store failures, and `400` if claims are absent. |
 | `virtual_host_config_layer` | Checks that the path's virtual host id exists in the loaded `UserConfig`. | Returns `404` with body `{"detail":"Server not found"}` when the virtual host is not in the caller's config. |
+
+After the virtual host check succeeds, `virtual_host_config_layer` scopes a
+task-local gateway request context containing the principal, selected
+`VirtualHostId`, and selected `VirtualHost`. RMCP's `StreamableHttpService`
+factory runs inside that request task for normal stateless requests, so the
+fresh `McpService` instance can carry context-derived capabilities for
+`server/discover` and `subscriptions/listen` admission. Factory calls that
+happen outside this request scope, such as schema-cache validation paths, build
+a service with minimal safe capabilities.
 
 For `DELETE`, `session_id_layer` also has response-side behavior. It lets RMCP
 handle the request first. If the RMCP response succeeds and a session id exists,
@@ -186,6 +195,8 @@ backend-routed:
 | Method | Current behavior |
 | --- | --- |
 | `ping` | Returns success. |
+| `server/discover` | Uses RMCP's default handler over `McpService::get_info()`. For modern stateless requests this reports capabilities derived from the authenticated user's selected virtual host. |
+| `subscriptions/listen` | Uses RMCP's subscription machinery. The gateway narrows the requested filter against the selected virtual host, registers RMCP `SubscriptionSink`s for accepted notification kinds, and removes those registrations when the listen request closes. |
 
 This path still passes through the same HTTP middleware, but it does not use
 backend fanout or identifier routing.

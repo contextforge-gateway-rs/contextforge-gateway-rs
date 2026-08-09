@@ -10,7 +10,8 @@
 > not compatibility contracts.
 
 Gateway methods fall into three groups: `initialize` creates backend sessions,
-routed methods use them, and `ping` remains local to the gateway process.
+routed methods use them, and local modern methods such as `server/discover` and
+`subscriptions/listen` operate on request-scoped gateway context.
 
 ## Initialize
 
@@ -54,11 +55,14 @@ matches invalidate the session; see [Failure Modes](failure-modes.md).
 
 ## Local Methods
 
-This method passes through the same HTTP middleware but does not touch backends:
+These methods pass through the same HTTP middleware but do not directly fan out
+to backends:
 
 | Method | Current behavior |
 | --- | --- |
 | `ping` | Returns success. |
+| `server/discover` | Returns gateway capabilities derived from the authenticated user's selected virtual host. Until stateless backend capability caching lands, this is vhost-scoped and config-derived rather than live-backend-refined. |
+| `subscriptions/listen` | Uses RMCP's built-in stream handling, acknowledgment, filtering, and `io.modelcontextprotocol/subscriptionId` tagging. The gateway narrows resource subscription URIs to those routable for the selected virtual host, registers accepted sinks, and cleans them up when the listen request closes. Relaying list-changed and resource-updated notifications is tracked separately. |
 
 ## Session Delete
 
