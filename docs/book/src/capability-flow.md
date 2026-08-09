@@ -7,6 +7,14 @@
 This page explains where MCP capabilities come from during `initialize`, how
 the gateway stores them, and what the downstream client sees today.
 
+Modern stateless `server/discover` has a separate transitional path. The
+request middleware resolves the authenticated principal and selected virtual
+host before RMCP builds `McpService`; the service then reports
+vhost-scoped gateway capabilities from that context. These capabilities are
+config-derived, not live-backend-refined, until the stateless backend discovery
+and capability cache replaces the legacy `initialize` fanout for modern
+requests.
+
 ## Short Answer
 
 Upstream capabilities come from each backend's own `InitializeResult`. The

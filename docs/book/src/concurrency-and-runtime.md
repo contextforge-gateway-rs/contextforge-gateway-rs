@@ -31,6 +31,7 @@ global queue interval of `1024` and `4` I/O events per tick.
 | State | Lock | Contention profile |
 | --- | --- | --- |
 | `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, per-call borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. |
+| Downstream subscription registry | `Arc<std::sync::Mutex<HashMap<...>>>` | Locked briefly while registering or removing `SubscriptionSink` handles for `subscriptions/listen`. A synchronous lock lets the drop guard remove entries even when RMCP drops the listen future. |
 | Subscription set | `Arc<tokio::sync::Mutex<HashSet<String>>>` | Local `subscribe`/`unsubscribe` only. |
 | User config LRU cache | `Arc<tokio::sync::Mutex<LruCache>>` inside `RedisUserConfigStore` | One lock per config lookup on the hot path; misses add a Redis round trip. |
 | User session LRU cache | Same pattern in `LocalUserSessionStore` | Initialize and delete paths. |
@@ -49,6 +50,10 @@ reads, and plugin hooks all run outside any gateway lock.
 - `call_tool` watches the downstream cancellation token and forwards a cancel
   to the backend if the client gives up first; backend progress notifications
   are forwarded downstream while the call is in flight.
+- `subscriptions/listen` stores cloneable RMCP `SubscriptionSink`s in the
+  downstream subscription registry and parks until RMCP cancels the request.
+  Registry entries are owned by a guard so cancellation or stream teardown
+  removes them without holding a lock across the parked future.
 
 ## Listener Behavior
 
