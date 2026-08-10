@@ -5,9 +5,8 @@ The Rust data plane for
 traffic, loads control-plane-published configuration from Redis, and routes
 authorized requests to configured MCP backends.
 
-Architecture, configuration, operations, and development documentation lives
-in [The ContextForge Data Plane Book](docs/book/src/SUMMARY.md). Build it locally
-with `mdbook serve docs/book`; see [docs/book/README.md](docs/book/README.md).
+Architecture, configuration, operations, and development context lives
+in the wiki under [`_context/wiki/`](_context/wiki/index.md).
 
 ## Quick Start
 
@@ -20,8 +19,8 @@ make testing-up
 ```
 
 The stack uses the current `fast_time_server` backend and exercises config
-publication through the external ContextForge control plane. Follow
-[Local Docker Stack](docs/book/src/local-docker-stack.md) for the complete smoke
+publication through the external ContextForge control plane. See
+[getting-started.md](_context/wiki/getting-started.md) for the complete smoke
 test, then stop it with:
 
 ```bash
@@ -38,13 +37,13 @@ docker compose -f docker/docker-compose-local.yaml up -d
 docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-two
 ```
 
-Then follow [Run the Gateway Locally](docs/book/src/running-the-gateway.md).
+Then follow [getting-started.md](_context/wiki/getting-started.md) for the local cargo dev workflow.
 
 ## Runtime CPEX Plugins
 
 Runtime CPEX plugins are disabled by default. When enabled, the data plane loads
 validated plugin configuration from Redis and supports the narrow hook surface
-documented in [Plugins And Policy](docs/book/src/plugins-and-policy.md).
+documented in [config.md](_context/wiki/config.md).
 
 The optional demo plugin crates still come from their independently hosted
 `cpex-plugins-rs` repository; they are unrelated to the retired MCP SDK fork.
@@ -83,9 +82,7 @@ cargo run --release \
 
 ## Tracing and Metrics
 
-The data plane exports OTLP traces and metrics. The local Langfuse,
-OpenTelemetry Collector, and Prometheus overlays are documented in
-[Telemetry And Diagnostics](docs/book/src/telemetry-and-diagnostics.md).
+The data plane exports OTLP traces and metrics. Local Langfuse, OTel Collector, and Prometheus overlays are documented in [config.md](_context/wiki/config.md) under "Local Telemetry Verification Stack".
 
 ## Performance Tests
 

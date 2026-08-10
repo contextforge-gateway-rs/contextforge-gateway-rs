@@ -21,9 +21,9 @@ then follow only the links that are relevant.
 
 ## Quick orientation
 
-- **Repo**: `contextforge-gateway-rs` — the Rust dataplane for ContextForge.
+- **Repo**: `contextforge-data-plane` — the Rust dataplane for ContextForge.
 - **Core invariant**: this crate is pure routing logic. No IAM, UI, or metrics storage.
 - **Protocol target**: MCP `2026-07-28` over Streamable HTTP. Legacy SSE paths are being removed.
-- **Architecture book**: [`docs/book/src/`](../../docs/book/src/) — read the relevant page before touching the hot path.
+- **Architecture context**: [architecture.md](architecture.md) — read before touching the hot path. Full wiki index above.
 - **Validation gate**: `cargo fmt` + `cargo clippy` + `cargo nextest` + `cargo deny` must be clean; CI also runs `cargo shear`. See [preferences.md](preferences.md) for by-change-type requirements.
 - **System topology**: `client → nginx → [dataplane | control-plane]`; config flows from control-plane via `dataplane_publisher.py` → Redis → dataplane. See [project.md § System topology](project.md#system-topology).

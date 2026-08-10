@@ -8,7 +8,7 @@ A change is not done until:
 3. `cargo nextest run --locked --workspace` passes (fallback: `cargo test`).
 4. `cargo deny check advisories licenses` passes (pre-commit + CI).
 5. `cargo build --locked --workspace` succeeds.
-6. If the change touches the hot path, the matching book page in [`docs/book/src/`](../../docs/book/src/) is updated in the same change.
+6. If the change touches the hot path, update the matching wiki page in `_context/wiki/` in the same change.
 
 CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`.
 
@@ -16,7 +16,7 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 
 | Change type | Minimum extra validation |
 | --- | --- |
-| Docs only | `mdbook build docs/book` + `mdbook test docs/book` |
+| Docs only | Update the relevant wiki page in `_context/wiki/` |
 | Routing or session behavior | New/updated integration tests in `crates/contextforge-data-plane-lib/tests/` against mock backends |
 | Config shape | Schema regeneration (`cargo run -p contextforge-data-plane-apis`) + control-plane compatibility check |
 | Plugin behavior | `gateway_plugins.rs` coverage for the new hook path |
@@ -72,4 +72,4 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 ## Branch naming
 
 Format: `user/<github-username>/<kebab-case-summary>` — e.g. `user/alice/fix-session-cleanup`.
-Open PRs as draft; mark ready only when implementation, tests, and book updates are complete.
+Open PRs as draft; mark ready only when implementation, tests, and wiki updates are complete.

@@ -29,15 +29,14 @@ The dataplane must never take on control-plane concerns.
 
 ## Key modules and architecture
 
-The architecture book at [`docs/book/src/`](../../docs/book/src/) is the authoritative reference. Key pages:
+Architecture context lives in the wiki. Key pages:
 
-| Page | Covers |
+| Wiki page | Covers |
 | --- | --- |
-| [`system-shape.md`](../../docs/book/src/system-shape.md) | Crate layout, pipeline shape, state ownership, module boundaries |
-| [`request-flow.md`](../../docs/book/src/request-flow.md) | Startup, middleware order, fan-out, response path |
-| [`mcp-routing-semantics.md`](../../docs/book/src/mcp-routing-semantics.md) | Backend prefix namespace and routing contract |
-| [`authentication-and-user-config.md`](../../docs/book/src/authentication-and-user-config.md) | JWT validation, config keying, cache behavior |
-| [`architectural-choices.md`](../../docs/book/src/architectural-choices.md) | Invariants and tradeoffs that must not change accidentally |
+| [architecture.md](architecture.md) | Crate layout, pipeline shape, state ownership, module boundaries |
+| [routing.md](routing.md) | Backend prefix namespace, routing contract, session state, method reference |
+| [config.md](config.md) | JWT validation, config keying, UserConfig shape, cache behavior |
+| [security.md](security.md) | Trust boundaries, invariants, and tradeoffs |
 
 ## Crate ownership
 
