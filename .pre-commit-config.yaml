@@ -46,6 +46,7 @@ repos:
       - id: end-of-file-fixer
         name: Fix End of Files
         types: [text]
+        exclude: '^\.gitignore$'
         stages: [pre-commit, pre-push, manual]
 
       - id: trailing-whitespace
