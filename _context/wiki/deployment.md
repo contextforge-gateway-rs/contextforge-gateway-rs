@@ -38,9 +38,18 @@ Backend MCP sessions are **local process state** — see [routing.md](routing.md
 
 ## Images
 
-- CI publishes `ghcr.io/<owner>/contextforge-gateway-rs:<version>` (Cargo package version as tag).
-- **No `latest` tag — always pin the version.**
+- CI builds `docker/Dockerfile` on every push to `main` and publishes both `ghcr.io/<owner>/contextforge-data-plane:v<version>` and `ghcr.io/<owner>/contextforge-data-plane:latest`, where `<version>` is the Cargo package version.
+- **Pin the `v`-prefixed tag for reproducible deployments.** `latest` tracks `main`.
 - Builder: `rust:1.96.1` in `docker/Dockerfile`.
+- The reference Compose stack runs the gateway with raised limits worth copying to real deployments: `nofile 65535` and TCP tuning (`tcp_fin_timeout=15`, widened local port range).
+
+## TLS Choices
+
+| Leg | Options |
+| --- | --- |
+| Front door to gateway | Plain HTTP on a trusted private network (common shape behind nginx), or terminate TLS at the gateway with `--tls-address` plus certificate and key. Both listeners can run at once on different sockets. |
+| Gateway to Redis | `--redis-mode` plain, TLS, or mTLS. Use TLS/mTLS across trust zones — Redis is the config trust boundary. |
+| Gateway to backends | HTTPS-only by default; opt into plain HTTP or mTLS with `--upstream-connection-mode`. |
 
 ## Config Propagation Delay
 

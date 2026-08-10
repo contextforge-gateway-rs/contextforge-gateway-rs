@@ -8,7 +8,7 @@
 
 Plus at least: `--address` or `--tls-address`, `--token-verification-public-key` or `--token-verification-secret`.
 
-## Key CLI Flags (env var: `CONTEXTFORGE_GATEWAY_RS_*`)
+## Key CLI Flags (env var: `CONTEXTFORGE_DATA_PLANE_*`)
 
 | Flag | Env suffix | Default | Note |
 | --- | --- | --- | --- |
@@ -42,7 +42,7 @@ Optional: `token_use`, `iat`, `teams`, `scopes`, `user.full_name`.
 
 > **No revocation:** a leaked token is valid until `exp`. Rotate the signing key and restart to invalidate all outstanding tokens.
 
-## UserConfig Shape (from `contextforge-gateway-rs-apis`)
+## UserConfig Shape (from `contextforge-data-plane-apis`)
 
 ```
 UserConfig
@@ -81,7 +81,7 @@ Redis storage: `MessagePack(User::new(sub))` → `MessagePack(UserConfig)`.
 
 Schema: `schemas/user_config.json`. Regenerate after any struct change:
 ```bash
-cargo run -p contextforge-gateway-rs-apis
+cargo run -p contextforge-data-plane-apis
 ```
 
 ## Plugin Config (Redis key: `ContextForgeGatewayRuntimePluginConfig`)
@@ -152,3 +152,48 @@ Metrics are pushed by a `PeriodicReader` every **30 seconds**. Allow ~35s after 
 | MCP routing errors | `AuthorizedCallValidator::validate` debug, then `call_tool`/`read_resource`/`get_prompt` warns |
 | Backend failures | `initialize:` warns for failed backends; routed-call warns name the failing backend |
 | Plugin problems | CPEX pipeline error logs; invalid reload marks runtime failed |
+
+## Local Telemetry Verification Stack
+
+A complete local observability pipeline ships under `docker/` as overlays:
+
+| Component | Role | Endpoint |
+| --- | --- | --- |
+| Langfuse | Trace backend and span viewer. | `http://localhost:3100`, login `admin@example.com` / `changeme`, project `ContextForge Data Plane`. |
+| OTel Collector | Receives OTLP from the gateway; fans traces and metrics out. | OTLP/HTTP on `:4318`, Prometheus exposition on `:8889`. |
+| Prometheus | Scrapes the collector for browsable PromQL. | `http://localhost:9090`. |
+
+Start:
+```bash
+docker compose \
+  -f docker/docker-compose-local.yaml \
+  -f docker/docker-compose-langfuse.yaml \
+  -f docker/docker-compose-otel-collector.yaml \
+  up -d
+```
+
+Run the gateway with export enabled (RUST_TRACE_LOG=debug required for trace export):
+```bash
+RUST_TRACE_LOG=debug \
+cargo run --release --bin contextforge-data-plane -- \
+  --address 0.0.0.0:8001 \
+  --redis-port 6379 --redis-address 127.0.0.1 --redis-mode=plain-text \
+  --token-verification-public-key assets/jwt.key.pub \
+  --number-of-cpus 4 \
+  --upstream-connection-mode=plain-text-or-tls \
+  --enable-open-telemetry true \
+  --enable-otel-metrics true \
+  --otlp-protocol http-protobuf \
+  --otlp-endpoint  http://127.0.0.1:3100/api/public/otel/v1/traces \
+  --otlp-metrics-endpoint http://127.0.0.1:4318/v1/metrics \
+  --otlp-service-name contextforge-data-plane
+```
+
+## Prometheus Starter Queries
+
+| Question | Query |
+| --- | --- |
+| Request count by method, status, service | `http_server_request_duration_seconds_count` |
+| p95 latency | `histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[1m])))` |
+| In-flight requests | `http_server_active_requests` |
+| Payload throughput | `http_server_request_body_size_bytes_sum` / `http_server_response_body_size_bytes_sum` |

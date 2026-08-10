@@ -17,15 +17,15 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 | Change type | Minimum extra validation |
 | --- | --- |
 | Docs only | `mdbook build docs/book` + `mdbook test docs/book` |
-| Routing or session behavior | New/updated integration tests in `crates/contextforge-gateway-rs-lib/tests/` against mock backends |
-| Config shape | Schema regeneration (`cargo run -p contextforge-gateway-rs-apis`) + control-plane compatibility check |
+| Routing or session behavior | New/updated integration tests in `crates/contextforge-data-plane-lib/tests/` against mock backends |
+| Config shape | Schema regeneration (`cargo run -p contextforge-data-plane-apis`) + control-plane compatibility check |
 | Plugin behavior | `gateway_plugins.rs` coverage for the new hook path |
 | Performance-sensitive paths | Load-test run before and after |
 
 ## Code style
 
 - **Idiomatic Rust** — no unnecessary clones, heap allocations, `Arc`, or `Mutex` unless justified by the design.
-- Most product behavior lives in `contextforge-gateway-rs-lib`. Do not let dataplane logic accumulate in the binary crate.
+- Most product behavior lives in `contextforge-data-plane-lib`. Do not let dataplane logic accumulate in the binary crate.
 - Typed errors — propagate errors rather than swallowing them silently.
 - Keep change size minimal. Every changed line must trace directly to the task at hand.
 

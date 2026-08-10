@@ -36,7 +36,7 @@ upstream response
 
 Order is invariant: auth/config before backend selection; request plugins before upstream; response plugins before returning.
 
-## Module Boundaries (`contextforge-gateway-rs-lib`)
+## Module Boundaries (`contextforge-data-plane-lib`)
 
 | Module | Owns |
 | --- | --- |
@@ -53,7 +53,7 @@ Order is invariant: auth/config before backend selection; request plugins before
 | State | Owner | Lifetime |
 | --- | --- | --- |
 | CLI `Config` | Binary startup + `Gateway` | Process |
-| JWT decoders | `ContextForgeGatewayAppState` | Process |
+| JWT decoders | `ContextForgeDataPlaneAppState` | Process |
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |

@@ -62,11 +62,16 @@ This is **local process state only**. Implications:
 
 ## Capability Merge
 
-On `initialize`, the gateway builds one downstream `InitializeResult` — not a passthrough of any one backend. It uses gateway-aware merge:
+On `initialize`, the gateway builds one downstream `InitializeResult` — not a passthrough of any one backend. The source of truth is each backend's `InitializeResult`; the gateway reads `peer_info().capabilities` from each running service and stores them with the backend transport state.
+
+The merge rule (gateway-aware, not a raw union):
 - Enable a top-level capability when ≥1 backend supports it **and** the gateway has a routing story for it.
-- `resources.subscribe` preserved if any backend advertises it.
-- `listChanged` not yet advertised (gateway doesn't emit downstream list-changed notifications).
+- `resources.subscribe` preserved if any backend advertises it (the gateway routes subscribe/unsubscribe and forwards resource-update notifications).
+- `listChanged` not yet advertised (gateway doesn't emit downstream list-changed notifications when upstream lists change).
 - Single-backend passthrough is not a stable contract (`HashMap` iteration order).
+- If no backend reports supported capabilities, returns `ServerCapabilities::default()`.
+
+**Do not** initialize the downstream capability from just one backend entry — the gateway fronts multiple backends, `HashMap` iteration is non-deterministic, and list methods already merge across all backends.
 
 ## Cleanup
 

@@ -43,10 +43,11 @@ The architecture book at [`docs/book/src/`](../../docs/book/src/) is the authori
 
 | Crate | Purpose |
 | --- | --- |
-| `contextforge-gateway-rs-lib` | All dataplane behavior: routing, middleware, sessions, transports. Almost everything goes here. |
-| `contextforge-gateway-rs` (binary) | Process shell only: CLI flags, logging, runtime shape. No dataplane logic. |
-| `contextforge-gateway-rs-apis` | Shared config shapes (`UserConfig`, `User`, plugin config). Regenerate JSON schemas with `cargo run -p contextforge-gateway-rs-apis` after any change. |
-| `contextforge-gateway-rs-cpex` | Plugin integration (CPEX hook factories). |
+| `contextforge-data-plane-lib` | All dataplane behavior: routing, middleware, sessions, transports. Almost everything goes here. |
+| `contextforge-data-plane` (binary) | Process shell only: CLI flags, logging, runtime shape. No dataplane logic. |
+| `contextforge-data-plane-apis` | Shared config shapes (`UserConfig`, `User`, plugin config). Regenerate JSON schemas after any change: `cargo run -p contextforge-data-plane-apis`. |
+| `contextforge-data-plane-cpex` | Plugin integration (CPEX hook factories). |
+| `contextforge-load-test` | Performance harness: end-to-end MCP traffic driver. |
 
 **Key invariants:**
 - Redis/config access goes through `UserConfigStore` only — never leak Redis details into routing code.
