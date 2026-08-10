@@ -13,7 +13,7 @@ After completing a task, offer to update the wiki if the task yielded durable kn
 
 ---
 
-Guidance for agents working on `contextforge-gateway-rs`.
+Guidance for agents working on `contextforge-data-plane`.
 
 This repo is the Rust dataplane part of ContextForge. It must stay compatible
 with the external ContextForge control plane in
