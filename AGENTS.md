@@ -11,6 +11,10 @@ the task.
 
 After completing a task, offer to update the wiki if the task yielded durable knowledge that could benefit future work, then wait for user approval. This includes new processes, architecture decisions, or insights that go beyond the immediate task.
 
+When adding a new wiki page, also update:
+- `_context/wiki/index.md` — add a row to the pages table
+- `_context/wiki/SUMMARY.md` — add the page under the appropriate section so it appears in the published book
+
 ---
 
 Guidance for agents working on `contextforge-data-plane`.
