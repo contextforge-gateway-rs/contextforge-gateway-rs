@@ -13,7 +13,6 @@ fn parse_origin(raw: &str) -> Option<Origin> {
     if url.query().is_some() || url.fragment().is_some() {
         return None;
     }
-    url.host()?;
     match url.origin() {
         Origin::Tuple(_, _, _) => Some(url.origin()),
         Origin::Opaque(_) => None,
