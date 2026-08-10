@@ -34,10 +34,9 @@ fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
 }
 
 fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[Authority]) -> bool {
-    let request_host = authority.host().to_ascii_lowercase();
     let request_port = authority.port_u16();
     allowed_hosts.iter().any(|entry| {
-        entry.host().to_ascii_lowercase() == request_host && entry.port_u16().is_none_or(|p| Some(p) == request_port)
+        entry.host().eq_ignore_ascii_case(authority.host()) && entry.port_u16().is_none_or(|p| Some(p) == request_port)
     })
 }
 
