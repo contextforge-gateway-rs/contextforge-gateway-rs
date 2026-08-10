@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-.PHONY: help docker-prod compose-up compose-down docs-serve
-=======
 SERVICES ?= nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
 ARGS     ?=
 
@@ -15,10 +12,6 @@ DETECT_SECRETS_EXCLUDE := '(?x)(Cargo\.lock$$|\.lock$$)|^\.secrets\.baseline$$'
         fmt fmt-check lint deny \
         pre-commit install-pre-commit-hooks configure-git \
         secrets-scan secrets-scan-all secrets-audit secrets-baseline
-<<<<<<< HEAD
->>>>>>> 7aaeb99 (feat:added make pre-commit)
-=======
->>>>>>> a7bc99d (restored: Makefile changes - scope creep)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -37,15 +30,6 @@ compose-up: ## Launch stack: nginx, control plane, redis, postgres, pgbouncer, d
 	}
 	docker compose -f docker/docker-compose.yml up -d $(SERVICES) $(ARGS)
 
-<<<<<<< HEAD
-compose-down: ## Tear down the stack
-	docker compose -f docker/docker-compose.yml stop nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
-
-docs-serve: ## Serve the wiki book locally at http://127.0.0.1:3000
-	mdbook serve _context/wiki --hostname 127.0.0.1 --port 3000 --open
-=======
-testing-down: ## Tear down the testing stack
-	docker compose -f docker/docker-compose.yml stop $(SERVICES) $(ARGS)
 compose-down: ## Tear down the stack
 	docker compose -f docker/docker-compose.yml stop $(SERVICES) $(ARGS)
 
@@ -77,7 +61,7 @@ install-pre-commit-hooks: ## Install pre-commit git hooks into .git/hooks
 		echo "pre-commit not found. Install it with one of:"; \
 		echo "  uv tool install pre-commit"; \
 		echo "  brew install pre-commit"; \
-		exit 1; \
+		echo "  exit 1"; \
 	fi
 	pre-commit install
 	@echo "✅ pre-commit hooks installed"
@@ -86,7 +70,6 @@ pre-commit: ## Run all pre-commit hooks against every file
 	@if ! command -v pre-commit >/dev/null 2>&1; then \
 		echo "pre-commit not found. Install it with one of:"; \
 		echo "  uv tool install pre-commit"; \
-		echo "  brew install pre-commit"; \
 		exit 1; \
 	fi
 	@mkdir -p .cache/pre-commit-home .cache/tmp
@@ -162,7 +145,3 @@ configure-git: install-pre-commit-hooks ## Configure git hooks + merge driver fo
 	git config merge.secrets-baseline.driver \
 		"$$common_dir/git-drivers/resolve-secrets-baseline-conflict.sh %O %A %B %P"
 	@echo "✅ Git merge driver configured for .secrets.baseline"
-<<<<<<< HEAD
->>>>>>> 7aaeb99 (feat:added make pre-commit)
-=======
->>>>>>> a7bc99d (restored: Makefile changes - scope creep)
