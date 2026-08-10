@@ -111,7 +111,7 @@ The downstream client should reason about one MCP server:
 
 ```text
 client
-  -> ContextForge Gateway
+  -> ContextForge Data Plane
   -> merged tools/resources/prompts
 ```
 

@@ -8,10 +8,10 @@
 
 | Change | Home |
 | --- | --- |
-| Dataplane behavior: routing, middleware, sessions, transports | `contextforge-gateway-rs-lib` — almost everything goes here. |
-| Process shell: CLI flags, logging, runtime shape, exporters | `contextforge-gateway-rs` (the binary crate). Do not add dataplane logic here. |
-| Shared config shapes (`UserConfig`, `User`, plugin config document) | `contextforge-gateway-rs-apis`. Regenerate the JSON schemas after any change: `cargo run -p contextforge-gateway-rs-apis` (see [Control-Plane Integration](control-plane-integration.md)). |
-| Plugin integration | `contextforge-gateway-rs-cpex`. |
+| Dataplane behavior: routing, middleware, sessions, transports | `contextforge-data-plane-lib` — almost everything goes here. |
+| Process shell: CLI flags, logging, runtime shape, exporters | `contextforge-data-plane` (the binary crate). Do not add dataplane logic here. |
+| Shared config shapes (`UserConfig`, `User`, plugin config document) | `contextforge-data-plane-apis`. Regenerate the JSON schemas after any change: `cargo run -p contextforge-data-plane-apis` (see [Control-Plane Integration](control-plane-integration.md)). |
+| Plugin integration | `contextforge-data-plane-cpex`. |
 | Load generation | `contextforge-load-test`. |
 
 Inside the library crate, keep the module boundaries from
@@ -68,7 +68,7 @@ Expectations by change type:
 | Change type | Minimum validation |
 | --- | --- |
 | Docs only | `mdbook build docs/book` and `mdbook test docs/book`. |
-| Routing or session behavior | New or updated integration tests under `crates/contextforge-gateway-rs-lib/tests/` against the mock backends. |
+| Routing or session behavior | New or updated integration tests under `crates/contextforge-data-plane-lib/tests/` against the mock backends. |
 | Config shape | Schema regeneration plus a control-plane compatibility check. |
 | Plugin behavior | `gateway_plugins.rs` coverage for the new hook path. |
 | Performance-sensitive paths | A [load-test run](performance.md) before and after. |

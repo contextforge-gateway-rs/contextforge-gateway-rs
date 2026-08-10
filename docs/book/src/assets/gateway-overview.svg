@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 330" role="img" aria-labelledby="title desc">
-  <title id="title">ContextForge Gateway request and response path</title>
-  <desc id="desc">An MCP client sends streamable HTTP traffic to the ContextForge Gateway. The gateway validates the caller, loads runtime configuration, calls backend MCP servers, receives backend responses, merges them, and returns one MCP response or stream to the client.</desc>
+  <title id="title">ContextForge Data Plane request and response path</title>
+  <desc id="desc">An MCP client sends streamable HTTP traffic to the ContextForge Data Plane. The data plane validates the caller, loads runtime configuration, calls backend MCP servers, receives backend responses, merges them, and returns one MCP response or stream to the client.</desc>
 
   <rect x="0" y="0" width="980" height="330" rx="18" fill="#ffffff" />
   <rect x="1" y="1" width="978" height="328" rx="18" fill="none" stroke="#d7dde5" />
@@ -38,7 +38,7 @@
 
   <g>
     <rect x="314" y="48" width="308" height="188" rx="12" fill="#f1fbf5" stroke="#3f9b6d" stroke-width="2" />
-    <text x="468" y="84" text-anchor="middle" class="title">ContextForge Gateway</text>
+    <text x="468" y="84" text-anchor="middle" class="title">ContextForge Data Plane</text>
 
     <rect x="350" y="108" width="236" height="30" rx="8" fill="#ffffff" stroke="#cdd8d1" />
     <text x="468" y="128" text-anchor="middle" class="body">validate caller</text>

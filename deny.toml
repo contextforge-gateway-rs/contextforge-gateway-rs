@@ -323,7 +323,8 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
 
 [sources.allow-org]
-# github.com organizations to allow git sources for
+# github.com organizations to allow git sources for. The legacy organization
+# still hosts the demo CPEX plugins used by the optional test feature.
 github = ["contextforge-gateway-rs"]
 # gitlab.com organizations to allow git sources for
 gitlab = []

@@ -18,7 +18,7 @@ All export settings are process config; see the telemetry section of the
 ## Logging
 
 Console and file logging are always on. The file appender writes
-`contextforge-gateway-rs.log` (configurable with `--log-name`) in the current
+`contextforge-data-plane.log` (configurable with `--log-name`) in the current
 working directory and rotates hourly by default (`--log-rotation`).
 
 Three environment filters control verbosity independently:
@@ -63,7 +63,7 @@ A complete local pipeline ships under `docker/` as overlays on top of the
 
 | Component | Role | Endpoint |
 | --- | --- | --- |
-| Langfuse | Trace backend and span viewer. | UI at `http://localhost:3100`, login `admin@example.com` / `changeme`, project `ContextForge Gateway (Rust)`. |
+| Langfuse | Trace backend and span viewer. | UI at `http://localhost:3100`, login `admin@example.com` / `changeme`, project `ContextForge Data Plane`. |
 | OTel Collector | Receives OTLP from the gateway, fans traces and metrics out. | OTLP/HTTP on `:4318`, Prometheus exposition on `:8889`, raw dumps via `docker logs otel-collector`. |
 | Prometheus | Scrapes the collector for browsable PromQL. | UI at `http://localhost:9090`. |
 
@@ -83,7 +83,7 @@ Re-run with `ps` instead of `up -d` and wait until every container is healthy.
 
 ```bash
 RUST_TRACE_LOG=debug \
-cargo run --release --bin contextforge-gateway-rs -- \
+cargo run --release --bin contextforge-data-plane -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 --redis-address 127.0.0.1 --redis-mode=plain-text \
   --token-verification-public-key assets/jwt.key.pub \
@@ -95,7 +95,7 @@ cargo run --release --bin contextforge-gateway-rs -- \
   --otlp-endpoint  http://127.0.0.1:3100/api/public/otel/v1/traces \
   --otlp-headers   "Authorization=Basic cGstbGYtY29udGV4dGZvcmdlOnNrLWxmLWNvbnRleHRmb3JnZQ==" \
   --otlp-metrics-endpoint http://127.0.0.1:4318/v1/metrics \
-  --otlp-service-name contextforge-gateway-rs
+  --otlp-service-name contextforge-data-plane
 ```
 
 The `Authorization` header is Basic auth for the seeded Langfuse project keys

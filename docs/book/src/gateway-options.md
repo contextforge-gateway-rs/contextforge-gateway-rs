@@ -8,7 +8,7 @@ a flag and an environment variable at the same time, the command-line flag wins.
 For the always-current list, ask the binary directly:
 
 ```bash
-cargo run -p contextforge-gateway-rs --bin contextforge-gateway-rs -- --help
+cargo run -p contextforge-data-plane --bin contextforge-data-plane -- --help
 ```
 
 The sections below group the options by concern: listeners, JWT, Redis, upstream
@@ -40,10 +40,10 @@ cannot pass the claims layer.
 
 | Flag | Env var | Required | Meaning |
 | --- | --- | --- | --- |
-| `--address <host:port>` | `CONTEXTFORGE_GATEWAY_RS_ADDRESS` | No | Plain HTTP listener. Omit it when serving only TLS. |
-| `--tls-address <host:port>` | `CONTEXTFORGE_GATEWAY_RS_TLS_ADDRESS` | No | TLS listener address. Requires certificate and private key. |
-| `--server-certificate <path>` | `CONTEXTFORGE_GATEWAY_RS_TLS_SERVER_CERTIFICATE` | With `--tls-address` | PEM certificate chain for downstream TLS. |
-| `--server-private-key <path>` | `CONTEXTFORGE_GATEWAY_RS_TLS_SERVER_PRIVATE_KEY` | With `--tls-address` | PEM private key for downstream TLS. |
+| `--address <host:port>` | `CONTEXTFORGE_DATA_PLANE_ADDRESS` | No | Plain HTTP listener. Omit it when serving only TLS. |
+| `--tls-address <host:port>` | `CONTEXTFORGE_DATA_PLANE_TLS_ADDRESS` | No | TLS listener address. Requires certificate and private key. |
+| `--server-certificate <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_SERVER_CERTIFICATE` | With `--tls-address` | PEM certificate chain for downstream TLS. |
+| `--server-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_SERVER_PRIVATE_KEY` | With `--tls-address` | PEM private key for downstream TLS. |
 
 `--address` and `--tls-address` may both be configured, but they must not use
 the same socket address.
@@ -52,9 +52,9 @@ the same socket address.
 
 | Flag | Env var | Required | Meaning |
 | --- | --- | --- | --- |
-| `--token-verification-public-key <path>` | `CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY` | For RSA tokens | RSA public key used for `RS256`, `RS384`, or `RS512` tokens. |
-| `--token-verification-secret <secret>` | `CONTEXTFORGE_GATEWAY_RS_TOKEN_SECRET` | For HMAC tokens | Shared secret used for `HS256`, `HS384`, or `HS512` tokens. |
-| `--token-verification-private-key <path>` | `CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY` | Local tools only | RSA private key used by the optional local token helper. Present only when `contextforge-gateway-rs-lib/with_tools` is enabled. |
+| `--token-verification-public-key <path>` | `CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PUBLIC_KEY` | For RSA tokens | RSA public key used for `RS256`, `RS384`, or `RS512` tokens. |
+| `--token-verification-secret <secret>` | `CONTEXTFORGE_DATA_PLANE_TOKEN_SECRET` | For HMAC tokens | Shared secret used for `HS256`, `HS384`, or `HS512` tokens. |
+| `--token-verification-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PRIVATE_KEY` | Local tools only | RSA private key used by the optional local token helper. Present only when `contextforge-data-plane-lib/with_tools` is enabled. |
 
 The claims layer validates issuer, audience, and expiration:
 
@@ -71,13 +71,13 @@ then selects one virtual host inside that config.
 
 | Flag | Env var | Required | Meaning |
 | --- | --- | --- | --- |
-| `--redis-address <host>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME` | Yes | Redis host name or IP. |
-| `--redis-port <port>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_PORT` | Yes | Redis port. |
-| `--redis-mode <mode>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE` | Yes | Redis connection mode: `plain-text`, `tls`, or `mtls`. |
-| `--redis-tls-trust-bundle <path>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_TRUST_BUNDLE` | TLS and mTLS | PEM trust bundle for Redis TLS. |
-| `--redis-tls-client-certificate <path>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_CERTIFICATE` | mTLS | PEM client certificate for Redis mTLS. |
-| `--redis-tls-client-private-key <path>` | `CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_PRIVATE_KEY` | mTLS | PEM client private key for Redis mTLS. |
-| `--user-config-cache-expiry-seconds <n>` | `CONTEXTFORGE_GATEWAY_RS_USER_CONFIG_CACHE_EXPIRY_SECONDS` | No, default `60` | Expiry for the in-process user config cache in front of Redis. `0` disables caching and reads Redis on every request. |
+| `--redis-address <host>` | `CONTEXTFORGE_DATA_PLANE_REDIS_HOSTNAME` | Yes | Redis host name or IP. |
+| `--redis-port <port>` | `CONTEXTFORGE_DATA_PLANE_REDIS_PORT` | Yes | Redis port. |
+| `--redis-mode <mode>` | `CONTEXTFORGE_DATA_PLANE_REDIS_CONNECTION_MODE` | Yes | Redis connection mode: `plain-text`, `tls`, or `mtls`. |
+| `--redis-tls-trust-bundle <path>` | `CONTEXTFORGE_DATA_PLANE_REDIS_TLS_REDIS_TRUST_BUNDLE` | TLS and mTLS | PEM trust bundle for Redis TLS. |
+| `--redis-tls-client-certificate <path>` | `CONTEXTFORGE_DATA_PLANE_REDIS_TLS_REDIS_CLIENT_CERTIFICATE` | mTLS | PEM client certificate for Redis mTLS. |
+| `--redis-tls-client-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_REDIS_TLS_REDIS_CLIENT_PRIVATE_KEY` | mTLS | PEM client private key for Redis mTLS. |
+| `--user-config-cache-expiry-seconds <n>` | `CONTEXTFORGE_DATA_PLANE_USER_CONFIG_CACHE_EXPIRY_SECONDS` | No, default `60` | Expiry for the in-process user config cache in front of Redis. `0` disables caching and reads Redis on every request. |
 
 Local Compose exposes plain Redis on `127.0.0.1:6379`, so local runs normally
 use:
@@ -95,10 +95,10 @@ for config, not the routing model itself.
 
 | Flag | Env var | Required | Meaning |
 | --- | --- | --- | --- |
-| `--upstream-connection-mode <mode>` | `CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE` | No | Controls whether backend MCP URLs may be HTTP, HTTPS, or mTLS. |
-| `--upstream-trust-bundle <path>` | `CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_TRUST_BUNDLE` | No | Additional PEM trust bundle for HTTPS upstreams. |
-| `--upstream-certificate <path>` | `CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_CERTIFICATE` | mTLS modes | PEM client certificate for upstream mTLS. |
-| `--upstream-private-key <path>` | `CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_PRIVATE_KEY` | mTLS modes | PEM client private key for upstream mTLS. |
+| `--upstream-connection-mode <mode>` | `CONTEXTFORGE_DATA_PLANE_UPSTREAM_CONNECTION_MODE` | No | Controls whether backend MCP URLs may be HTTP, HTTPS, or mTLS. |
+| `--upstream-trust-bundle <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_UPSTREAM_TRUST_BUNDLE` | No | Additional PEM trust bundle for HTTPS upstreams. |
+| `--upstream-certificate <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_UPSTREAM_CERTIFICATE` | mTLS modes | PEM client certificate for upstream mTLS. |
+| `--upstream-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_UPSTREAM_PRIVATE_KEY` | mTLS modes | PEM client private key for upstream mTLS. |
 
 Connection modes:
 
@@ -116,28 +116,28 @@ before reaching that backend because the reqwest client is HTTPS-only.
 
 | Flag | Env var | Default | Meaning |
 | --- | --- | --- | --- |
-| `--number-of-cpus <n>` | `CONTEXTFORGE_GATEWAY_RS_GATEWAY_CPUS` | Host CPU count | Worker thread count for the Tokio runtime shape. |
-| `--single-runtime <bool>` | `CONTEXTFORGE_GATEWAY_RS_SINGLE_RUNTIME` | `true` | `true` uses one multi-thread runtime. `false` starts multiple current-thread runtimes. |
-| `--runtime-plugins-enabled <bool>` | `CONTEXTFORGE_GATEWAY_RS_RUNTIME_PLUGINS_ENABLED` | `false` | Enables CPEX runtime plugin execution and Redis plugin config loading. |
+| `--number-of-cpus <n>` | `CONTEXTFORGE_DATA_PLANE_NUMBER_OF_CPUS` | Host CPU count | Worker thread count for the Tokio runtime shape. |
+| `--single-runtime <bool>` | `CONTEXTFORGE_DATA_PLANE_SINGLE_RUNTIME` | `true` | `true` uses one multi-thread runtime. `false` starts multiple current-thread runtimes. |
+| `--runtime-plugins-enabled <bool>` | `CONTEXTFORGE_DATA_PLANE_RUNTIME_PLUGINS_ENABLED` | `false` | Enables CPEX runtime plugin execution and Redis plugin config loading. |
 
 When runtime plugins are enabled, plugin config is read from Redis key
 `ContextForgeGatewayRuntimePluginConfig`. That key is a control-plane trust
 boundary because it decides which registered hooks run. The flag only enables
 execution for plugin factories compiled into the binary. For the experimental
 secrets detection plugin, also build the gateway with
-`contextforge-gateway-rs/plugins`.
+`contextforge-data-plane/plugins`.
 
 ## Telemetry Options
 
 | Flag | Env var | Default | Meaning |
 | --- | --- | --- | --- |
-| `--enable-open-telemetry <bool>` | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY` | `false` | Enables trace export. |
-| `--enable-otel-metrics <bool>` | `CONTEXTFORGE_GATEWAY_RS_ENABLE_OTEL_METRICS` | `false` | Enables HTTP server metric export. |
-| `--otlp-protocol <protocol>` | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` or `http-protobuf`. |
-| `--otlp-endpoint <uri>` | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_ENDPOINT` | Protocol-specific | Trace export endpoint. |
-| `--otlp-metrics-endpoint <uri>` | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Protocol-specific | Metrics export endpoint. |
-| `--otlp-headers <headers>` | `CONTEXTFORGE_GATEWAY_RS_OTEL_EXPORTER_OTLP_HEADERS` | none | Comma-separated `key=value` headers for OTLP export. |
-| `--otlp-service-name <name>` | `CONTEXTFORGE_GATEWAY_RS_OTEL_SERVICE_NAME` | `CONTEXTFORGE-GATEWAY-RS` | OpenTelemetry `service.name`. |
+| `--enable-open-telemetry <bool>` | `CONTEXTFORGE_DATA_PLANE_ENABLE_OPEN_TELEMETRY` | `false` | Enables trace export. |
+| `--enable-otel-metrics <bool>` | `CONTEXTFORGE_DATA_PLANE_ENABLE_OTEL_METRICS` | `false` | Enables HTTP server metric export. |
+| `--otlp-protocol <protocol>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` or `http-protobuf`. |
+| `--otlp-endpoint <uri>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_ENDPOINT` | Protocol-specific | Trace export endpoint. |
+| `--otlp-metrics-endpoint <uri>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Protocol-specific | Metrics export endpoint. |
+| `--otlp-headers <headers>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_HEADERS` | none | Comma-separated `key=value` headers for OTLP export. |
+| `--otlp-service-name <name>` | `CONTEXTFORGE_DATA_PLANE_OTEL_SERVICE_NAME` | `CONTEXTFORGE-DATA-PLANE` | OpenTelemetry `service.name`. |
 
 Default endpoints:
 
@@ -157,8 +157,8 @@ RUST_TRACE_LOG=debug
 
 | Flag or env var | Default | Meaning |
 | --- | --- | --- |
-| `--log-name` / `CONTEXTFORGE_GATEWAY_LOG_NAME` | `contextforge-gateway-rs.log` | File log name in the current working directory. |
-| `--log-rotation` / `CONTEXTFORGE_GATEWAY_LOG_ROTATION` | `hourly` | Rotation mode: `minutely`, `hourly`, `daily`, or `never`. |
+| `--log-name` / `CONTEXTFORGE_DATA_PLANE_LOG_NAME` | `contextforge-data-plane.log` | File log name in the current working directory. |
+| `--log-rotation` / `CONTEXTFORGE_DATA_PLANE_LOG_ROTATION` | `hourly` | Rotation mode: `minutely`, `hourly`, `daily`, or `never`. |
 | `RUST_LOG` | `debug` | Console event filter. |
 | `RUST_FILE_LOG` | `debug` | File event filter. |
 | `RUST_TRACE_LOG` | `info` | OpenTelemetry span filter. |
@@ -189,7 +189,7 @@ You may combine this with `--address` to expose both HTTP and HTTPS listeners.
 ### HMAC Token Verification
 
 ```bash
---token-verification-secret "${CONTEXTFORGE_GATEWAY_RS_TOKEN_SECRET}"
+--token-verification-secret "${CONTEXTFORGE_DATA_PLANE_TOKEN_SECRET}"
 ```
 
 Use this only when downstream JWTs are signed with an `HS*` algorithm. RSA

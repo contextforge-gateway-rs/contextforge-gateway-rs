@@ -30,7 +30,7 @@ follow [Run the Gateway Locally](running-the-gateway.md) alongside this page.
 
 ## Startup Path
 
-Startup begins in `crates/contextforge-gateway-rs/src/main.rs`:
+Startup begins in `crates/contextforge-data-plane/src/main.rs`:
 
 ```text
 install rustls crypto provider
@@ -53,7 +53,7 @@ and then calls `gateway.run_gateway()`.
 
 ## HTTP Stack Order
 
-`Gateway::run_gateway` builds the service stack in `crates/contextforge-gateway-rs-lib/src/lib.rs`.
+`Gateway::run_gateway` builds the service stack in `crates/contextforge-data-plane-lib/src/lib.rs`.
 Tower layers execute from the outside in, so a normal MCP request reaches the
 handler in this order:
 

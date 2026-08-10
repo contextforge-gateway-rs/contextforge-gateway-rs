@@ -14,7 +14,7 @@ parts of the dataplane.
 
 | Surface | Source | Loaded | Main user |
 | --- | --- | --- | --- |
-| Process `Config` | CLI flags and `CONTEXTFORGE_GATEWAY_RS_*` env vars parsed by `clap`. | Startup. | Listener setup, JWT decoder keys, Redis connection, upstream HTTP client, telemetry, runtime shape. |
+| Process `Config` | CLI flags and `CONTEXTFORGE_DATA_PLANE_*` env vars parsed by `clap`. | Startup. | Listener setup, JWT decoder keys, Redis connection, upstream HTTP client, telemetry, runtime shape. |
 | `UserConfig` | `UserConfigStore`, currently Redis through `RedisUserConfigStore`. | Per request after JWT validation. | Virtual host and backend selection. |
 | `RuntimePluginConfigDocument` | Redis key `ContextForgeGatewayRuntimePluginConfig` when runtime plugins are enabled. | Startup and watcher reload. | CPEX tool pre/post hooks. |
 
@@ -140,7 +140,7 @@ RuntimePluginConfigDocument
 
 Runtime config activates plugin factories that were compiled into the gateway
 binary; it does not load new Rust code. The experimental secrets detection
-plugin is included with the `contextforge-gateway-rs/plugins` Cargo feature and
+plugin is included with the `contextforge-data-plane/plugins` Cargo feature and
 activated with plugin kind `validator/secrets-detection`.
 
 The plugin config loader accepts JSON bytes or MessagePack bytes. It rejects

@@ -72,8 +72,8 @@ From the workspace root:
 
 ```bash
 cargo +1.96 test -p cpex-secrets-detection
-cargo +1.96 check -p contextforge-gateway-rs --features plugins
-cargo +1.96 test -p contextforge-gateway-rs-cpex
-cargo +1.96 test -p contextforge-gateway-rs-lib --test gateway_plugins -- --nocapture
-cargo +1.96 test -p contextforge-gateway-rs --features plugins --test secrets_detection_e2e -- --ignored --nocapture
+cargo +1.96 check -p contextforge-data-plane --features plugins
+cargo +1.96 test -p contextforge-data-plane-cpex
+cargo +1.96 test -p contextforge-data-plane-lib --test gateway_plugins -- --nocapture
+cargo +1.96 test -p contextforge-data-plane --features plugins --test secrets_detection_e2e -- --ignored --nocapture
 ```
