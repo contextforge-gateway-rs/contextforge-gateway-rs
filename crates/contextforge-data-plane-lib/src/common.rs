@@ -1,12 +1,3 @@
-use std::{
-    fs::{self, File},
-    io::{Cursor, Read},
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-};
-use url::Origin;
-
 use clap::{Parser, ValueEnum};
 use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
@@ -14,6 +5,13 @@ use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem::PemObject};
 use secret_string::SecretString;
 use serde::{Deserialize, Serialize};
+use std::{
+    fs::{self, File},
+    io::{Cursor, Read},
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+};
 use thiserror::Error;
 use typed_builder::TypedBuilder;
 
@@ -263,10 +261,9 @@ pub struct Config {
         long,
         env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS",
         value_delimiter = ',',
-        num_args = 0..,
-        value_parser = validate_mcp_origin,
+        num_args = 1..
     )]
-    pub mcp_allowed_origins: Vec<Origin>,
+    pub mcp_allowed_origins: Option<Vec<String>>,
 
     #[arg(
         long,
@@ -275,10 +272,6 @@ pub struct Config {
         num_args = 1..
     )]
     pub mcp_allowed_hosts: Option<Vec<String>>,
-}
-
-fn validate_mcp_origin(s: &str) -> Result<Origin, String> {
-    crate::layers::mcp_origin::parse_origin_str(s).ok_or_else(|| format!("invalid MCP origin: {s}"))
 }
 
 #[derive(Error, Debug)]
