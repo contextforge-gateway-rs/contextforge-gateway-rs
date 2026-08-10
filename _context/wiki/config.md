@@ -23,7 +23,7 @@ Plus at least: `--address` or `--tls-address`, `--token-verification-public-key`
 | `--redis-mode` | `REDIS_CONNECTION_MODE` | **required** | `plain-text` \| `tls` \| `mtls` |
 | `--user-config-cache-expiry-seconds` | `USER_CONFIG_CACHE_EXPIRY_SECONDS` | `60` | `0` = no cache |
 | `--upstream-connection-mode` | `UPSTREAM_CONNECTION_MODE` | HTTPS-only | `plain-text-or-tls` for local HTTP backends |
-| `--number-of-cpus` | `GATEWAY_CPUS` | host CPU count | Tokio worker threads |
+| `--number-of-cpus` | `NUMBER_OF_CPUS` | host CPU count | Tokio worker threads |
 | `--single-runtime` | `SINGLE_RUNTIME` | `true` | `false` = multi-runtime (no session affinity) |
 | `--runtime-plugins-enabled` | `RUNTIME_PLUGINS_ENABLED` | `false` | Enables CPEX hooks |
 | `--enable-open-telemetry` | `ENABLE_OPEN_TELEMETRY` | `false` | OTLP traces |
