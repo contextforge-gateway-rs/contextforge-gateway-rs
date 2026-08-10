@@ -199,8 +199,6 @@ mod tests {
 
     use super::*;
 
-    /// The write-back refuses extra text as well as missing text: a plugin that appends a part
-    /// leaves it with nowhere to go, and guessing would silently drop the plugin's edit.
     #[test]
     fn prompt_result_response_rejects_added_text() {
         let original = GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, "review of weather")]);

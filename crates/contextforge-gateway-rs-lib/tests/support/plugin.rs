@@ -317,23 +317,14 @@ impl TestPluginFactory {
 pub(crate) const REWRITTEN_PROMPT_TOPIC: &str = "rewritten-topic";
 pub(crate) const REWRITTEN_PROMPT_TEXT: &str = "review of [REDACTED]";
 
-/// What [`PromptTestPlugin`] does when a hook fires. One value drives both hooks so a single
-/// fixture can serve pre-only, post-only, and pre-and-post configurations.
 #[derive(Clone, Copy, Default)]
 pub(crate) enum PromptBehavior {
-    /// Pre rewrites the `topic` argument; post rewrites the rendered text.
     #[default]
     Rewrite,
-    /// Post deletes the rendered text part outright, so the write-back has nothing to line up
-    /// against. Models a redaction plugin dropping content the client must never receive.
     DropText,
-    /// Pre leaves a marker in the CPEX context; post denies unless it reads the marker back.
     ContextRoundtrip,
 }
 
-/// Fake plugin for the prompt hooks. It reads `PromptRequest` and `PromptResult` content parts
-/// rather than the tool parts [`TestPlugin`] handles. Which hook is running is inferred from the
-/// payload, so one handler serves both.
 pub(crate) struct PromptTestPlugin {
     pub(crate) config: PluginConfig,
     pub(crate) observations: Arc<Mutex<PromptObservations>>,
@@ -449,8 +440,6 @@ impl HookHandler<CmfHook> for PromptTestPlugin {
         _extensions: &Extensions,
         ctx: &mut PluginContext,
     ) -> PluginResult<MessagePayload> {
-        // A rendered prompt carries a `PromptResult` part, a request carries a `PromptRequest`
-        // one, so the payload itself says which hook is running.
         if payload.message.get_prompt_results().is_empty() {
             self.handle_pre(payload, ctx)
         } else {

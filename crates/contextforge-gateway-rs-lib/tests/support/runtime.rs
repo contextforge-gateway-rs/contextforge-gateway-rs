@@ -6,7 +6,6 @@ use serde_json::json;
 
 use super::{PromptTestPlugin, PromptTestPluginFactory, TestPlugin, TestPluginFactory};
 
-/// Builds a runtime holding a single prompt plugin, mirroring [`runtime_with_plugins`].
 pub(crate) async fn runtime_with_prompt_plugin(plugin: Arc<PromptTestPlugin>) -> Arc<CpexRuntimeRegistry> {
     let mut runtime = CpexRuntimeRegistry::default();
     runtime

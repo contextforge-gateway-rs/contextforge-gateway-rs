@@ -64,8 +64,6 @@ impl ServerHandler for TestBackend {
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
     }
 
-    /// Renders `review` from its `topic` argument, so a test can prove a pre-hook argument
-    /// rewrite actually reached the backend.
     async fn get_prompt(
         &self,
         request: GetPromptRequestParams,
