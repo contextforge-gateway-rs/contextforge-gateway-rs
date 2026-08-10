@@ -15,7 +15,10 @@ DETECT_SECRETS_EXCLUDE := '(?x)(Cargo\.lock$$|\.lock$$)|^\.secrets\.baseline$$'
         fmt fmt-check lint deny \
         pre-commit install-pre-commit-hooks configure-git \
         secrets-scan secrets-scan-all secrets-audit secrets-baseline
+<<<<<<< HEAD
 >>>>>>> 7aaeb99 (feat:added make pre-commit)
+=======
+>>>>>>> a7bc99d (restored: Makefile changes - scope creep)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -159,4 +162,7 @@ configure-git: install-pre-commit-hooks ## Configure git hooks + merge driver fo
 	git config merge.secrets-baseline.driver \
 		"$$common_dir/git-drivers/resolve-secrets-baseline-conflict.sh %O %A %B %P"
 	@echo "✅ Git merge driver configured for .secrets.baseline"
+<<<<<<< HEAD
 >>>>>>> 7aaeb99 (feat:added make pre-commit)
+=======
+>>>>>>> a7bc99d (restored: Makefile changes - scope creep)
