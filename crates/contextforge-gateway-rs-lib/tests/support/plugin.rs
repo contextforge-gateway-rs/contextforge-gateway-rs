@@ -314,6 +314,184 @@ impl TestPluginFactory {
     }
 }
 
+pub(crate) const REWRITTEN_PROMPT_TOPIC: &str = "rewritten-topic";
+pub(crate) const REWRITTEN_PROMPT_TEXT: &str = "review of [REDACTED]";
+
+/// What [`PromptTestPlugin`] does when a hook fires. One value drives both hooks so a single
+/// fixture can serve pre-only, post-only, and pre-and-post configurations.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum PromptBehavior {
+    /// Pre rewrites the `topic` argument; post rewrites the rendered text.
+    #[default]
+    Rewrite,
+    /// Post deletes the rendered text part outright, so the write-back has nothing to line up
+    /// against. Models a redaction plugin dropping content the client must never receive.
+    DropText,
+    /// Pre leaves a marker in the CPEX context; post denies unless it reads the marker back.
+    ContextRoundtrip,
+}
+
+/// Fake plugin for the prompt hooks. It reads `PromptRequest` and `PromptResult` content parts
+/// rather than the tool parts [`TestPlugin`] handles. Which hook is running is inferred from the
+/// payload, so one handler serves both.
+pub(crate) struct PromptTestPlugin {
+    pub(crate) config: PluginConfig,
+    pub(crate) observations: Arc<Mutex<PromptObservations>>,
+    pub(crate) behavior: PromptBehavior,
+}
+
+#[derive(Default)]
+pub(crate) struct PromptObservations {
+    pub(crate) pre_calls: usize,
+    pub(crate) pre_name: Option<String>,
+    pub(crate) pre_server_id: Option<String>,
+    pub(crate) post_calls: usize,
+    pub(crate) post_prompt_name: Option<String>,
+}
+
+impl PromptTestPlugin {
+    pub(crate) fn new(name: &str, hooks: Vec<&'static str>) -> Self {
+        Self {
+            config: PluginConfig {
+                name: name.to_owned(),
+                kind: "prompt-test".to_owned(),
+                hooks: hooks.into_iter().map(str::to_owned).collect(),
+                ..Default::default()
+            },
+            observations: Arc::new(Mutex::new(PromptObservations::default())),
+            behavior: PromptBehavior::default(),
+        }
+    }
+
+    pub(crate) fn with_behavior(mut self, behavior: PromptBehavior) -> Self {
+        self.behavior = behavior;
+        self
+    }
+
+    pub(crate) fn observations(&self) -> Arc<Mutex<PromptObservations>> {
+        Arc::clone(&self.observations)
+    }
+
+    fn handle_pre(&self, payload: &MessagePayload, ctx: &mut PluginContext) -> PluginResult<MessagePayload> {
+        let mut observations = self.observations.lock().expect("observations lock poisoned");
+        observations.pre_calls += 1;
+        if let Some(request) = payload.message.get_prompt_requests().first() {
+            observations.pre_name = Some(request.name.clone());
+            observations.pre_server_id.clone_from(&request.server_id);
+        }
+        drop(observations);
+
+        match self.behavior {
+            PromptBehavior::ContextRoundtrip => {
+                ctx.set_global("prompt_pre_seen", json!(true));
+                PluginResult::allow()
+            },
+            PromptBehavior::Rewrite | PromptBehavior::DropText => {
+                let mut modified = payload.clone();
+                if let Some(ContentPart::PromptRequest { content }) =
+                    modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::PromptRequest { .. }))
+                {
+                    content.arguments = HashMap::from([("topic".to_owned(), json!(REWRITTEN_PROMPT_TOPIC))]);
+                }
+                PluginResult::modify_payload(modified)
+            },
+        }
+    }
+
+    fn handle_post(&self, payload: &MessagePayload, ctx: &mut PluginContext) -> PluginResult<MessagePayload> {
+        let mut observations = self.observations.lock().expect("observations lock poisoned");
+        observations.post_calls += 1;
+        if let Some(result) = payload.message.get_prompt_results().first() {
+            observations.post_prompt_name = Some(result.prompt_name.clone());
+        }
+        drop(observations);
+
+        match self.behavior {
+            PromptBehavior::Rewrite => {
+                let mut modified = payload.clone();
+                for part in &mut modified.message.content {
+                    if let ContentPart::Text { text } = part {
+                        REWRITTEN_PROMPT_TEXT.clone_into(text);
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            PromptBehavior::DropText => {
+                let mut modified = payload.clone();
+                modified.message.content.retain(|part| !matches!(part, ContentPart::Text { .. }));
+                PluginResult::modify_payload(modified)
+            },
+            PromptBehavior::ContextRoundtrip => {
+                if ctx.get_global("prompt_pre_seen") == Some(&json!(true)) {
+                    PluginResult::allow()
+                } else {
+                    PluginResult::deny(
+                        PluginViolation::new("missing_prompt_context", "prompt pre context missing")
+                            .with_proto_error_code(i64::from(MISSING_CONTEXT_ERROR_CODE)),
+                    )
+                }
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl Plugin for PromptTestPlugin {
+    fn config(&self) -> &PluginConfig {
+        &self.config
+    }
+}
+
+impl HookHandler<CmfHook> for PromptTestPlugin {
+    async fn handle(
+        &self,
+        payload: &MessagePayload,
+        _extensions: &Extensions,
+        ctx: &mut PluginContext,
+    ) -> PluginResult<MessagePayload> {
+        // A rendered prompt carries a `PromptResult` part, a request carries a `PromptRequest`
+        // one, so the payload itself says which hook is running.
+        if payload.message.get_prompt_results().is_empty() {
+            self.handle_pre(payload, ctx)
+        } else {
+            self.handle_post(payload, ctx)
+        }
+    }
+}
+
+pub(crate) struct PromptTestPluginFactory {
+    observations: Arc<Mutex<PromptObservations>>,
+    behavior: PromptBehavior,
+}
+
+impl PromptTestPluginFactory {
+    pub(crate) fn from_plugin(plugin: &PromptTestPlugin) -> Self {
+        Self { observations: Arc::clone(&plugin.observations), behavior: plugin.behavior }
+    }
+}
+
+impl PluginFactory for PromptTestPluginFactory {
+    fn create(&self, config: &PluginConfig) -> Result<PluginInstance, Box<PluginError>> {
+        let plugin = Arc::new(PromptTestPlugin {
+            config: config.clone(),
+            observations: Arc::clone(&self.observations),
+            behavior: self.behavior,
+        });
+        let mut handlers = Vec::new();
+        for hook in [cmf_hook_names::PROMPT_PRE_FETCH, cmf_hook_names::PROMPT_POST_FETCH] {
+            if config.hooks.iter().any(|configured| configured == hook) {
+                handlers.push((
+                    hook,
+                    Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
+                        as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
+                ));
+            }
+        }
+        let plugin: Arc<dyn Plugin> = plugin;
+        Ok(PluginInstance { plugin, handlers })
+    }
+}
+
 impl PluginFactory for TestPluginFactory {
     fn create(&self, config: &PluginConfig) -> Result<PluginInstance, Box<PluginError>> {
         let plugin = Arc::new(TestPlugin {

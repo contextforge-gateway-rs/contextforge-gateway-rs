@@ -13,7 +13,7 @@ use cpex::cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, ErrorCode},
+    model::{CallToolRequestParams, CallToolResult, ErrorCode, GetPromptRequestParams, GetPromptResult},
     serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::task::JoinHandle;
@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 use crate::{
     config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config},
     error::GatewayPluginRuntimeError,
-    hooks::{RuntimeHookError, RuntimeHookState, ToolPreCallResult},
+    hooks::{PromptPreFetchResult, RuntimeHookError, RuntimeHookState, ToolPreCallResult},
     runtime::GatewayPluginRuntime,
 };
 
@@ -40,7 +40,7 @@ pub struct GatewayPluginRuntimeHandle {
     runtime: Arc<ArcSwap<RuntimeState>>,
 }
 
-struct RegistryToolCallState {
+struct RegistryCallState {
     runtime: Arc<GatewayPluginRuntime>,
     state: Option<RuntimeHookState>,
 }
@@ -253,11 +253,43 @@ impl GatewayPluginRuntimeHandle {
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
         if runtime.has_post_hook() {
             let state = result.state.take();
-            result.state = Some(Arc::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
+            result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
         } else {
             result.state = None;
         }
         Ok(result)
+    }
+
+    pub async fn before_get_prompt(
+        &self,
+        request: &GetPromptRequestParams,
+        prompt_name: &str,
+        backend_name: &str,
+    ) -> Result<PromptPreFetchResult, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let mut result = runtime.before_get_prompt(request, prompt_name, backend_name).await?;
+        if runtime.has_prompt_post_hook() {
+            let state = result.state.take();
+            result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
+        } else {
+            result.state = None;
+        }
+        Ok(result)
+    }
+
+    pub async fn after_get_prompt(
+        &self,
+        prompt_name: &str,
+        response: GetPromptResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_get_prompt(prompt_name, response, state.state.clone()).await,
+            None => Ok(response),
+        }
     }
 
     pub async fn after_tool_call(
@@ -266,7 +298,7 @@ impl GatewayPluginRuntimeHandle {
         response: CallToolResult,
         state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
-        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
             Some(state) => state.runtime.after_tool_call(tool_name, response, state.state.clone()).await,
             None => Ok(response),
         }
@@ -283,7 +315,7 @@ impl GatewayPluginRuntimeHandle {
     where
         T: Serialize + DeserializeOwned,
     {
-        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
             Some(state) => state.runtime.after_tool_event(tool_name, event, state.state.clone()).await,
             None => Ok(Some(event)),
         }
@@ -712,6 +744,13 @@ mod tests {
 
             assert_eq!("runtime plugin config is unsupported", error.to_string());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn prompt_hooks_are_accepted_config() {
+        let plugin = Arc::new(TestPlugin::new("prompt", vec![cmf_hook_names::PROMPT_PRE_FETCH]));
+        // runtime_with_plugin initializes and expects success
+        runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

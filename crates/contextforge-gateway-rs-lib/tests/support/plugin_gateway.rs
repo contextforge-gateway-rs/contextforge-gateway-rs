@@ -15,9 +15,9 @@ use http::{HeaderMap, HeaderValue};
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation,
-        InitializeRequestParams, InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken,
-        ServerCapabilities,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, GetPromptRequestParams,
+        GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, NumberOrString,
+        ProgressNotificationParam, ProgressToken, PromptMessage, Role, ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -45,6 +45,7 @@ pub(crate) struct BackendObservation {
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
 }
 
@@ -59,8 +60,30 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
+    }
+
+    /// Renders `review` from its `topic` argument, so a test can prove a pre-hook argument
+    /// rewrite actually reached the backend.
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        self.state
+            .prompts
+            .lock()
+            .expect("backend prompts lock poisoned")
+            .push(BackendObservation { tool_name: request.name.clone(), args: request.arguments.clone() });
+
+        let topic = request
+            .arguments
+            .as_ref()
+            .and_then(|arguments| arguments.get("topic"))
+            .and_then(Value::as_str)
+            .unwrap_or("nothing");
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(Role::User, format!("review of {topic}"))]).into())
     }
 
     async fn call_tool(

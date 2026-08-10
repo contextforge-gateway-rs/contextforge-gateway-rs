@@ -1,5 +1,7 @@
-use cpex::cpex_core::cmf::{ContentPart, Message, MessagePayload, Role, ToolCall, ToolResult};
-use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
+use cpex::cpex_core::cmf::{
+    ContentPart, Message, MessagePayload, PromptRequest, PromptResult, Role, ToolCall, ToolResult,
+};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult};
 use serde_json::{Map, Value};
 
 pub(crate) fn tool_call_payload(
@@ -110,9 +112,103 @@ fn raw_error_tool_result(value: Value) -> CallToolResult {
     }
 }
 
+pub(crate) fn prompt_request_payload(
+    request: &GetPromptRequestParams,
+    prompt_name: &str,
+    backend_name: &str,
+    prompt_request_id: &str,
+) -> MessagePayload {
+    MessagePayload {
+        message: Message {
+            schema_version: "2.0".to_owned(),
+            role: Role::User,
+            content: vec![ContentPart::PromptRequest {
+                content: PromptRequest {
+                    prompt_request_id: prompt_request_id.to_owned(),
+                    name: prompt_name.to_owned(),
+                    arguments: request.arguments.clone().unwrap_or_default().into_iter().collect(),
+                    server_id: Some(backend_name.to_owned()),
+                },
+            }],
+            channel: None,
+        },
+    }
+}
+
+pub(crate) fn prompt_request_arguments(payload: &MessagePayload) -> Option<Map<String, Value>> {
+    payload
+        .message
+        .get_prompt_requests()
+        .first()
+        .map(|request| request.arguments.clone().into_iter().collect::<Map<String, Value>>())
+}
+
+pub(crate) fn prompt_result_payload(
+    response: &GetPromptResult,
+    prompt_name: &str,
+    prompt_request_id: &str,
+) -> MessagePayload {
+    let mut content = vec![ContentPart::PromptResult {
+        content: PromptResult {
+            prompt_request_id: prompt_request_id.to_owned(),
+            prompt_name: prompt_name.to_owned(),
+            messages: Vec::new(),
+            content: None,
+            is_error: false,
+            error_message: None,
+        },
+    }];
+    content.extend(
+        response
+            .messages
+            .iter()
+            .filter_map(|message| message.content.as_text())
+            .map(|text| ContentPart::Text { text: text.text.clone() }),
+    );
+
+    MessagePayload {
+        message: Message { schema_version: "2.0".to_owned(), role: Role::Assistant, content, channel: None },
+    }
+}
+
+pub(crate) fn prompt_result_response(
+    mut original: GetPromptResult,
+    payload: &MessagePayload,
+) -> Option<GetPromptResult> {
+    let mut texts = payload.message.content.iter().filter_map(|part| match part {
+        ContentPart::Text { text } => Some(text),
+        _ => None,
+    });
+
+    for message in &mut original.messages {
+        if message.content.as_text().is_none() {
+            continue;
+        }
+        message.content = ContentBlock::text(texts.next()?.clone());
+    }
+
+    if texts.next().is_some() {
+        return None;
+    }
+    Some(original)
+}
+
 #[cfg(test)]
 mod tests {
+    use rmcp::model::{PromptMessage, Role as McpRole};
+
     use super::*;
+
+    /// The write-back refuses extra text as well as missing text: a plugin that appends a part
+    /// leaves it with nowhere to go, and guessing would silently drop the plugin's edit.
+    #[test]
+    fn prompt_result_response_rejects_added_text() {
+        let original = GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, "review of weather")]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        payload.message.content.push(ContentPart::Text { text: "extra".to_owned() });
+
+        assert!(prompt_result_response(original, &payload).is_none());
+    }
 
     #[test]
     fn tool_result_response_uses_cmf_error_flag_for_nested_mcp_result() {

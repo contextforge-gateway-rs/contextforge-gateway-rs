@@ -1,6 +1,6 @@
 use std::{any::Any, sync::Arc};
 
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, GetPromptRequestParams};
 use serde_json::{Map, Value};
 
 pub type RuntimeHookError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -29,5 +29,31 @@ pub struct ToolPreCallResult {
 impl ToolPreCallResult {
     pub fn unchanged() -> Self {
         Self { arguments: ToolArgumentsUpdate::Unchanged, state: None }
+    }
+}
+
+#[derive(Debug)]
+pub enum PromptArgumentsUpdate {
+    Unchanged,
+    Replace(Option<Map<String, Value>>),
+}
+
+impl PromptArgumentsUpdate {
+    pub fn apply_to_request(self, request: &mut GetPromptRequestParams, routed_prompt_name: &str) {
+        routed_prompt_name.clone_into(&mut request.name);
+        if let Self::Replace(arguments) = self {
+            request.arguments = arguments;
+        }
+    }
+}
+
+pub struct PromptPreFetchResult {
+    pub arguments: PromptArgumentsUpdate,
+    pub state: Option<RuntimeHookState>,
+}
+
+impl PromptPreFetchResult {
+    pub fn unchanged() -> Self {
+        Self { arguments: PromptArgumentsUpdate::Unchanged, state: None }
     }
 }

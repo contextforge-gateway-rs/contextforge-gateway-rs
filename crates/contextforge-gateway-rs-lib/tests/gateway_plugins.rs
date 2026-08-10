@@ -9,16 +9,18 @@ use cpex::cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
     model::{
-        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
-        InitializeRequestParams, ProgressNotificationParam, Request, ServerResult,
+        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ContentBlock, ErrorCode,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, ProgressNotificationParam,
+        Request, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
 use serde_json::{Map, Value, json};
 
 use support::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID,
-    TestPlugin, error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_TEXT,
+    REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID, TestPlugin, error_code,
+    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin, start_gateway,
     start_gateway_with_json_backend_responses, sum_request, text, token,
 };
 
@@ -677,4 +679,109 @@ async fn pre_hook_invalid_arguments_return_invalid_params() {
 
     assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Prompt hooks
+// ---------------------------------------------------------------------------
+
+fn review_request(topic: &str) -> GetPromptRequestParams {
+    GetPromptRequestParams::new("review")
+        .with_arguments(serde_json::Map::from_iter([("topic".to_owned(), json!(topic))]))
+}
+
+fn prompt_text(result: &GetPromptResult) -> String {
+    result
+        .messages
+        .iter()
+        .filter_map(|message| match &message.content {
+            ContentBlock::Text(text) => Some(text.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_pre_hook_rewrites_arguments_reaching_the_backend() {
+    let plugin = Arc::new(PromptTestPlugin::new("prompt-pre", vec![cmf_hook_names::PROMPT_PRE_FETCH]));
+    let observations = plugin.observations();
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!(format!("review of {REWRITTEN_PROMPT_TOPIC}"), prompt_text(&result));
+
+    let prompt_calls = gateway.backend_state.prompts.lock().expect("backend prompts lock poisoned");
+    assert_eq!("review", prompt_calls[0].tool_name);
+    assert_eq!(
+        Some(&Value::from(REWRITTEN_PROMPT_TOPIC)),
+        prompt_calls[0].args.as_ref().and_then(|args| args.get("topic"))
+    );
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(1, observations.pre_calls);
+    assert_eq!(Some("review"), observations.pre_name.as_deref());
+    assert_eq!(Some(gateway.backend_name.as_str()), observations.pre_server_id.as_deref());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_rewrites_rendered_text_before_client_response() {
+    let plugin = Arc::new(PromptTestPlugin::new("prompt-post", vec![cmf_hook_names::PROMPT_POST_FETCH]));
+    let observations = plugin.observations();
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!(REWRITTEN_PROMPT_TEXT, prompt_text(&result));
+
+    let prompt_calls = gateway.backend_state.prompts.lock().expect("backend prompts lock poisoned");
+    assert_eq!(Some(&Value::from("weather")), prompt_calls[0].args.as_ref().and_then(|args| args.get("topic")));
+    drop(prompt_calls);
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(0, observations.pre_calls, "no pre hook is configured");
+    assert_eq!(1, observations.post_calls);
+    assert_eq!(Some("review"), observations.post_prompt_name.as_deref());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_removing_rendered_text_fails_closed() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new("prompt-post-drop", vec![cmf_hook_names::PROMPT_POST_FETCH])
+            .with_behavior(PromptBehavior::DropText),
+    );
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let error = service.get_prompt(review_request("weather")).await.expect_err("dropped text fails the call");
+    assert_eq!(ErrorCode::INTERNAL_ERROR, error_code(error));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_pre_and_post_hooks_share_gateway_call_context() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new(
+            "prompt-context",
+            vec![cmf_hook_names::PROMPT_PRE_FETCH, cmf_hook_names::PROMPT_POST_FETCH],
+        )
+        .with_behavior(PromptBehavior::ContextRoundtrip),
+    );
+    let observations = plugin.observations();
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!("review of weather", prompt_text(&result));
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(1, observations.pre_calls);
+    assert_eq!(1, observations.post_calls);
 }
