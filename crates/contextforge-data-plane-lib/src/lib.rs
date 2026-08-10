@@ -41,6 +41,7 @@ use crate::{
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer,
+        mcp_header_limits::{McpStandardHeaderLimits, mcp_header_limits_layer},
         mcp_origin::mcp_origin_layer,
         session_id::{SessionIdState, session_id_layer},
         user_config_store::user_config_store_layer,
@@ -137,6 +138,7 @@ impl Gateway {
             config_store: Arc::clone(&user_config_store),
             config: config.clone(),
         };
+        let mcp_standard_header_limits = McpStandardHeaderLimits::from_config(config);
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
@@ -145,6 +147,9 @@ impl Gateway {
             .layer(middleware::from_fn_with_state(session_id_state, session_id_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
+            // Keep this outside auth/config/RMCP work so oversized MCP headers
+            // are rejected before JWT validation or body parsing.
+            .layer(middleware::from_fn_with_state(mcp_standard_header_limits, mcp_header_limits_layer))
             .layer(cors_layer)
             // mcp_origin_layer is the outermost wrapper: fires before JWT auth,
             // session creation, and backend fan-out.

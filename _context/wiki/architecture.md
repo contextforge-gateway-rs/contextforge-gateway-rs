@@ -11,6 +11,7 @@ TCP/TLS listener
   -> /contextforge-rs nested router
   -> mcp_origin_layer          → validates Host then Origin       (403 when disallowed)
   -> CORS layer
+  -> mcp_header_limits_layer   → MCP standard header budgets      (431 when exceeded)
   -> virtual_host_id_layer       → inserts VirtualHostId           (400 on path mismatch)
   -> claims_layer                → inserts ContextForgeClaims      (401 on bad/missing JWT)
   -> session_id_layer            → inserts SessionId if present
@@ -23,6 +24,9 @@ TCP/TLS listener
 checks the optional Host allowlist first, then rejects any present Origin that
 is malformed or not allowlisted; requests without Origin continue. See
 [Security](security.md#mcp-origin-and-host-validation).
+`mcp_header_limits_layer` rejects excessive MCP standard headers before JWT
+validation, config lookup, session creation, backend fanout, or RMCP body
+parsing.
 
 MCP handlers read typed extensions — they never parse headers, paths, or Redis keys directly.
 
@@ -30,7 +34,7 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 
 ```text
 downstream request
-  -> Host/Origin validation → virtual host extraction → JWT validation → session extraction
+  -> Host/Origin validation → MCP header limits → virtual host extraction → JWT validation → session extraction
   -> user config lookup → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)

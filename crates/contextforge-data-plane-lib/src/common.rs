@@ -198,6 +198,18 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")]
     pub otlp_metrics_endpoint: Option<http::Uri>,
 
+    /// Maximum number of MCP standard headers accepted on a single request.
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_COUNT", default_value_t = DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT)]
+    pub mcp_standard_header_max_count: usize,
+
+    /// Maximum byte length accepted for a single MCP standard header value.
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_VALUE_BYTES", default_value_t = DEFAULT_MCP_STANDARD_HEADER_MAX_VALUE_BYTES)]
+    pub mcp_standard_header_max_value_bytes: usize,
+
+    /// Approximate maximum total bytes accepted across MCP standard headers.
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES", default_value_t = DEFAULT_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES)]
+    pub mcp_standard_header_max_total_bytes: usize,
+
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_NUMBER_OF_CPUS")]
     pub number_of_cpus: Option<usize>,
 
@@ -274,6 +286,10 @@ pub struct Config {
     )]
     pub mcp_allowed_hosts: Option<Vec<Authority>>,
 }
+
+pub const DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT: usize = 32;
+pub const DEFAULT_MCP_STANDARD_HEADER_MAX_VALUE_BYTES: usize = 8 * 1024;
+pub const DEFAULT_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES: usize = 64 * 1024;
 
 #[derive(Error, Debug)]
 pub enum ConfigValidationError {
