@@ -5,40 +5,26 @@ use url::{Origin, Url};
 
 use crate::common::Config;
 
-/// Parses a serialized RFC 6454 origin (`scheme://host[:port]`) into a typed
-/// [`url::Origin`].
-///
-/// Returns `None` for `"null"` and for any value that is not a bare authority
-/// — no path, query, fragment, userinfo, backslash, control characters, or
-/// extra slashes after `://`.  Port normalization (`https://x.com:443` ==
-/// `https://x.com`) is handled by the `url` crate.
+/// Parses a serialized RFC 6454 origin (`scheme://host[:port]`) into a typed [`url::Origin`].
+/// Returns `None` for `"null"` and any value that is not a bare scheme+authority.
 fn parse_origin(raw: &str) -> Option<Origin> {
-    // Reject ASCII control characters (including embedded tab) before the url
-    // crate silently strips them.
     if raw.bytes().any(|b| b < 0x20 || b == 0x7F) {
         return None;
     }
-    // Reject leading/trailing whitespace; also catches Unicode spaces the
-    // control-character check above misses.
     if raw != raw.trim() {
         return None;
     }
     if raw.eq_ignore_ascii_case("null") {
         return None;
     }
-    // Reject characters that the url crate normalizes away silently.
     if raw.contains('\\') || raw.contains('@') || raw.contains('?') || raw.contains('#') {
         return None;
     }
-
-    // Split on "://" and validate the authority portion on the raw string.
-    // Any "/" in authority_part means a path (e.g. "host/." normalizes to "/"
-    // after parsing, so this must be caught before Url::parse runs).
     let (_, authority_part) = raw.split_once("://")?;
     if authority_part.is_empty() || authority_part.contains('/') {
         return None;
     }
-    // Reject trailing ":" with no port (e.g. "https://host:").
+    // Trailing ":" with no port (e.g. "https://host:") is accepted by url but not a valid origin.
     let host_for_port_check = authority_part.trim_start_matches('[');
     if let Some((_, port_part)) = host_for_port_check.rsplit_once(':')
         && port_part.is_empty()
@@ -46,14 +32,9 @@ fn parse_origin(raw: &str) -> Option<Origin> {
         return None;
     }
 
-    // Append "/" so Url::parse accepts a bare authority string.
     let url = Url::parse(&format!("{raw}/")).ok()?;
 
-    // Post-parse sanity checks (defense-in-depth).
-    if url.path() != "/" {
-        return None;
-    }
-    if !url.username().is_empty() || url.password().is_some() {
+    if url.path() != "/" || !url.username().is_empty() || url.password().is_some() {
         return None;
     }
     if url.query().is_some() || url.fragment().is_some() {
@@ -67,7 +48,6 @@ fn parse_origin(raw: &str) -> Option<Origin> {
     }
 }
 
-/// Thin wrapper exposing `parse_origin` to [`Config::finalize`].
 pub(crate) fn parse_origin_str(raw: &str) -> Option<Origin> {
     parse_origin(raw)
 }
@@ -81,9 +61,6 @@ fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
         .or_else(|| request.uri().authority().cloned())
 }
 
-/// Returns `true` when `authority` matches an entry in `allowed_hosts`.
-///
-/// Entries are `host` or `host:port`; an entry without a port matches any port.
 fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[String]) -> bool {
     let request_host = authority.host().to_ascii_lowercase();
     let request_port = authority.port_u16();
@@ -108,20 +85,6 @@ fn forbidden_response() -> Response {
 }
 
 /// MCP 2026-07-28 DNS-rebinding protection middleware.
-///
-/// See <https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http>.
-///
-/// | Condition | Result |
-/// |---|---|
-/// | `mcp_allowed_hosts` set, `Host` not in list | 403 |
-/// | `Origin` absent | accept (native clients omit it) |
-/// | `Origin` present and in `mcp_allowed_origins` | accept |
-/// | `Origin` present, `mcp_allowed_origins` empty | 403 |
-/// | `Origin` present and not in list | 403 |
-/// | `Origin: null`, malformed, or invalid syntax | 403 |
-///
-/// No same-origin fallback — an empty allowlist rejects every present Origin.
-/// Fires before JWT validation, session creation, and backend fan-out.
 pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Request<Body>, next: Next) -> Response {
     if !config.mcp_allowed_hosts.is_empty() {
         match request_authority(&request) {
@@ -157,12 +120,12 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
         return forbidden_response();
     };
 
-    if config.mcp_parsed_origins.is_empty() {
+    if config.mcp_allowed_origins.is_empty() {
         warn!("mcp_origin_layer - rejected Origin: no allowed origins configured origin = {origin_str}");
         return forbidden_response();
     }
 
-    if config.mcp_parsed_origins.contains(&request_origin) {
+    if config.mcp_allowed_origins.contains(&request_origin) {
         debug!("mcp_origin_layer - Origin accepted via allowlist origin = {origin_str}");
         next.run(request).await
     } else {
@@ -183,10 +146,10 @@ mod tests {
     // ── helpers ───────────────────────────────────────────────────────────────
 
     fn config_origins(origins: &[&str]) -> Config {
-        let mut c =
-            Config { mcp_allowed_origins: origins.iter().map(|s| (*s).to_owned()).collect(), ..Config::default() };
-        c.finalize().expect("test origins should be valid");
-        c
+        Config {
+            mcp_allowed_origins: origins.iter().map(|s| parse_origin_str(s).unwrap()).collect(),
+            ..Config::default()
+        }
     }
 
     fn config_hosts(hosts: &[&str]) -> Config {
@@ -194,13 +157,11 @@ mod tests {
     }
 
     fn config_origins_and_hosts(origins: &[&str], hosts: &[&str]) -> Config {
-        let mut c = Config {
-            mcp_allowed_origins: origins.iter().map(|s| (*s).to_owned()).collect(),
+        Config {
+            mcp_allowed_origins: origins.iter().map(|s| parse_origin_str(s).unwrap()).collect(),
             mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(),
             ..Config::default()
-        };
-        c.finalize().expect("test origins should be valid");
-        c
+        }
     }
 
     fn make_app(config: Config) -> axum::Router {
@@ -344,46 +305,21 @@ mod tests {
         assert!(parse_origin("https://app.\texample.com").is_none());
     }
 
-    // ── parse_origin_str / Config::finalize unit tests ────────────────────────
+    // ── parse_origin_str unit tests ───────────────────────────────────────────
 
     #[test]
-    fn empty_configured_origins_produces_empty_parsed_list() {
-        let mut c = Config::default();
-        assert!(c.finalize().is_ok());
-        assert!(c.mcp_parsed_origins.is_empty());
-    }
-
-    // ── Config::finalize startup-error tests ──────────────────────────────────
-
-    #[test]
-    fn finalize_with_valid_origins_succeeds() {
-        let mut c = Config { mcp_allowed_origins: vec!["https://app.example.com".to_owned()], ..Config::default() };
-        assert!(c.finalize().is_ok());
-        assert_eq!(c.mcp_parsed_origins.len(), 1);
+    fn parse_origin_str_accepts_valid_origin() {
+        assert!(parse_origin_str("https://app.example.com").is_some());
     }
 
     #[test]
-    fn finalize_with_invalid_origin_returns_error() {
-        let mut c = Config {
-            mcp_allowed_origins: vec!["https://valid.example.com".to_owned(), r"https:\bad".to_owned()],
-            ..Config::default()
-        };
-        let err = c.finalize().unwrap_err();
-        assert!(err.to_string().contains(r"https:\bad"));
-        // mcp_parsed_origins must not be partially populated on error.
-        assert!(c.mcp_parsed_origins.is_empty());
+    fn parse_origin_str_rejects_invalid_origin() {
+        assert!(parse_origin_str(r"https:\bad").is_none());
     }
 
     #[test]
-    fn finalize_reports_all_invalid_origins_in_error() {
-        let mut c = Config {
-            mcp_allowed_origins: vec![r"https:\bad1".to_owned(), "https:////bad2.example.com".to_owned()],
-            ..Config::default()
-        };
-        let err = c.finalize().unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains(r"https:\bad1"), "expected bad1 in: {msg}");
-        assert!(msg.contains("https:////bad2.example.com"), "expected bad2 in: {msg}");
+    fn parse_origin_str_rejects_path_component() {
+        assert!(parse_origin_str("https:////bad2.example.com").is_none());
     }
 
     // ── authority_in_allowlist unit tests ─────────────────────────────────────

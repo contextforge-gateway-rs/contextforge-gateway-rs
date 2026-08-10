@@ -65,10 +65,7 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    pub async fn run_gateway(mut self) -> Result<()> {
-        // Parse mcp_allowed_origins into typed url::Origin values once at startup.
-        // Returns an error (and aborts startup) if any configured origin is invalid.
-        self.config.finalize()?;
+    pub async fn run_gateway(self) -> Result<()> {
         let config = &self.config;
         let session_manager = self.session_manager;
         let user_config_store = match self.user_config_store_type {
@@ -85,10 +82,8 @@ impl Gateway {
         };
         let mcp_plugin_runtime = self.plugin_runtime;
 
-        // Host and Origin validation is owned by the outer mcp_origin_layer.
-        // Disable RMCP's built-in checks so they do not conflict with ours.
-        // When the operator has configured an allowed-hosts list, pass it to
-        // RMCP as well for defense-in-depth; RMCP's list uses bare hostnames.
+        // mcp_origin_layer is the sole enforcement point; disable RMCP's built-in checks.
+        // Pass the host list to RMCP as well when configured (defense-in-depth).
         let streamable_config = if config.mcp_allowed_hosts.is_empty() {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
         } else {

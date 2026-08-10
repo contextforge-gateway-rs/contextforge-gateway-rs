@@ -259,57 +259,20 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_LOG_ROTATION")]
     pub log_rotation: Option<LogRotation>,
 
-    /// Allowlist of browser Origins permitted on MCP Streamable HTTP requests.
-    ///
-    /// Each entry must be a fully-qualified origin with scheme, e.g.
-    /// `https://app.example.com` or `http://localhost:3000`.
-    /// Port comparison is exact after RFC 3986 default-port normalization:
-    /// `https://app.example.com` and `https://app.example.com:443` are
-    /// equivalent; `https://app.example.com:8443` is distinct.
-    ///
-    /// Behaviour when this list is **non-empty**:
-    /// - No `Origin` header → accepted (native/non-browser clients).
-    /// - `Origin` present and matching an entry → accepted.
-    /// - `Origin` present, malformed, `null`, or not in the list → HTTP 403.
-    ///
-    /// Behaviour when this list is **empty** (default):
-    /// - No `Origin` header → accepted.
-    /// - `Origin` present → **HTTP 403** (no same-origin fallback; an empty
-    ///   allowlist is not a bypass).
-    ///
-    /// Supply multiple origins as a comma-separated string:
-    /// `https://app.example.com,https://other.example.com`
+    /// MCP Origin allowlist. Missing `Origin` is always accepted. A present `Origin`
+    /// must match an entry; an empty list rejects every present `Origin` (no bypass).
+    /// Comma-separated: `https://app.example.com,http://localhost:3000`
     #[arg(
         long,
         env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS",
         value_delimiter = ',',
-        num_args = 0..
+        num_args = 0..,
+        value_parser = validate_mcp_origin,
     )]
-    pub mcp_allowed_origins: Vec<String>,
+    pub mcp_allowed_origins: Vec<Origin>,
 
-    /// Pre-parsed form of `mcp_allowed_origins`, populated by [`Config::finalize`].
-    ///
-    /// Using `#[clap(skip)]` keeps this invisible to the CLI / env-var parser;
-    /// it is always derived from `mcp_allowed_origins` and never set directly.
-    #[clap(skip)]
-    pub mcp_parsed_origins: Vec<Origin>,
-
-    /// Allowlist of `Host` header values (authorities) trusted on inbound MCP
-    /// requests, used as the companion DNS-rebinding control.
-    ///
-    /// Each entry is a hostname or `host:port` authority, e.g.
-    /// `gateway.example.com` or `gateway.example.com:8080`.
-    /// Port is optional; an entry without a port matches that host on any port.
-    ///
-    /// When this list is **non-empty**, any request whose `Host` header does
-    /// not match an entry is rejected with HTTP 403 before Origin validation.
-    ///
-    /// When this list is **empty** (default), Host validation is disabled.
-    /// For deployments exposed directly to the internet, set this alongside
-    /// `mcp_allowed_origins`.
-    ///
-    /// Supply multiple hosts as a comma-separated string:
-    /// `gateway.example.com,gateway.example.com:443`
+    /// MCP Host allowlist. When non-empty, requests with a non-matching `Host` header are
+    /// rejected with HTTP 403 before Origin validation. Comma-separated: `gateway.example.com:8080`
     #[arg(
         long,
         env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS",
@@ -319,45 +282,15 @@ pub struct Config {
     pub mcp_allowed_hosts: Vec<String>,
 }
 
-impl Config {
-    /// Parses `mcp_allowed_origins` into typed [`Origin`] values and stores
-    /// them in `mcp_parsed_origins`.  Call this once after clap parsing
-    /// completes so the middleware can compare against pre-parsed values
-    /// instead of re-parsing on every request.
-    ///
-    /// Returns an error if any configured origin string is invalid.
-    /// The error message names all invalid entries so the operator can correct
-    /// the configuration without restarting repeatedly.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigValidationError::InvalidMcpAllowedOrigins`] when one or
-    /// more entries in `mcp_allowed_origins` cannot be parsed as a valid
-    /// serialized origin.
-    pub fn finalize(&mut self) -> Result<(), ConfigValidationError> {
-        use crate::layers::mcp_origin::parse_origin_str;
-        let mut parsed = Vec::with_capacity(self.mcp_allowed_origins.len());
-        let mut invalid = Vec::new();
-        for s in &self.mcp_allowed_origins {
-            match parse_origin_str(s) {
-                Some(origin) => parsed.push(origin),
-                None => invalid.push(s.as_str()),
-            }
-        }
-        if !invalid.is_empty() {
-            return Err(ConfigValidationError::InvalidMcpAllowedOrigins(invalid.join(", ")));
-        }
-        self.mcp_parsed_origins = parsed;
-        Ok(())
-    }
+fn validate_mcp_origin(s: &str) -> Result<Origin, String> {
+    crate::layers::mcp_origin::parse_origin_str(s)
+        .ok_or_else(|| format!("invalid MCP origin: {s}"))
 }
 
 #[derive(Error, Debug)]
 pub enum ConfigValidationError {
     #[error("Redis Configuration Error")]
     RedisConfigurationError(String),
-    #[error("Invalid mcp_allowed_origins entries: {0}")]
-    InvalidMcpAllowedOrigins(String),
 }
 
 impl TryFrom<&Config> for RedisConfig {
