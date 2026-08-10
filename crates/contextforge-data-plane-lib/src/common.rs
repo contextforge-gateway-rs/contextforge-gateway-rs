@@ -14,6 +14,7 @@ use std::{
 };
 use thiserror::Error;
 use typed_builder::TypedBuilder;
+use url::Url;
 
 use crate::user_config_store::UserConfigStore;
 
@@ -263,7 +264,7 @@ pub struct Config {
         value_delimiter = ',',
         num_args = 1..
     )]
-    pub mcp_allowed_origins: Option<Vec<String>>,
+    pub mcp_allowed_origins: Option<Vec<Url>>,
 
     #[arg(
         long,

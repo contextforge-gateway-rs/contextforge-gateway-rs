@@ -84,7 +84,7 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
         return forbidden_response();
     };
 
-    let allowed = allowed_origins.iter().filter_map(|s| parse_origin(s)).any(|o| o == request_origin);
+    let allowed = allowed_origins.iter().map(Url::origin).any(|o| o == request_origin);
     if allowed {
         debug!("mcp_origin_layer - Origin accepted via allowlist origin = {origin_str}");
         next.run(request).await
@@ -99,14 +99,17 @@ mod tests {
     use axum::{Router, body::to_bytes, middleware, routing::get};
     use http::{Request, StatusCode};
     use tower::ServiceExt;
-    use url::Origin;
+    use url::{Origin, Url};
 
     use super::*;
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
     fn config_origins(origins: &[&str]) -> Config {
-        Config { mcp_allowed_origins: Some(origins.iter().map(|s| (*s).to_owned()).collect()), ..Config::default() }
+        Config {
+            mcp_allowed_origins: Some(origins.iter().map(|s| s.parse::<Url>().unwrap()).collect()),
+            ..Config::default()
+        }
     }
 
     fn config_hosts(hosts: &[&str]) -> Config {
@@ -118,7 +121,7 @@ mod tests {
 
     fn config_origins_and_hosts(origins: &[&str], hosts: &[&str]) -> Config {
         Config {
-            mcp_allowed_origins: Some(origins.iter().map(|s| (*s).to_owned()).collect()),
+            mcp_allowed_origins: Some(origins.iter().map(|s| s.parse::<Url>().unwrap()).collect()),
             mcp_allowed_hosts: Some(hosts.iter().map(|s| s.parse::<Authority>().unwrap()).collect()),
             ..Config::default()
         }
