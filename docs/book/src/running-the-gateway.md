@@ -123,7 +123,6 @@ curl --silent --show-error --request POST \
           "gateway-one": {
             "name": "gateway-one",
             "url": "http://127.0.0.1:5555/mcp",
-            "transport": "STREAMABLEHTTP",
             "passthrough_headers": [],
             "allowed_tool_names": [],
             "allowed_resource_names": [],
@@ -132,7 +131,6 @@ curl --silent --show-error --request POST \
           "gateway-two": {
             "name": "gateway-two",
             "url": "http://127.0.0.1:5556/mcp",
-            "transport": "STREAMABLEHTTP",
             "passthrough_headers": [],
             "allowed_tool_names": [],
             "allowed_resource_names": [],

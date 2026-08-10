@@ -16,7 +16,7 @@ use std::{
 use contextforge_data_plane_apis::{
     User,
     runtime_plugin_config::{RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION},
-    user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
 };
 use http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -375,7 +375,6 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                     BackendMCPGateway {
                         name: "backend".to_owned(),
                         url: backend.url.parse().expect("backend URL parses"),
-                        transport: Transport::StreamableHttp,
                         passthrough_headers: Vec::new(),
                         add_headers: HashMap::new(),
                         remove_headers: Vec::new(),

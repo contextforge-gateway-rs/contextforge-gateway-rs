@@ -6,7 +6,7 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
@@ -268,7 +268,6 @@ async fn start_gateway_with_runtime(
                             BackendMCPGateway {
                                 url: format!("http://127.0.0.1:{backend_port}/mcp").parse().expect("backend URL"),
                                 name: String::new(),
-                                transport: Transport::default(),
                                 passthrough_headers: Vec::new(),
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),

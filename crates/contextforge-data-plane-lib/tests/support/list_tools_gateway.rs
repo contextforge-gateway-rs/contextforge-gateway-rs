@@ -2,7 +2,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
@@ -215,7 +215,6 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                 BackendMCPGateway {
                     name: format!("backend-{port}"),
                     url,
-                    transport: Transport::default(),
                     passthrough_headers: Vec::new(),
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),

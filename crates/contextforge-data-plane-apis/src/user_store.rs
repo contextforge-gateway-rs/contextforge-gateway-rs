@@ -4,17 +4,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-pub enum Transport {
-    #[default]
-    #[serde(rename = "STREAMABLEHTTP")]
-    StreamableHttp,
-    #[serde(rename = "SSE")]
-    Sse,
-    #[serde(rename = "STDIO")]
-    Stdio,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 pub enum IntegrationType {
     #[serde(rename = "REST")]
     Rest,
@@ -27,7 +16,6 @@ pub enum IntegrationType {
 pub struct BackendMCPGateway {
     pub name: String,
     pub url: url::Url,
-    pub transport: Transport,
     /// Header names copied from the downstream request onto the upstream connection.
     pub passthrough_headers: Vec<String>,
     /// Static headers injected onto the upstream connection (override passthrough).
