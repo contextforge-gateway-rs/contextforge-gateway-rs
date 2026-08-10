@@ -2,7 +2,7 @@
 
 ## What this project is
 
-`contextforge-gateway-rs` is a Rust-based MCP (Model Context Protocol) gateway — the **dataplane** component of ContextForge. It acts as a scalable, secure proxy layer that routes AI tool calls from MCP clients to one or more backend MCP servers.
+`contextforge-data-plane` is a Rust-based MCP (Model Context Protocol) gateway — the **dataplane** component of ContextForge. It acts as a scalable, secure proxy layer that routes AI tool calls from MCP clients to one or more backend MCP servers.
 
 It is paired with the external ContextForge control plane at [`IBM/mcp-context-forge`](https://github.com/IBM/mcp-context-forge). The two components have a strict division of responsibility:
 
@@ -51,13 +51,36 @@ Architecture context lives in the wiki. Key pages:
 **Key invariants:**
 - Redis/config access goes through `UserConfigStore` only — never leak Redis details into routing code.
 - The backend prefix naming contract must not change without updating merge logic, split logic, and tests.
-- When behavior on the hot path changes, the matching book page must be updated in the same change.
+- When behavior on the hot path changes, the matching wiki page must be updated in the same change.
 
 ## Active work (near-term)
 
 - **Protocol migration**: replacing all remaining legacy MCP paths (SSE transport, `initialize`/session shims) with `2026-07-28` equivalents over Streamable HTTP.
 - Legacy SSE transport and old session behavior are **being removed**, not maintained. Do not build new behavior on temporary shims.
 - New tests and examples should use `server/discover`, per-request client metadata, and protocol version `2026-07-28`.
+
+## Control-Plane Integration Contract
+
+> **Provisional.** No formal contract has been stipulated yet. This section documents the current de-facto integration surface with [IBM/mcp-context-forge](https://github.com/IBM/mcp-context-forge). Any row may change while the project is early; when a proper contract is agreed, update this section to track it.
+
+| Agreement | Value today |
+| --- | --- |
+| Client-facing route | `/servers/{virtual_host_id}/mcp`. Front door rewrites modern MCP `2026-07-28` Streamable HTTP traffic to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the dataplane. |
+| Protocol compatibility | Dataplane target is MCP `2026-07-28` only. Control plane serves older versions, legacy session init, and SSE on its own routes. |
+| Unknown virtual host | `404` with body `{"detail":"Server not found"}`, matching the control-plane response shape. |
+| Token issuer and audience | `iss = mcpgateway`, `aud = mcpgateway-api`. |
+| Claims shape | `sub`, `jti`, `iss`, `aud`, `exp`, and `user` required. `token_use`, `iat`, `teams`, `scopes`, and `user.full_name` optional. Dataplane routes on `sub` only. |
+| User config Redis key | `MessagePack(User::new(jwt_subject))` — key type plus subject, not the raw subject string. |
+| User config Redis value | `MessagePack(UserConfig)`. JSON schema at `schemas/user_config.json`. |
+| User key Redis schema | `schemas/user.json`. |
+| Plugin config key | `ContextForgeGatewayRuntimePluginConfig`, JSON or MessagePack, `version: 1` with a `cpex` section. |
+
+**Coordination rule:** changing any row above is a cross-repo change. The dataplane, the control-plane publisher (`dataplane_publisher.py`), and the `cf-integration` harness all need updating together.
+
+Regenerate both schemas after any struct change to `UserConfig`, `VirtualHost`, `BackendMCPGateway`, or the `User` key type:
+```bash
+cargo run -p contextforge-data-plane-apis
+```text
 
 ## System topology
 
@@ -91,7 +114,7 @@ This means:
 | Component | Role | Persistence |
 | --- | --- | --- |
 | **nginx** | TLS termination, routing fan-out | — |
-| **dataplane** (`contextforge-gateway-rs`) | MCP routing, auth enforcement, fan-out to backends | Redis (read-only for config) |
+| **dataplane** (`contextforge-data-plane`) | MCP routing, auth enforcement, fan-out to backends | Redis (read-only for config) |
 | **control-plane** (`IBM/mcp-context-forge`) | IAM, UI, metrics, legacy MCP clients, config publishing | Redis (write) + PostgreSQL (via pgbouncer) |
 | **redis** | Runtime config store, inter-component pub/sub channel | In-memory + persistence |
 | **postgres** (via pgbouncer) | Control-plane relational store | Durable |

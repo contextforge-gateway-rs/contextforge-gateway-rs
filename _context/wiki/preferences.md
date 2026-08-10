@@ -65,7 +65,7 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 - **Minimal scope**: stay tightly scoped to the task — no unsolicited refactors or cleanups.
 - **Plan first for complex tasks**: for changes with multiple moving parts, propose the approach before implementing.
 - **Run validation**: run `cargo test` and `cargo clippy` after changes and report results before declaring done.
-- **Update the book**: when hot-path behavior changes, include the book page update in the same task.
+- **Update the wiki**: when hot-path behavior changes, include the wiki page update in the same task.
 - **No hallucination**: if something is unclear, ask rather than guess.
 
 

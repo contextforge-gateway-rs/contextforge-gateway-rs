@@ -4,7 +4,7 @@
 
 Backend map keys become public identifiers only for **multi-backend virtual hosts without an explicit tool alias**:
 
-```
+```text
 backend tool "increment" on backend "gateway-one" → "gateway-one-increment"
 backend resource "counter" on backend "gateway-one" → "gateway-one-counter"
 ```
@@ -21,7 +21,7 @@ Single-backend virtual hosts: identifiers pass through **unchanged**.
 
 All four list methods fan out to all connected backends concurrently and merge results:
 
-```
+```text
 list_tools / list_resources / list_prompts / list_resource_templates
   → all connected backends → merged sorted output
 ```
@@ -32,7 +32,7 @@ Failed/unavailable backends are logged and skipped. Single-backend: identifiers 
 
 Calls targeting one object use the inverse rule. The name splitter walks configured backend names and requires a `-` immediately after the backend name:
 
-```
+```text
 gateway-one-increment  →  backend: gateway-one,  tool: increment
 gateway-oneincrement   →  rejected (no - separator)
 ```
@@ -50,7 +50,7 @@ The gateway wraps per-backend cursors inside its own opaque token (JSON, treated
 ## Session State (local process)
 
 Backend RMCP services are stored in `BackendTransports` keyed by:
-```
+```text
 principal (claims.sub) + backend_name (map key) + downstream_session_id
 ```
 
@@ -76,7 +76,7 @@ The merge rule (gateway-aware, not a raw union):
 ## Cleanup
 
 `DELETE` with `Mcp-session-id`:
-```
+```text
 → RMCP handles request
 → on success: remove LocalUserSessionStore entry + BackendTransports entries for principal+session
 ```
@@ -92,7 +92,7 @@ If RMCP rejects the delete, local state is untouched.
 | `list_resources` | List | Same as list_tools. |
 | `list_prompts` | List | Same as list_tools. |
 | `list_resource_templates` | List | Same — both name and URI template get prefixed for multi-backend. |
-| `call_tool` | Targeted | Resolves alias → single/multi-backend fallback. Runs pre/post plugin hooks. Forwards downstream cancellation to backend. Tracks backend progress tokens. |
+| `call_tool` | Targeted | Resolves alias → single/multi-backend fallback. Runs pre/post plugin hooks. Forwards downstream cancellation to backend. Tracks backend progress tokens: RMCP assigns a new token per backend request; the gateway maps each backend token to the downstream token. Request enqueue and mapping publication are serialized against progress lookup so an immediate backend notification cannot overtake registration. When the notification matches an in-flight token, the gateway restores the downstream token and forwards it to the client. |
 | `read_resource` | Targeted | Single-backend: URI unchanged. Multi-backend: strips prefix. |
 | `subscribe` / `unsubscribe` | Targeted | Same resource-URI routing; forwards/stops resource-update notifications. |
 | `get_prompt` | Targeted | Single-backend: name unchanged. Multi-backend: strips prefix. |

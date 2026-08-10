@@ -2,7 +2,7 @@
 
 ## Minimum Required Flags
 
-```
+```text
 --redis-address   --redis-port   --redis-mode
 ```
 
@@ -44,7 +44,7 @@ Optional: `token_use`, `iat`, `teams`, `scopes`, `user.full_name`.
 
 ## UserConfig Shape (from `contextforge-data-plane-apis`)
 
-```
+```text
 UserConfig
   virtual_hosts: HashMap<String, VirtualHost>
 
@@ -79,10 +79,16 @@ BackendMCPGateway
 
 Redis storage: `MessagePack(User::new(sub))` → `MessagePack(UserConfig)`.
 
-Schema: `schemas/user_config.json`. Regenerate after any struct change:
+Two schemas are generated — both must be regenerated and committed when `UserConfig`, `VirtualHost`, `BackendMCPGateway`, or the `User` key type changes:
+
+| Schema file | Covers |
+| --- | --- |
+| `schemas/user_config.json` | `UserConfig` routing document written to Redis. |
+| `schemas/user.json` | `User` key type used as the Redis key. |
+
 ```bash
 cargo run -p contextforge-data-plane-apis
-```
+```text
 
 ## Plugin Config (Redis key: `ContextForgeGatewayRuntimePluginConfig`)
 
@@ -90,7 +96,7 @@ cargo run -p contextforge-data-plane-apis
 RuntimePluginConfigDocument
   version: 1
   cpex: CpexConfig
-```
+```text
 
 Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke` only.  
 Rejected: routing-based selection, plugin dirs, global policies, other hook types.  
@@ -187,7 +193,7 @@ cargo run --release --bin contextforge-data-plane -- \
   --otlp-endpoint  http://127.0.0.1:3100/api/public/otel/v1/traces \
   --otlp-metrics-endpoint http://127.0.0.1:4318/v1/metrics \
   --otlp-service-name contextforge-data-plane
-```
+```text
 
 ## Prometheus Starter Queries
 
@@ -197,3 +203,12 @@ cargo run --release --bin contextforge-data-plane -- \
 | p95 latency | `histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[1m])))` |
 | In-flight requests | `http_server_active_requests` |
 | Payload throughput | `http_server_request_body_size_bytes_sum` / `http_server_response_body_size_bytes_sum` |
+
+## Known Telemetry Gaps
+
+Tracked upstream, not yet implemented in the dataplane:
+
+| Gap | Issue |
+| --- | --- |
+| W3C trace-context propagation across gateway hops | [mcp-context-forge#4723](https://github.com/IBM/mcp-context-forge/issues/4723) |
+| MCP-semantic spans with tool names and JSON-RPC method attributes | [mcp-context-forge#4722](https://github.com/IBM/mcp-context-forge/issues/4722) |

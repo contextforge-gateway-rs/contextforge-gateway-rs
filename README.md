@@ -15,7 +15,7 @@ test stack:
 
 ```bash
 make docker-prod
-make testing-up
+make compose-up
 ```
 
 The stack uses the current `fast_time_server` backend and exercises config
@@ -24,7 +24,7 @@ publication through the external ContextForge control plane. See
 test, then stop it with:
 
 ```bash
-make testing-down
+make compose-down
 ```
 
 ## Run the Binary from Cargo

@@ -4,7 +4,7 @@
 
 Tower layers execute outside-in. A request reaches MCP handlers with these extensions already set:
 
-```
+```text
 TCP/TLS listener
   -> HttpMetricsLayer
   -> TraceLayer
@@ -22,7 +22,7 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 
 ## Pipeline Shape
 
-```
+```text
 downstream request
   -> virtual host extraction → JWT validation → session extraction
   -> user config lookup → MCP handler validation
@@ -73,3 +73,98 @@ Order is invariant: auth/config before backend selection; request plugins before
 ## Lock Design
 
 Locks guard maps of handles, not I/O. Backend calls, Redis reads, and plugin hooks run outside any gateway lock. `borrow_transports()` clones `Arc<RunningService>` so the lock is not held across calls.
+
+## Startup And Response Flow
+
+Startup sequence (`main.rs` → `Gateway::run_gateway`):
+
+```text
+install rustls crypto provider
+  -> Config::parse()
+  -> logging::init_tracing_logging(&config)
+  -> Runtime::from(&config)          ← sets executor shape
+  -> optional CpexRuntimeRegistry
+  -> Gateway::builder()
+       .with_config(config)
+       .with_user_config_store_type(UserConfigStoreType::Redis)
+       .with_session_manager(LocalSessionManager::default())
+       .with_plugin_runtime(...)
+       .build()
+  -> runtime.execute(gateway, plugin_registry)
+```
+
+Response unwind order (Tower layers execute outside-in, so unwind is inside-out):
+
+```text
+backend response
+  -> response plugin hooks (call_tool only)
+  -> merge / namespace / pass through
+  -> virtual_host_config_layer response side
+  -> user_config_store_layer response side
+  -> session_id_layer response side  ← on DELETE success: remove session + backend transports
+  -> claims_layer response side
+  -> virtual_host_id_layer response side
+  -> CORS, TraceLayer, HttpMetricsLayer
+  -> downstream response
+```
+
+Flow checkpoints — each must exist before the next dependency runs:
+
+| Checkpoint | Fact established | Next dependency |
+| --- | --- | --- |
+| Listener | Request reached Rust dataplane over TCP/TLS. | Metrics, tracing, nested routing. |
+| Path extraction | Inner path matched `/servers/{virtual_host_id}/mcp`. | MCP handlers can resolve a `VirtualHost`. |
+| Claims validation | Bearer token accepted; `ContextForgeClaims` exists. | Config lookup can use `claims.sub`. |
+| User config lookup | `UserConfig` exists for the authenticated subject. | Virtual host check can run. |
+| Virtual host check | Path's virtual host id exists in the caller's config. | MCP validators can resolve the selected `VirtualHost`. |
+| RMCP dispatch | Streamable HTTP request mapped to an MCP method. | Handler chooses initialize, routed call, or local behavior. |
+
+## MCP-First, Not MCP-Only
+
+The current code implements MCP behavior, but the gateway shell is broader:
+
+```text
+auth → config lookup → transport setup → plugin runtime → telemetry → session strategy
+```
+
+Keep protocol-neutral concerns (auth, config ingestion, TLS handling, plugin execution, telemetry, runtime shape, session strategy) reusable. Future A2A or model-provider routing should reuse the gateway shell without copying the MCP routing stack. MCP-specific behavior must remain isolated to the current MCP modules.
+
+## Transport Security Split
+
+Transport security is split across two owners; keep this visible:
+
+| Concern | Stable owner | Expected evolution |
+| --- | --- | --- |
+| Gateway listener certificate | Process config. | Stays process config — it belongs to the listener. |
+| JWT verification keys | Process config. | Stays process config. |
+| Backend URL, auth headers, pass-through policy, allowed objects | Runtime user config (`BackendMCPGateway`). | Grows as per-backend policy detail increases. |
+| Backend-specific TLS trust and client identity | Process config today. | Should move to runtime config or referenced secret material per backend. |
+
+Do not bury transport security decisions inside MCP method handlers. They belong in startup assembly or explicit backend transport construction.
+
+## Plugin Hook Expansion Requirements
+
+Current supported hooks are intentionally narrow (`cmf.tool_pre_invoke`, `cmf.tool_post_invoke`). Before adding any new hook point, define all of the following:
+
+| Requirement | Why |
+| --- | --- |
+| Failure behavior | Does a plugin error abort the call, degrade gracefully, or log and continue? |
+| Timeout behavior | What happens when a plugin takes too long on the hot path? |
+| Cancellation behavior | Can the downstream cancel propagate through the plugin? |
+| Streaming/SSE behavior | Does the hook fire once or per-chunk? What is the backpressure model? |
+| Telemetry attribution | Which span/metric owns plugin latency and errors? |
+
+Avoid ad hoc plugin calls in routing code. New hook points belong at explicit, documented pipeline positions.
+
+## Architecture-Change Follow-Through Matrix
+
+Changing a load-bearing choice requires updating more than one file:
+
+| Change | Required follow-through |
+| --- | --- |
+| Downstream MCP version | Coordinate with control plane; update protocol tests and examples; keep legacy traffic on control-plane routes. |
+| Backend namespace / prefix contract | Update merge logic, split logic, tests, docs, and control-plane integration if client-facing surface moves. |
+| Session state moves external | Update `SessionManager`, cleanup behavior, load-balancing docs, and failure-mode tests. |
+| Config transport changes | Keep `UserConfigStore` as the boundary; update adapter tests. |
+| Plugin hook surface expands | Document ordering, failure, timeout, cancellation, streaming, and telemetry before landing. |
+| New protocol joins the gateway | Keep shared shell protocol-neutral; isolate new protocol-specific routing. |

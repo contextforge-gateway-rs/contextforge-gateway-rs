@@ -7,8 +7,8 @@ docker-prod: ## Build production Docker image (contextforge-data-plane:latest) f
 	docker build -t contextforge-data-plane:latest -f docker/Dockerfile .
 
 compose-up: ## Launch stack: nginx, control plane, redis, postgres, pgbouncer, dataplane, fast_time_server
-	@docker image inspect dataplane:latest >/dev/null 2>&1 || { \
-		echo "Image dataplane:latest not found. Run 'make docker-prod' first."; \
+	@docker image inspect contextforge-data-plane:latest >/dev/null 2>&1 || { \
+		echo "Image contextforge-data-plane:latest not found. Run 'make docker-prod' first."; \
 		exit 1; \
 	}
 	docker compose -f docker/docker-compose.yml up -d nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
