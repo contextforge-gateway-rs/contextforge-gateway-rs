@@ -84,12 +84,12 @@ impl Gateway {
 
         // mcp_origin_layer is the sole enforcement point; disable RMCP's built-in checks.
         // Pass the host list to RMCP as well when configured (defense-in-depth).
-        let streamable_config = if config.mcp_allowed_hosts.is_empty() {
-            StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
-        } else {
+        let streamable_config = if let Some(ref hosts) = config.mcp_allowed_hosts {
             StreamableHttpServerConfig::default()
-                .with_allowed_hosts(config.mcp_allowed_hosts.iter().map(String::as_str))
+                .with_allowed_hosts(hosts.iter().map(String::as_str))
                 .disable_allowed_origins()
+        } else {
+            StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
         };
 
         let reqwest_backend_client = reqwest::Client::try_from(config)?;

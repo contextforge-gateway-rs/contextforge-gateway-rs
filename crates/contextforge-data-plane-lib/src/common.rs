@@ -259,9 +259,6 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_LOG_ROTATION")]
     pub log_rotation: Option<LogRotation>,
 
-    /// MCP Origin allowlist. Missing `Origin` is always accepted. A present `Origin`
-    /// must match an entry; an empty list rejects every present `Origin` (no bypass).
-    /// Comma-separated: `https://app.example.com,http://localhost:3000`
     #[arg(
         long,
         env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS",
@@ -271,15 +268,13 @@ pub struct Config {
     )]
     pub mcp_allowed_origins: Vec<Origin>,
 
-    /// MCP Host allowlist. When non-empty, requests with a non-matching `Host` header are
-    /// rejected with HTTP 403 before Origin validation. Comma-separated: `gateway.example.com:8080`
     #[arg(
         long,
         env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS",
         value_delimiter = ',',
-        num_args = 0..
+        num_args = 1..
     )]
-    pub mcp_allowed_hosts: Vec<String>,
+    pub mcp_allowed_hosts: Option<Vec<String>>,
 }
 
 fn validate_mcp_origin(s: &str) -> Result<Origin, String> {

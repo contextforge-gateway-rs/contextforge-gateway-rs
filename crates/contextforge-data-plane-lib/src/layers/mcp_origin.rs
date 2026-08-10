@@ -86,13 +86,13 @@ fn forbidden_response() -> Response {
 
 /// MCP 2026-07-28 DNS-rebinding protection middleware.
 pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Request<Body>, next: Next) -> Response {
-    if !config.mcp_allowed_hosts.is_empty() {
+    if let Some(ref allowed_hosts) = config.mcp_allowed_hosts {
         match request_authority(&request) {
             None => {
                 warn!("mcp_origin_layer - rejected request: Host header missing or unparseable");
                 return forbidden_response();
             },
-            Some(ref authority) if !authority_in_allowlist(authority, &config.mcp_allowed_hosts) => {
+            Some(ref authority) if !authority_in_allowlist(authority, allowed_hosts) => {
                 warn!("mcp_origin_layer - rejected request: Host not in allowlist host = {authority}");
                 return forbidden_response();
             },
@@ -153,13 +153,13 @@ mod tests {
     }
 
     fn config_hosts(hosts: &[&str]) -> Config {
-        Config { mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(), ..Config::default() }
+        Config { mcp_allowed_hosts: Some(hosts.iter().map(|s| (*s).to_owned()).collect()), ..Config::default() }
     }
 
     fn config_origins_and_hosts(origins: &[&str], hosts: &[&str]) -> Config {
         Config {
             mcp_allowed_origins: origins.iter().map(|s| parse_origin_str(s).unwrap()).collect(),
-            mcp_allowed_hosts: hosts.iter().map(|s| (*s).to_owned()).collect(),
+            mcp_allowed_hosts: Some(hosts.iter().map(|s| (*s).to_owned()).collect()),
             ..Config::default()
         }
     }
