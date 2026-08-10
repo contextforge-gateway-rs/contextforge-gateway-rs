@@ -4,6 +4,7 @@ use axum::middleware;
 use axum_otel_metrics::HttpMetricsLayerBuilder;
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
+use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use rmcp::transport::{
     StreamableHttpServerConfig,
@@ -86,7 +87,7 @@ impl Gateway {
         // Pass the host list to RMCP as well when configured (defense-in-depth).
         let streamable_config = if let Some(ref hosts) = config.mcp_allowed_hosts {
             StreamableHttpServerConfig::default()
-                .with_allowed_hosts(hosts.iter().map(String::as_str))
+                .with_allowed_hosts(hosts.iter().map(Authority::as_str))
                 .disable_allowed_origins()
         } else {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()

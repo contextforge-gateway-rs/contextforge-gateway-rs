@@ -271,7 +271,7 @@ pub struct Config {
         value_delimiter = ',',
         num_args = 1..
     )]
-    pub mcp_allowed_hosts: Option<Vec<String>>,
+    pub mcp_allowed_hosts: Option<Vec<Authority>>,
 }
 
 #[derive(Error, Debug)]

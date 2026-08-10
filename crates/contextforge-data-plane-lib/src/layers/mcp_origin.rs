@@ -33,18 +33,11 @@ fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
         .or_else(|| request.uri().authority().cloned())
 }
 
-fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[String]) -> bool {
+fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[Authority]) -> bool {
     let request_host = authority.host().to_ascii_lowercase();
     let request_port = authority.port_u16();
     allowed_hosts.iter().any(|entry| {
-        let (entry_host, entry_port) = match entry.rsplit_once(':') {
-            Some((h, p)) => match p.parse::<u16>() {
-                Ok(port) => (h.to_ascii_lowercase(), Some(port)),
-                Err(_) => (entry.to_ascii_lowercase(), None),
-            },
-            None => (entry.to_ascii_lowercase(), None),
-        };
-        entry_host == request_host && entry_port.is_none_or(|p| Some(p) == request_port)
+        entry.host().to_ascii_lowercase() == request_host && entry.port_u16().is_none_or(|p| Some(p) == request_port)
     })
 }
 
@@ -118,13 +111,16 @@ mod tests {
     }
 
     fn config_hosts(hosts: &[&str]) -> Config {
-        Config { mcp_allowed_hosts: Some(hosts.iter().map(|s| (*s).to_owned()).collect()), ..Config::default() }
+        Config {
+            mcp_allowed_hosts: Some(hosts.iter().map(|s| s.parse::<Authority>().unwrap()).collect()),
+            ..Config::default()
+        }
     }
 
     fn config_origins_and_hosts(origins: &[&str], hosts: &[&str]) -> Config {
         Config {
             mcp_allowed_origins: Some(origins.iter().map(|s| (*s).to_owned()).collect()),
-            mcp_allowed_hosts: Some(hosts.iter().map(|s| (*s).to_owned()).collect()),
+            mcp_allowed_hosts: Some(hosts.iter().map(|s| s.parse::<Authority>().unwrap()).collect()),
             ..Config::default()
         }
     }
@@ -235,27 +231,27 @@ mod tests {
     #[test]
     fn authority_exact_host_match() {
         let auth = "gateway.example.com".parse::<Authority>().unwrap();
-        assert!(authority_in_allowlist(&auth, &["gateway.example.com".to_owned()]));
+        assert!(authority_in_allowlist(&auth, &["gateway.example.com".parse::<Authority>().unwrap()]));
     }
 
     #[test]
     fn authority_entry_without_port_matches_any_port() {
         let auth = "gateway.example.com:8080".parse::<Authority>().unwrap();
-        assert!(authority_in_allowlist(&auth, &["gateway.example.com".to_owned()]));
+        assert!(authority_in_allowlist(&auth, &["gateway.example.com".parse::<Authority>().unwrap()]));
     }
 
     #[test]
     fn authority_entry_with_port_matches_only_that_port() {
         let auth8080 = "gateway.example.com:8080".parse::<Authority>().unwrap();
         let auth443 = "gateway.example.com:443".parse::<Authority>().unwrap();
-        assert!(authority_in_allowlist(&auth8080, &["gateway.example.com:8080".to_owned()]));
-        assert!(!authority_in_allowlist(&auth443, &["gateway.example.com:8080".to_owned()]));
+        assert!(authority_in_allowlist(&auth8080, &["gateway.example.com:8080".parse::<Authority>().unwrap()]));
+        assert!(!authority_in_allowlist(&auth443, &["gateway.example.com:8080".parse::<Authority>().unwrap()]));
     }
 
     #[test]
     fn authority_mismatch_returns_false() {
         let auth = "evil.example.com".parse::<Authority>().unwrap();
-        assert!(!authority_in_allowlist(&auth, &["gateway.example.com".to_owned()]));
+        assert!(!authority_in_allowlist(&auth, &["gateway.example.com".parse::<Authority>().unwrap()]));
     }
 
     // ── middleware: no Origin ─────────────────────────────────────────────────
