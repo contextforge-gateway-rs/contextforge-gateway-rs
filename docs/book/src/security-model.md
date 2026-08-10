@@ -49,9 +49,59 @@ Authentication is bearer-JWT only:
 | Upstream | HTTPS-only by default; plain HTTP must be opted into with `--upstream-connection-mode`. mTLS client identity is supported per process. |
 | Redis | Plain, TLS, or mTLS via `--redis-mode`. Use TLS or mTLS anywhere Redis crosses a trust zone, because Redis is the config trust boundary. |
 
-CORS is currently wide open (any origin, method, and header). The API is
-bearer-token based and cookie-free, so cross-site request forgery does not
-apply, but expect this to tighten as policy work lands.
+## MCP Origin and Host Validation
+
+The gateway enforces the MCP 2026-07-28 Streamable HTTP transport
+[DNS-rebinding security requirement](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http):
+
+> Servers MUST validate the Origin header on all incoming connections to
+> prevent DNS rebinding attacks. If the Origin header is present and
+> invalid, servers MUST respond with HTTP 403 Forbidden.
+
+`mcp_origin_layer` is the single enforcement point for both Origin and Host
+validation. It fires before JWT claims verification, session creation,
+virtual-host lookup, and backend fan-out.
+
+### Host allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS`)
+
+An optional comma-separated list of trusted `Host` authorities
+(`gateway.example.com` or `gateway.example.com:8080`).
+
+When **non-empty**: requests whose `Host` header does not match an entry are
+rejected with **HTTP 403** before Origin validation is attempted. An entry
+without a port matches that host on any port; an entry with a port matches only
+that exact port.
+
+When **empty** (default): Host validation is disabled. Recommended to set
+alongside `mcp_allowed_origins` for public-internet deployments.
+
+### Origin allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS`)
+
+A comma-separated list of fully-qualified browser origins
+(`https://app.example.com`, `http://localhost:3000`).
+
+| `mcp_allowed_origins` | `Origin` absent | `Origin` in list | `Origin` not in list | `null` / malformed |
+| --- | --- | --- | --- | --- |
+| **non-empty** | ✅ accepted | ✅ accepted | ❌ HTTP 403 | ❌ HTTP 403 |
+| **empty** (default) | ✅ accepted | ❌ HTTP 403 | ❌ HTTP 403 | ❌ HTTP 403 |
+
+**An empty allowlist is not a bypass.** When `mcp_allowed_origins` is not
+configured, every request that carries an `Origin` header is rejected with HTTP
+403. There is no same-origin fallback: comparing `Origin` with `Host` would let
+a DNS-rebinding attacker satisfy both values simultaneously, defeating the
+protection entirely.
+
+Origins are strictly validated before comparison: backslash sequences, userinfo
+(`@`), path, query, and fragment components cause immediate rejection, preventing
+the `url` crate's WHATWG-compliant normalization from silently repairing
+malformed inputs into a valid origin.
+
+Port comparison uses typed `url::Origin` equality after RFC 3986 default-port
+normalization: `https://app.example.com` and `https://app.example.com:443` are
+the same origin; `https://app.example.com:8443` is a different origin.
+Configured origins are validated at startup by the clap `value_parser`; any
+invalid entry causes startup to abort with a formatted error before the process
+reaches `run_gateway`.
 
 ## Local Bootstrap Helpers
 

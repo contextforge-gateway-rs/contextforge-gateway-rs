@@ -56,6 +56,7 @@ jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 rustls = { version = "0.23", features = ["ring"] }
 cpex = "=0.2.2"
 uuid = { version = "1.23.1", features = ["v4"] }
+url = { version = "2.5", features = ["serde"] }
 axum = "0.8"
 openport = { version = "0.4.0", features = ["rand"] }
 cpex-secrets-detection = { path = "./crates/plugins/cpex-secrets-detection" }

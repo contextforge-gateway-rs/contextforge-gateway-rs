@@ -1,11 +1,3 @@
-use std::{
-    fs::{self, File},
-    io::{Cursor, Read},
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-};
-
 use clap::{Parser, ValueEnum};
 use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
@@ -13,8 +5,16 @@ use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem::PemObject};
 use secret_string::SecretString;
 use serde::{Deserialize, Serialize};
+use std::{
+    fs::{self, File},
+    io::{Cursor, Read},
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+};
 use thiserror::Error;
 use typed_builder::TypedBuilder;
+use url::Url;
 
 use crate::user_config_store::UserConfigStore;
 
@@ -257,6 +257,22 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_LOG_ROTATION")]
     pub log_rotation: Option<LogRotation>,
+
+    #[arg(
+        long,
+        env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS",
+        value_delimiter = ',',
+        num_args = 1..
+    )]
+    pub mcp_allowed_origins: Option<Vec<Url>>,
+
+    #[arg(
+        long,
+        env = "CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS",
+        value_delimiter = ',',
+        num_args = 1..
+    )]
+    pub mcp_allowed_hosts: Option<Vec<Authority>>,
 }
 
 #[derive(Error, Debug)]

@@ -4,6 +4,7 @@ use axum::middleware;
 use axum_otel_metrics::HttpMetricsLayerBuilder;
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
+use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use rmcp::transport::{
     StreamableHttpServerConfig,
@@ -40,6 +41,7 @@ use crate::{
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer,
+        mcp_origin::mcp_origin_layer,
         session_id::{SessionIdState, session_id_layer},
         user_config_store::user_config_store_layer,
         virtual_host_config::virtual_host_config_layer,
@@ -81,7 +83,15 @@ impl Gateway {
         };
         let mcp_plugin_runtime = self.plugin_runtime;
 
-        let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
+        // mcp_origin_layer is the sole enforcement point; disable RMCP's built-in checks.
+        // Pass the host list to RMCP as well when configured (defense-in-depth).
+        let streamable_config = if let Some(ref hosts) = config.mcp_allowed_hosts {
+            StreamableHttpServerConfig::default()
+                .with_allowed_hosts(hosts.iter().map(Authority::as_str))
+                .disable_allowed_origins()
+        } else {
+            StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
+        };
 
         let reqwest_backend_client = reqwest::Client::try_from(config)?;
 
@@ -135,7 +145,10 @@ impl Gateway {
             .layer(middleware::from_fn_with_state(session_id_state, session_id_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
-            .layer(cors_layer);
+            .layer(cors_layer)
+            // mcp_origin_layer is the outermost wrapper: fires before JWT auth,
+            // session creation, and backend fan-out.
+            .layer(middleware::from_fn_with_state(config.clone(), mcp_origin_layer));
 
         #[cfg(feature = "with_tools")]
         let app = tools::add_tools(app);

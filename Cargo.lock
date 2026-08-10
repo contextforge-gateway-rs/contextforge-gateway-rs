@@ -649,6 +649,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "typed-builder",
+ "url",
  "uuid",
 ]
 
