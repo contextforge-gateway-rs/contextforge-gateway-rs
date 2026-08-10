@@ -40,10 +40,22 @@ Origin and Host settings retain the explicitly configured
 | --- | --- | --- | --- |
 | `--mcp-allowed-origins <origin,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS` | None | Browser Origin allowlist. Without it, requests lacking `Origin` pass and every request carrying `Origin` receives HTTP `403`. |
 | `--mcp-allowed-hosts <authority,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | None | Optional RMCP request-authority allowlist. For requests that reach the RMCP service, missing or malformed authorities receive HTTP `400`; unlisted authorities receive HTTP `403`. Earlier middleware may return first. |
+| `--mcp-standard-header-max-count <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_COUNT` | `32` | Maximum MCP standard headers accepted on one request. |
+| `--mcp-standard-header-max-value-bytes <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_VALUE_BYTES` | `8192` | Maximum byte length accepted for one MCP standard header value. |
+| `--mcp-standard-header-max-total-bytes <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES` | `65536` | Approximate request-level aggregate bytes across all matched MCP standard header names and values. |
 
 Values are comma-separated. Origin entries must be fully qualified serialized
 origins such as `https://app.example.com`; Host entries are authorities such as
 `gateway.example.com` or `gateway.example.com:8443`. See [Security](security.md#mcp-origin-and-host-validation).
+The MCP standard header limits apply to `Mcp-Method`, `Mcp-Name`,
+`Mcp-Protocol-Version`, and `Mcp-Param-*`. The same guardrail also covers the
+legacy/RMCP transport header `Mcp-Session-Id`. A configured value of `0` is
+treated as the documented default. The byte totals are application-level
+aggregate budgets based on all matched header name and value lengths on one
+request; they do not allow a single oversized value, which is still capped by
+`--mcp-standard-header-max-value-bytes`. They are not exact wire-size accounting
+and do not model HTTP/2 header compression. Non-MCP headers remain bounded by
+the HTTP transport.
 
 ### Redis
 
@@ -134,6 +146,11 @@ BackendMCPGateway
 | Hop-by-hop | `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `Proxy-Connection`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade` |
 | RMCP-reserved | `Mcp-Session-Id`, `Accept`, `Last-Event-Id` |
 | Gateway-managed | `Host` (set from backend URL host + port; never overridden by config) |
+| Computed MCP standard | `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`, `Mcp-Param-*` |
+
+`Authorization` and `Cookie` are not protected here because backend
+authentication through `passthrough_headers` or `add_headers` is intentional
+runtime configuration.
 
 Redis storage: `MessagePack(User::new(sub))` → `MessagePack(UserConfig)`.
 

@@ -80,6 +80,13 @@ CORS, authentication, user-config, and virtual-host middleware can return a
 response first, so the Host-specific `400` and `403` statuses apply only after
 those earlier stages succeed.
 
+`mcp_header_limits_layer` enforces configurable count, per-value byte, and
+approximate total byte budgets for MCP standard request headers before JWT
+validation or RMCP body parsing. That budget covers `Mcp-Method`, `Mcp-Name`,
+`Mcp-Protocol-Version`, `Mcp-Session-Id`, and `Mcp-Param-*`. It is an
+application-level guard for MCP standard headers only; non-MCP headers remain
+bounded by the HTTP transport.
+
 ## Local Bootstrap Helpers (`with_tools`)
 
 The `contextforge-data-plane-lib/with_tools` feature compiles in:
