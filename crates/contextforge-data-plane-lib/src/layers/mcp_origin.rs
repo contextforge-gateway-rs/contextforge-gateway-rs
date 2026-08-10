@@ -5,66 +5,40 @@ use url::{Origin, Url};
 
 use crate::common::Config;
 
-// ── Origin parsing ────────────────────────────────────────────────────────────
-
-/// Strictly parses a serialized RFC 6454 origin string into a typed
+/// Parses a serialized RFC 6454 origin (`scheme://host[:port]`) into a typed
 /// [`url::Origin`].
 ///
-/// A valid serialized origin is exactly `scheme "://" host [":" port]` with
-/// **no** userinfo, path, query, or fragment component.  The `url` crate
-/// silently repairs many malformed inputs (backslashes, userinfo stripping,
-/// etc.), so this function validates the raw string before handing it to the
-/// parser:
-///
-/// - Contains `\` → rejected (backslash normalization attack).
-/// - Contains `@` before the first `/` → rejected (userinfo present).
-/// - Contains `?` or `#` → rejected (query / fragment present).
-///
-/// Returns `None` for the literal `"null"` opaque origin (RFC 6454 §6.2) and
-/// for any value that fails the checks above.
-///
-/// Port normalization is handled by the `url` crate: `https://blah.com:443`
-/// and `https://blah.com` produce the same `Origin::Tuple`; `https://blah.com:8443`
-/// is distinct.
+/// Returns `None` for `"null"` and for any value that is not a bare authority
+/// — no path, query, fragment, userinfo, backslash, control characters, or
+/// extra slashes after `://`.  Port normalization (`https://x.com:443` ==
+/// `https://x.com`) is handled by the `url` crate.
 fn parse_origin(raw: &str) -> Option<Origin> {
-    // ── Pre-parse structural checks on the raw string ─────────────────────
-
-    // Leading/trailing whitespace is not valid in a serialized origin
-    // (RFC 6454 §6.1) and the url crate silently trims it, so reject early.
+    // Reject ASCII control characters (including embedded tab) before the url
+    // crate silently strips them.
+    if raw.bytes().any(|b| b < 0x20 || b == 0x7F) {
+        return None;
+    }
+    // Reject leading/trailing whitespace; also catches Unicode spaces the
+    // control-character check above misses.
     if raw != raw.trim() {
         return None;
     }
-
-    if raw.trim().eq_ignore_ascii_case("null") {
+    if raw.eq_ignore_ascii_case("null") {
+        return None;
+    }
+    // Reject characters that the url crate normalizes away silently.
+    if raw.contains('\\') || raw.contains('@') || raw.contains('?') || raw.contains('#') {
         return None;
     }
 
-    // Backslash — the url crate treats it as a slash (WHATWG URL §5.1).
-    if raw.contains('\\') {
+    // Split on "://" and validate the authority portion on the raw string.
+    // Any "/" in authority_part means a path (e.g. "host/." normalizes to "/"
+    // after parsing, so this must be caught before Url::parse runs).
+    let (_, authority_part) = raw.split_once("://")?;
+    if authority_part.is_empty() || authority_part.contains('/') {
         return None;
     }
-    // Userinfo — "@" before the first "/" after the scheme separator.
-    // A valid origin has no path, so any "@" means userinfo.
-    if raw.contains('@') {
-        return None;
-    }
-    // Query / fragment.
-    if raw.contains('?') || raw.contains('#') {
-        return None;
-    }
-
-    // A serialized origin is exactly `scheme "://" host [":" port]`.
-    // This rejects "https:///…" and "https:////…" where the url crate silently
-    // collapses the extra slashes into a valid URL.
-    let Some((_, authority_part)) = raw.split_once("://") else {
-        return None; // no "://" at all
-    };
-    // Extra leading slashes after "://" mean the authority is empty or wrong.
-    if authority_part.starts_with('/') || authority_part.is_empty() {
-        return None;
-    }
-    // A trailing ":" with no port digits is malformed (e.g. "https://host:").
-    // Strip any IPv6 brackets first so "[::1]:" is also caught.
+    // Reject trailing ":" with no port (e.g. "https://host:").
     let host_for_port_check = authority_part.trim_start_matches('[');
     if let Some((_, port_part)) = host_for_port_check.rsplit_once(':')
         && port_part.is_empty()
@@ -72,42 +46,32 @@ fn parse_origin(raw: &str) -> Option<Origin> {
         return None;
     }
 
-    // Append "/" so the url crate accepts a bare `scheme://host[:port]` string.
+    // Append "/" so Url::parse accepts a bare authority string.
     let url = Url::parse(&format!("{raw}/")).ok()?;
 
-    // ── Post-parse structural checks ──────────────────────────────────────
-    // Path must be exactly the "/" we appended.
+    // Post-parse sanity checks (defense-in-depth).
     if url.path() != "/" {
         return None;
     }
-    // Re-check userinfo fields (defense-in-depth, url crate may strip "@").
     if !url.username().is_empty() || url.password().is_some() {
         return None;
     }
-    // No query or fragment.
     if url.query().is_some() || url.fragment().is_some() {
         return None;
     }
-    // Must have a host.
     url.host()?;
 
-    // Reject opaque origins (data:, blob:, …).
     match url.origin() {
         Origin::Tuple(_, _, _) => Some(url.origin()),
         Origin::Opaque(_) => None,
     }
 }
 
-/// Public-to-crate entry point for [`Config::finalize`] to validate configured
-/// origins at startup without exposing the private `parse_origin` function.
+/// Thin wrapper exposing `parse_origin` to [`Config::finalize`].
 pub(crate) fn parse_origin_str(raw: &str) -> Option<Origin> {
     parse_origin(raw)
 }
 
-// ── Host allowlist ────────────────────────────────────────────────────────────
-
-/// Parses the `Host` header (or HTTP/2 `:authority` pseudo-header) into an
-/// [`Authority`].
 fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
     request
         .headers()
@@ -117,20 +81,12 @@ fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
         .or_else(|| request.uri().authority().cloned())
 }
 
-/// Returns `true` when `authority` matches at least one entry in
-/// `allowed_hosts`.
+/// Returns `true` when `authority` matches an entry in `allowed_hosts`.
 ///
-/// Entries are plain hostnames (`gateway.example.com`) or `host:port`
-/// authorities (`gateway.example.com:8080`) — no scheme prefix.
-///
-/// - Entry **without** a port → matches that host on **any** port.
-/// - Entry **with** a port → matches only that exact `(host, port)` pair.
-///
-/// Comparison is case-insensitive on the host component.
+/// Entries are `host` or `host:port`; an entry without a port matches any port.
 fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[String]) -> bool {
     let request_host = authority.host().to_ascii_lowercase();
     let request_port = authority.port_u16();
-
     allowed_hosts.iter().any(|entry| {
         let (entry_host, entry_port) = match entry.rsplit_once(':') {
             Some((h, p)) => match p.parse::<u16>() {
@@ -143,8 +99,6 @@ fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[String]) -> bo
     })
 }
 
-// ── Response helpers ──────────────────────────────────────────────────────────
-
 fn forbidden_response() -> Response {
     Response::builder()
         .status(StatusCode::FORBIDDEN)
@@ -153,41 +107,22 @@ fn forbidden_response() -> Response {
         .expect("response should build")
 }
 
-// ── Middleware ────────────────────────────────────────────────────────────────
-
-/// Axum middleware that enforces the MCP 2026-07-28 Streamable HTTP
-/// DNS-rebinding protection requirement.
+/// MCP 2026-07-28 DNS-rebinding protection middleware.
 ///
-/// Per <https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http>:
-///
-/// > Servers MUST validate the Origin header on all incoming connections to
-/// > prevent DNS rebinding attacks. If the Origin header is present and
-/// > invalid, servers MUST respond with HTTP 403 Forbidden.
-///
-/// ## Decision table
+/// See <https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http>.
 ///
 /// | Condition | Result |
 /// |---|---|
-/// | `mcp_allowed_hosts` set, `Host` not in list | ❌ 403 |
-/// | `Origin` absent | ✅ accept (native / non-browser clients) |
-/// | `Origin: null` | ❌ 403 |
-/// | `Origin` malformed, has backslash / userinfo / path / query / fragment | ❌ 403 |
-/// | `mcp_allowed_origins` non-empty, parsed `Origin` in list | ✅ accept |
-/// | `mcp_allowed_origins` non-empty, parsed `Origin` not in list | ❌ 403 |
-/// | `mcp_allowed_origins` **empty** (default) | ❌ 403 — no fallback |
+/// | `mcp_allowed_hosts` set, `Host` not in list | 403 |
+/// | `Origin` absent | accept (native clients omit it) |
+/// | `Origin` present and in `mcp_allowed_origins` | accept |
+/// | `Origin` present, `mcp_allowed_origins` empty | 403 |
+/// | `Origin` present and not in list | 403 |
+/// | `Origin: null`, malformed, or invalid syntax | 403 |
 ///
-/// **There is no same-origin fallback.** A present `Origin` always requires
-/// an explicit trusted allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS`).
-/// An empty allowlist is not a bypass; it rejects every `Origin` that is present.
-///
-/// Port comparison uses [`url::Origin`] typed equality, which normalizes
-/// default ports: `https://app.example.com:443` and `https://app.example.com`
-/// are the same origin; `https://app.example.com:8443` is different.
-///
-/// This layer fires before JWT claims validation, session creation, and any
-/// backend fan-out.
+/// No same-origin fallback — an empty allowlist rejects every present Origin.
+/// Fires before JWT validation, session creation, and backend fan-out.
 pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Request<Body>, next: Next) -> Response {
-    // ── 1. Host allowlist check ───────────────────────────────────────────────
     if !config.mcp_allowed_hosts.is_empty() {
         match request_authority(&request) {
             None => {
@@ -202,9 +137,7 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
         }
     }
 
-    // ── 2. Origin header check ────────────────────────────────────────────────
     let Some(origin_header) = request.headers().get(header::ORIGIN) else {
-        // No Origin header → native / non-browser client; always allow.
         debug!("mcp_origin_layer - no Origin header, allowing request");
         return next.run(request).await;
     };
@@ -214,7 +147,6 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
         return forbidden_response();
     };
 
-    // Opaque / sandbox origin — always rejected regardless of config.
     if origin_str.trim().eq_ignore_ascii_case("null") {
         warn!("mcp_origin_layer - rejected opaque null Origin");
         return forbidden_response();
@@ -225,9 +157,6 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
         return forbidden_response();
     };
 
-    // ── 3. Allowlist check ────────────────────────────────────────────────────
-    // An empty allowlist is not a bypass: any present Origin is rejected until
-    // the operator explicitly configures trusted origins.
     if config.mcp_parsed_origins.is_empty() {
         warn!("mcp_origin_layer - rejected Origin: no allowed origins configured origin = {origin_str}");
         return forbidden_response();
@@ -241,8 +170,6 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
         forbidden_response()
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -401,6 +328,20 @@ mod tests {
         // url crate silently trims leading/trailing whitespace.
         assert!(parse_origin("  https://app.example.com").is_none());
         assert!(parse_origin("https://app.example.com  ").is_none());
+    }
+
+    #[test]
+    fn dot_segment_path_returns_none() {
+        // "https://app.example.com/." — url crate collapses "/." to "/" so the
+        // post-parse path check cannot catch this; the pre-parse "/" check must.
+        assert!(parse_origin("https://app.example.com/.").is_none());
+    }
+
+    #[test]
+    fn embedded_tab_returns_none() {
+        // url crate silently strips embedded horizontal tab; pre-parse control-
+        // character check must reject it before the parser runs.
+        assert!(parse_origin("https://app.\texample.com").is_none());
     }
 
     // ── parse_origin_str / Config::finalize unit tests ────────────────────────
@@ -721,6 +662,26 @@ mod tests {
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn normalized_malformed_origins_return_403() {
+        // Both values are normalized by the url crate into the same typed Origin
+        // as https://app.example.com, so they must be rejected by pre-parse
+        // checks before Url::parse is called.
+        let app = make_app(config_origins(&["https://app.example.com"]));
+
+        for origin in ["https://app.example.com/.", "https://app.\texample.com"] {
+            let req = Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::ORIGIN, origin)
+                .body(Body::empty())
+                .unwrap();
+
+            let res = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{origin}");
+        }
     }
 
     // ── middleware: null / malformed (always 403) ─────────────────────────────

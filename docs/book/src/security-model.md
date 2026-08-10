@@ -99,8 +99,8 @@ malformed inputs into a valid origin.
 Port comparison uses typed `url::Origin` equality after RFC 3986 default-port
 normalization: `https://app.example.com` and `https://app.example.com:443` are
 the same origin; `https://app.example.com:8443` is a different origin.
-Configured origins are parsed once at startup; invalid entries are logged and
-skipped.
+Configured origins are parsed once at startup via `Config::finalize()`; any
+invalid entry causes startup to abort with an error naming every bad value.
 
 ## Local Bootstrap Helpers
 
