@@ -49,12 +49,12 @@ disable the cache; production keeps both at 60.
 
 ## Schema Generation
 
-`contextforge-gateway-rs-apis` is the single source of truth for the shared
+`contextforge-data-plane-apis` is the single source of truth for the shared
 config shapes. It generates the JSON Schemas the control plane can validate
 against:
 
 ```bash
-cargo run -p contextforge-gateway-rs-apis
+cargo run -p contextforge-data-plane-apis
 ```
 
 This writes `schemas/user.json` and `schemas/user_config.json`. Regenerate and
@@ -71,7 +71,7 @@ control-plane paths and does not enter the dataplane.
 
 ## Verifying The Integration
 
-The [`cf-integration`](https://github.com/contextforge-gateway-rs/cf-integration)
+The [`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools)
 harness tests exactly this surface: it runs the stock upstream control-plane
 stack with the nginx split and the dataplane publisher enabled, then drives
 probe, live-test, and load lanes through the public route. When the

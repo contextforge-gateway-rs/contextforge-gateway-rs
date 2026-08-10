@@ -1,4 +1,4 @@
-# ContextForge Gateway (Rust) + OpenTelemetry Collector overlay for local
+# ContextForge Data Plane + OpenTelemetry Collector overlay for local
 # metrics verification (issue #4721 follow-up).
 #
 # Langfuse only ingests traces (see docker-compose-langfuse.yaml). To verify
@@ -26,7 +26,7 @@
 # Inspect:
 #   docker logs otel-collector --tail 200
 #
-# Reuses `gateways-net` already declared by docker-compose-local.yaml.
+# Reuses `contextforge-data-plane-net` from docker-compose-local.yaml.
 
 services:
   otel-collector:
@@ -42,7 +42,7 @@ services:
       # Prometheus-text endpoint exposed by the `prometheus` exporter,
       # scraped by the prometheus service below.
       - "8889:8889"
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
 
   prometheus:
     image: docker.io/prom/prometheus:v2.55.0
@@ -58,4 +58,4 @@ services:
       - "9090:9090"
     depends_on:
       - otel-collector
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]

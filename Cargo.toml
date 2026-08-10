@@ -1,10 +1,11 @@
 [workspace]
 members = [
-    "crates/contextforge-gateway-rs",
-    "crates/contextforge-gateway-rs-apis",
-    "crates/contextforge-gateway-rs-cpex",
-    "crates/contextforge-gateway-rs-lib",
+    "crates/contextforge-data-plane",
+    "crates/contextforge-data-plane-apis",
+    "crates/contextforge-data-plane-cpex",
+    "crates/contextforge-data-plane-lib",
     "crates/contextforge-load-test",
+    "crates/plugins/cpex-secrets-detection",
 ]
 resolver = "3"
 
@@ -14,16 +15,16 @@ edition = "2024"
 rust-version = "1.96"
 license = "Apache-2.0"
 keywords = ["mcp", "gateway", "rust", "contextforge", "a2a", "ai", "llm"]
-homepage = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
+homepage = "https://github.com/contextforge-org/contextforge-data-plane"
 readme = "./README.md"
-repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs"
+repository = "https://github.com/contextforge-org/contextforge-data-plane"
 
 
 [workspace.dependencies]
 # Keep dependencies here only when at least two workspace members inherit them.
-contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
-contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}
-rmcp = { version = "3.0.1", features = [
+contextforge-data-plane-cpex = { path = "./crates/contextforge-data-plane-cpex" }
+contextforge-data-plane-apis = { path = "./crates/contextforge-data-plane-apis"}
+rmcp = { version = "3.1.1", features = [
     "server",
     "client",
     "auth",
@@ -38,7 +39,7 @@ tracing = "0.1"
 tracing-opentelemetry = "0.33.0"
 opentelemetry = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
-tokio = { version = "1.48.0", features = ["full"] }
+tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 http = "1.4.0"
 redis = { version = "1.2.1", features = [
     "default",
@@ -51,12 +52,14 @@ thiserror = "2.0.18"
 rmp-serde = "1.3.1"
 async-trait = "0.1.89"
 reqwest = "0.13"
+jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 rustls = { version = "0.23", features = ["ring"] }
 cpex = "=0.2.2"
 uuid = { version = "1.23.1", features = ["v4"] }
+url = { version = "2.5", features = ["serde"] }
 axum = "0.8"
 openport = { version = "0.4.0", features = ["rand"] }
-secrets_detection_rust = { git = "https://github.com/IBM/cpex-plugins", rev = "6ff7af74587574fe6115ce87427519b63f6062da", package = "secrets_detection_rust" }
+cpex-secrets-detection = { path = "./crates/plugins/cpex-secrets-detection" }
 
 [profile.release]
 codegen-units = 1

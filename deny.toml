@@ -1,12 +1,7 @@
 [advisories]
 ignore = [
-    {id="RUSTSEC-2023-0071" , reason = "1. For time being not in production. 2. Workaround would be to force customers to use EC keys instead of RSA" },
-    {id="RUSTSEC-2026-0214" , reason = "1. gumdrop is used by goose which is a dev tool only" }
+    { id = "RUSTSEC-2026-0214", reason = "Transitive through the load-test-only Goose crate, which has no maintained CLI replacement yet" },
 ]
-
-[[licenses.exceptions]]
-allow = ["CDLA-Permissive-2.0"]
-name = "webpki-roots"
 
 ## This doesn't work at the moment. see https://github.com/EmbarkStudios/cargo-deny/issues/859
 [[licenses.exceptions]]
@@ -328,7 +323,8 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
 
 [sources.allow-org]
-# github.com organizations to allow git sources for
+# github.com organizations to allow git sources for. The legacy organization
+# still hosts the demo CPEX plugins used by the optional test feature.
 github = ["contextforge-gateway-rs"]
 # gitlab.com organizations to allow git sources for
 gitlab = []

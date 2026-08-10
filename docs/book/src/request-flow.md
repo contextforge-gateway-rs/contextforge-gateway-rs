@@ -30,7 +30,7 @@ follow [Run the Gateway Locally](running-the-gateway.md) alongside this page.
 
 ## Startup Path
 
-Startup begins in `crates/contextforge-gateway-rs/src/main.rs`:
+Startup begins in `crates/contextforge-data-plane/src/main.rs`:
 
 ```text
 install rustls crypto provider
@@ -53,7 +53,7 @@ and then calls `gateway.run_gateway()`.
 
 ## HTTP Stack Order
 
-`Gateway::run_gateway` builds the service stack in `crates/contextforge-gateway-rs-lib/src/lib.rs`.
+`Gateway::run_gateway` builds the service stack in `crates/contextforge-data-plane-lib/src/lib.rs`.
 Tower layers execute from the outside in, so a normal MCP request reaches the
 handler in this order:
 
@@ -62,6 +62,7 @@ TCP/TLS listener
   -> HttpMetricsLayer
   -> TraceLayer
   -> /contextforge-rs nested router
+  -> mcp_origin_layer          (MCP 2026-07-28: Host allowlist check, then Origin allowlist; absent Origin passes, empty allowlist rejects every present Origin)
   -> CORS layer
   -> virtual_host_id_layer
   -> claims_layer
@@ -103,6 +104,7 @@ The request layers insert the context used later by RMCP handlers:
 
 | Layer | Request behavior | Failure behavior |
 | --- | --- | --- |
+| `mcp_origin_layer` | (1) If `mcp_allowed_hosts` is set, rejects `Host` not in the list. (2) Absent `Origin` passes. (3) `Origin` must be in `mcp_allowed_origins`; an empty allowlist rejects every present `Origin` (no same-origin fallback). Strict serialized-origin syntax enforced; ports normalized per RFC 3986. | Returns `403` for disallowed `Host`, non-allowlisted, opaque (`null`), malformed, or extra-slash `Origin`. |
 | `virtual_host_id_layer` | Extracts `/servers/{virtual_host_id}/mcp` and inserts `VirtualHostId`. | Returns `400` when the inner path does not match. |
 | `claims_layer` | Validates `Authorization: Bearer ...` with configured RS/HMAC decoder, issuer, audience, and expiration. Inserts `ContextForgeClaims`. | Returns `401` for missing or invalid bearer auth. |
 | `session_id_layer` | Reads `Mcp-session-id` and inserts `SessionId` when present. | Missing session id is allowed here; authorized MCP handlers reject it later when required. |
@@ -202,5 +204,6 @@ cursor when more pages remain across any backend.
 
 The HTTP response then unwinds through `virtual_host_config_layer`,
 `user_config_store_layer`, `session_id_layer`, `claims_layer`,
-`virtual_host_id_layer`, CORS, trace, and metrics. On successful `DELETE`, `session_id_layer` performs local session and
-backend transport cleanup during this unwind.
+`virtual_host_id_layer`, CORS, `mcp_origin_layer`, trace, and metrics. On
+successful `DELETE`, `session_id_layer` performs local session and backend
+transport cleanup during this unwind.

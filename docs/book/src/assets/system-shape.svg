@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 430" role="img" aria-labelledby="title desc">
-  <title id="title">ContextForge Gateway system shape</title>
+  <title id="title">ContextForge Data Plane system shape</title>
   <desc id="desc">The ContextForge control plane writes runtime config into Redis. MCP clients call the Rust gateway dataplane. The gateway loads config, validates identity, calls backend MCP servers, receives backend responses, merges them, and returns one downstream response.</desc>
 
   <rect x="0" y="0" width="1040" height="430" rx="18" fill="#ffffff" />

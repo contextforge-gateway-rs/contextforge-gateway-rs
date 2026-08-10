@@ -24,7 +24,7 @@ compile it out. Use TCP-level checks or the exported metrics for liveness
 until a real health endpoint exists. (The reference nginx config's
 `location = /health` predates this and does not match the gateway's route.)
 
-The [`cf-integration`](https://github.com/contextforge-gateway-rs/cf-integration)
+The [`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools)
 harness runs the same split with the stock upstream control-plane stack and
 rewrites public `/servers/{id}/mcp` to `/contextforge-rs/servers/{id}/mcp`.
 
@@ -64,9 +64,11 @@ returns `400` until Redis returns.
 ## Images And Sizing
 
 - CI builds `docker/Dockerfile` (a `rust:1.96.1` builder stage) on every push
-  to `main` and pushes `ghcr.io/<owner>/contextforge-gateway-rs:<version>`,
-  where the tag is the Cargo package version. There is no `latest` tag —
-  pin the version.
+  to `main` and pushes both
+  `ghcr.io/<owner>/contextforge-data-plane:v<version>` and
+  `ghcr.io/<owner>/contextforge-data-plane:latest`, where `<version>` is the
+  Cargo package version. There is no unprefixed version tag. Pin the
+  `v`-prefixed tag for reproducible deployments; `latest` tracks `main`.
 - The reference Compose stack runs the gateway with raised limits worth
   copying to real deployments: `nofile` 65535 and TCP tuning
   (`tcp_fin_timeout=15`, widened local port range) for high connection churn.

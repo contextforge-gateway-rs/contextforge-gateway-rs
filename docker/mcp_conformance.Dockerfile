@@ -29,6 +29,6 @@ EOF
 
 WORKDIR /
 COPY --from=builder /tmp/rust-sdk/target/release/conformance-server /conformance-server
-LABEL org.opencontainers.image.source=https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
+LABEL org.opencontainers.image.source=https://github.com/contextforge-org/contextforge-data-plane
 LABEL org.opencontainers.image.description="Mcp-conformance"
 ENTRYPOINT ["/conformance-server"]

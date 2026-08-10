@@ -1,9 +1,9 @@
 #version: "3.9"          # Supported by both podman-compose and Docker Compose v2+
-name: mcp-gatewys
+name: contextforge-data-plane-local
   
 
 networks:
-  gateways-net:               # Single user-defined bridge network keeps traffic private
+  contextforge-data-plane-net: # Single user-defined bridge network keeps traffic private
     driver: bridge
 
 ###############################################################################
@@ -15,7 +15,7 @@ services:
     build:
       dockerfile: mcp_counter.Dockerfile
 
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     ports: [5555:5555]
 
     environment:
@@ -48,7 +48,7 @@ services:
     image: mcp_conformance
     build:
       dockerfile: mcp_conformance.Dockerfile
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     ports: [5556:5556]
 
     environment:
@@ -124,7 +124,7 @@ services:
       - ../assets/contextforgeCA/:/tls_config:z
     
 
-    networks: [gateways-net]
+    networks: [contextforge-data-plane-net]
     deploy:
       resources:
         limits:

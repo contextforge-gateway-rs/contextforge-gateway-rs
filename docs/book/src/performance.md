@@ -1,7 +1,7 @@
 # Performance
 
 > ⚡ **Two load paths:** `contextforge-load-test` measures the Rust dataplane
-> alone, and the [`cf-integration`](https://github.com/contextforge-gateway-rs/cf-integration)
+> alone, and the [`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools)
 > harness measures the full nginx-to-control-plane-to-dataplane stack with
 > Locust. Use the first to profile gateway changes and the second to measure
 > what users would see.

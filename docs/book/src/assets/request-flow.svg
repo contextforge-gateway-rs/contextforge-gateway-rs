@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 980" role="img" aria-labelledby="title desc">
-  <title id="title">ContextForge Gateway request flow</title>
+  <title id="title">ContextForge Data Plane request flow</title>
   <desc id="desc">A normal MCP HTTP request enters the TCP or TLS listener, passes through metrics, tracing, the contextforge nested router, CORS, virtual host extraction, claims validation, session extraction, user config lookup, a virtual host config check, and RMCP. RMCP then follows either initialize handling or authorized MCP method handling, calls backend MCP servers as needed, and returns the response through the same stack.</desc>
 
   <rect x="0" y="0" width="1500" height="980" rx="18" fill="#ffffff" />
