@@ -283,8 +283,7 @@ pub struct Config {
 }
 
 fn validate_mcp_origin(s: &str) -> Result<Origin, String> {
-    crate::layers::mcp_origin::parse_origin_str(s)
-        .ok_or_else(|| format!("invalid MCP origin: {s}"))
+    crate::layers::mcp_origin::parse_origin_str(s).ok_or_else(|| format!("invalid MCP origin: {s}"))
 }
 
 #[derive(Error, Debug)]
