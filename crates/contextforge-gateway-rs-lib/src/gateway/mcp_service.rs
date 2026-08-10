@@ -376,8 +376,12 @@ mod tests {
         let virtual_host = virtual_host_with_backends(&["backend-one"]);
         let gateway_context = GatewayRequestContext::new(&test_claims(), &test_virtual_host_id(), &virtual_host);
         let filter = SubscriptionFilter::builder().tools_list_changed().resource_subscription("memo://known").build();
-        let keys =
-            super::super::downstream_subscriptions::subscription_keys(&gateway_context, &filter, &RequestId::Number(7));
+        let keys = super::super::downstream_subscriptions::subscription_keys(
+            &gateway_context,
+            &filter,
+            &RequestId::Number(7),
+            0,
+        );
 
         assert_eq!(2, keys.len());
     }
