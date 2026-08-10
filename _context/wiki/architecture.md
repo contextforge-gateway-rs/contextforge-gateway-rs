@@ -34,6 +34,34 @@ upstream response
   -> metrics, tracing, logging → downstream response
 ```
 
+```mermaid
+flowchart TD
+    bin["binary\nCLI · logging · runtime"]
+    lib["lib\nrouting · middleware\nsessions · transports"]
+    apis["apis\nUserConfig · VirtualHost\nBackendMCPGateway"]
+    cpex["cpex\nCPEX hook factories"]
+    bin --> lib
+    lib --> apis
+    lib --> cpex
+```
+
+**Hot-path pipeline** (each stage must complete before the next):
+
+```mermaid
+flowchart TD
+    D(["downstream request"])
+    A["virtual host · JWT\nsession extract"]
+    C["user config lookup\nMCP validate"]
+    P1["request plugins\ntool_pre_invoke"]
+    B["backend MCP call\njoin_all for init/list"]
+    P2["response plugins\ntool_post_invoke"]
+    M["merge · namespace\npassthrough"]
+    T["metrics · tracing · logging"]
+    U(["downstream response"])
+    D --> A --> C --> P1 --> B --> P2 --> M --> T --> U
+```
+
+
 Order is invariant: auth/config before backend selection; request plugins before upstream; response plugins before returning.
 
 ## Module Boundaries (`contextforge-data-plane-lib`)

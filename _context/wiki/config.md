@@ -169,6 +169,45 @@ A complete local observability pipeline ships under `docker/` as overlays:
 | OTel Collector | Receives OTLP from the gateway; fans traces and metrics out. | OTLP/HTTP on `:4318`, Prometheus exposition on `:8889`. |
 | Prometheus | Scrapes the collector for browsable PromQL. | `http://localhost:9090`. |
 
+```mermaid
+flowchart LR
+    GW["Gateway\n(contextforge-data-plane)"]
+
+    subgraph Local["Local Observability Stack (docker/)"]
+        COL["OTel Collector\nOTLP/HTTP :4318\nPrometheus :8889"]
+        LF["Langfuse\n:3100\nspan viewer + trace backend"]
+        PR["Prometheus\n:9090\nPromQL browser"]
+    end
+
+    GW -->|"OTLP/HTTP traces\n(RUST_TRACE_LOG=debug required)"| COL
+    GW -->|"OTLP/HTTP metrics\n(PeriodicReader every 30s)"| COL
+    COL -->|"fan-out traces"| LF
+    COL -->|"scrape target :8889"| PR
+
+    OP(["operator"]) -->|"PromQL queries"| PR
+    OP -->|"span viewer\nlogin: admin@example.com"| LF
+```
+
+**Debugging by symptom:**
+
+```mermaid
+flowchart TD
+    SYM["Symptom"] --> S401["401 Unauthorized"]
+    SYM --> S400["400 config error"]
+    SYM --> S404["404 Server not found"]
+    SYM --> SMCP["MCP routing error"]
+    SYM --> SBACK["Backend failure"]
+    SYM --> SPLUG["Plugin problem"]
+
+    S401 --> L401["grep: claims_layer\nmissing/invalid token\nbad algorithm / no decoder key"]
+    S400 --> L400["grep: user_config_store_layer\n+ Redis content for JWT subject"]
+    S404 --> L404["grep: virtual_host_config_layer\nrequested vhost vs caller config"]
+    SMCP --> LMCP["grep: AuthorizedCallValidator::validate\nthen call_tool / read_resource / get_prompt warns"]
+    SBACK --> LBACK["grep: initialize: warns\nrouted-call warns name failing backend"]
+    SPLUG --> LPLUG["CPEX pipeline error logs\ninvalid reload marks runtime failed"]
+```
+
+
 Start:
 ```bash
 docker compose \

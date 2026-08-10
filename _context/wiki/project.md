@@ -13,6 +13,40 @@ It is paired with the external ContextForge control plane at [`IBM/mcp-context-f
 
 The dataplane must never take on control-plane concerns.
 
+```mermaid
+flowchart LR
+    C(["MCP Client\nprotocol 2026-07-28\nStreamable HTTP"])
+
+    subgraph Infra["Infrastructure"]
+        N["nginx\nTLS termination\nrouting fan-out"]
+    end
+
+    subgraph DP["ContextForge Data Plane  (this repo)"]
+        direction TB
+        MW["Middleware stack\nvirtual host · JWT · session · user config"]
+        RT["MCP Routing\nfan-out · prefix namespace\nlist merge · capability merge"]
+        PL["Plugin hooks\ncmf.tool_pre_invoke\ncmf.tool_post_invoke"]
+        MW --> RT --> PL
+    end
+
+    subgraph CP["Control Plane  (IBM/mcp-context-forge)"]
+        direction TB
+        IAM["IAM · UI\nmetrics storage"]
+        PUB["dataplane_publisher.py\nwrites UserConfig to Redis"]
+    end
+
+    R[("Redis\nUserConfig store\nMessagePack")]
+    BE["Backend MCP Servers"]
+
+    C --> N
+    N -->|"/contextforge-rs/*"| DP
+    N -->|"UI / IAM / legacy MCP / SSE"| CP
+    CP --> R
+    DP -->|"read-only UserConfig"| R
+    DP -->|"MCP calls"| BE
+```
+
+
 ## Goals and objectives
 
 - Provide a **production-grade, low-latency routing layer** between MCP clients and backend MCP servers.

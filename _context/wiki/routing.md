@@ -60,6 +60,39 @@ This is **local process state only**. Implications:
 - Gateway restart → all sessions lost → clients must re-run `initialize`.
 - Multi-runtime mode (`--single-runtime false`): each runtime thread has its own `BackendTransports` with no cross-thread affinity.
 
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant GW as Gateway (RMCP)
+    participant BT as BackendTransports<br/>(local process state)
+    participant LU as LocalUserSessionStore<br/>(LRU 50k / 1h)
+    participant BA as Backend A
+    participant BB as Backend B
+
+    C->>GW: POST initialize (Mcp-Session-Id: S)
+    GW->>BA: initialize (concurrent)
+    GW->>BB: initialize (concurrent)
+    BA-->>GW: InitializeResult
+    BB-->>GW: InitializeResult
+    GW->>BT: store RunningService keyed by sub+backend+S
+    GW->>LU: store session entry for sub+S
+    GW-->>C: merged InitializeResult
+
+    C->>GW: POST call_tool (Mcp-Session-Id: S)
+    GW->>BT: lookup sub+backend+S → Arc<RunningService>
+    BT-->>GW: RunningService handle
+    GW->>BA: call_tool (routed by name prefix)
+    BA-->>GW: ToolResult
+    GW-->>C: ToolResult
+
+    C->>GW: DELETE (Mcp-Session-Id: S)
+    GW->>GW: RMCP handles DELETE
+    GW->>LU: remove sub+S entry
+    GW->>BT: remove all sub+*+S entries
+    GW-->>C: 200 OK
+```
+
 ## Capability Merge
 
 On `initialize`, the gateway builds one downstream `InitializeResult` — not a passthrough of any one backend. The source of truth is each backend's `InitializeResult`; the gateway reads `peer_info().capabilities` from each running service and stores them with the backend transport state.
