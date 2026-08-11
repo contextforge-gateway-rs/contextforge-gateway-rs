@@ -1,0 +1,8 @@
+[book]
+title = "ContextForge Data Plane"
+description = "Architecture, configuration, operations, and development context for the Rust dataplane."
+src = "."
+
+[output.html]
+git-repository-url = "https://github.com/contextforge-org/contextforge-data-plane"
+edit-url-template = "https://github.com/contextforge-org/contextforge-data-plane/edit/main/_context/wiki/{path}"

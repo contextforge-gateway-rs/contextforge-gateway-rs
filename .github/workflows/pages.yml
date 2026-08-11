@@ -1,16 +1,16 @@
-name: Publish Book
+name: Publish Docs
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/pages.yml"
-      - "docs/book/**"
+      - "_context/wiki/**"
   push:
     branches: [main]
     paths:
       - ".github/workflows/pages.yml"
-      - "docs/book/**"
+      - "_context/wiki/**"
 
 permissions:
   contents: read
@@ -27,12 +27,12 @@ jobs:
         uses: taiki-e/install-action@v2.75.27
         with:
           tool: mdbook@0.5.3
-      - name: Build book
-        run: mdbook build docs/book
+      - name: Build docs
+        run: mdbook build _context/wiki
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs/book/book
+          path: _context/wiki/book
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
