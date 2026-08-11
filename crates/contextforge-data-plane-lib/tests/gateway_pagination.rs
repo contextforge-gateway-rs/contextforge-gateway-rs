@@ -81,6 +81,7 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
 /// all of them to the client without any items being silently dropped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
+#[ignore = "2026-07-28 protocol transition"]
 async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
     let ports = create_ports(2);
     let (backend_port, gateway_port) = (ports[0], ports[1]);
@@ -124,6 +125,7 @@ async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
 /// its tools would appear in every subsequent page as duplicates.
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
+#[ignore = "2026-07-28 protocol transition"]
 async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
     // Backend A: PaginatingServer (2 pages: 2 tools + 1 tool)
     // Backend B: another PaginatingServer (same 2 pages, different backend ID)

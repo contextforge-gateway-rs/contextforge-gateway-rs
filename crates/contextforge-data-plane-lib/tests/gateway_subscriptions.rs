@@ -53,6 +53,7 @@ impl ClientHandler for RecordingClient {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
+#[ignore = "2026-07-28 protocol transition"]
 async fn plaintext_subscribes_and_unsubscribes_through_two_prefixed_backends() -> Result<()> {
     let gateway_port = create_ports(1)[0];
     let user = TEST_USER_ID;

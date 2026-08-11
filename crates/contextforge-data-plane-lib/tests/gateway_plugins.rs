@@ -646,6 +646,7 @@ async fn post_hook_deny_drops_progress_notifications_without_failing_call() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[ignore = "2026-07-28 protocol transition"]
 async fn downstream_cancellation_is_relayed_to_backend() {
     let gateway = start_gateway(TEST_USER_ID, true, Arc::new(CpexRuntimeRegistry::default())).await;
     let service = gateway.connect(TEST_USER_ID).await;

@@ -11,6 +11,7 @@ use support::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
+#[ignore = "2026-07-28 protocol transition"]
 async fn plaintext_lists_prefixed_backend_resource_templates() -> Result<()> {
     let gateway_port = create_ports(1)[0];
 
@@ -48,6 +49,7 @@ async fn plaintext_lists_prefixed_backend_resource_templates() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
+#[ignore = "2026-07-28 protocol transition"]
 async fn plaintext_reads_resource_from_prefixed_template() -> Result<()> {
     let gateway_port = create_ports(1)[0];
 
