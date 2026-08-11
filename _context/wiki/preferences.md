@@ -16,7 +16,7 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 
 | Change type | Minimum extra validation |
 | --- | --- |
-| Docs only | Update the relevant wiki page in `_context/wiki/` |
+| Docs only | Run `mdbook build _context/wiki` and `mdbook test _context/wiki`; inspect affected headings, tables, and code blocks in the rendered output |
 | Routing or session behavior | New/updated integration tests in `crates/contextforge-data-plane-lib/tests/` against mock backends |
 | Config shape | Schema regeneration (`cargo run -p contextforge-data-plane-apis`) + control-plane compatibility check |
 | Plugin behavior | `gateway_plugins.rs` coverage for the new hook path |
