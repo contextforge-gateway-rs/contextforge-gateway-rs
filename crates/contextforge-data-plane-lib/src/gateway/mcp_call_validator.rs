@@ -139,5 +139,4 @@ impl<'a> AuthorizedCallValidator<'a> {
 
         Ok((virtual_host, claims))
     }
-
 }
