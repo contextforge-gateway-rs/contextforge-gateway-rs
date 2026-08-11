@@ -52,6 +52,13 @@ The gateway wraps per-backend cursors inside its own opaque token (JSON, treated
 
 **Known limitation:** if backend set changes between pages, removed backend's cursor is silently dropped.
 
+## Task Handles
+
+- Never expose an upstream task ID directly.
+- Encode it as `cfth1.<base64url>` with AES-256-GCM and a random nonce.
+- Bind the payload to JWT `sub`, virtual host, and backend; reject mismatches and removed backends as `invalid task ID`.
+- Handles are stateless. Replicas must share the key; key rotation invalidates outstanding handles.
+
 ## Session State (local process)
 
 Backend RMCP services are stored in `BackendTransports` keyed by:

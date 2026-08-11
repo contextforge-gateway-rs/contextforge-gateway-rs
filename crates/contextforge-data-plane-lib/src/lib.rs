@@ -14,6 +14,7 @@ mod common;
 mod const_values;
 mod gateway;
 mod layers;
+pub mod task_handle;
 mod telemetry;
 mod transports;
 
