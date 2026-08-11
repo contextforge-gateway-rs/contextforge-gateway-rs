@@ -44,6 +44,7 @@ dataplane contract.
 | If this is compromised | Impact |
 | --- | --- |
 | JWT signing key or HMAC secret | Attacker mints tokens for any subject and reaches that subject's backends. Rotate the key and restart; no revocation exists. |
+| Task-handle key | Attacker decrypts or forges upstream task routes. Rotate the key; outstanding handles become invalid. |
 | Redis write access | Attacker rewrites routing (arbitrary backend URLs receive caller traffic) and, if runtime plugins are enabled, chooses which registered hooks run on payloads. Protect Redis with TLS/mTLS and control-plane-only write access. |
 | A backend MCP server | Attacker sees requests routed to that backend and controls its responses; the namespace prefix limits blast radius to that backend's objects. |
 | The gateway process | Full compromise: it holds the decoding keys in memory and live backend sessions. |
@@ -83,4 +84,6 @@ These routes are registered **outside the authentication middleware** — unauth
 ## Secrets Handling
 
 - The HMAC secret is held as a `SecretString`; key and certificate material is read from disk paths at startup.
+- Task handles are authenticated, encrypted, and scoped to JWT `sub` + virtual host + backend. They do not replace JWT validation.
 - Never log: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig` documents, or backend credentials.
+- Treat task handles as opaque; do not log them.
