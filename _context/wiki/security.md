@@ -37,7 +37,43 @@ Authentication is bearer-JWT only:
 | Upstream | HTTPS-only by default; plain HTTP must be opted into with `--upstream-connection-mode`. mTLS client identity is supported per process. |
 | Redis | Plain, TLS, or mTLS via `--redis-mode`. Use TLS or mTLS anywhere Redis crosses a trust zone — Redis is the config trust boundary. |
 
-CORS is currently wide open (any origin, method, and header). The API is bearer-token based and cookie-free, so CSRF does not apply, but expect this to tighten as policy work lands.
+## MCP Origin and Host Validation
+
+The gateway enforces the MCP `2026-07-28` Streamable HTTP DNS-rebinding
+security requirement. `mcp_origin_layer` validates requests before JWT claims,
+session creation, virtual-host lookup, and backend fanout.
+
+### Host allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS`)
+
+The optional comma-separated allowlist contains trusted `Host` authorities,
+such as `gateway.example.com` or `gateway.example.com:8080`.
+
+- When configured, a missing, malformed, or unlisted request authority returns
+  HTTP `403` before Origin validation. The authority comes from `Host`, with an
+  absolute request URI as fallback. An entry without a port matches that host
+  on any port; an entry with a port matches only that port.
+- When omitted (the default), Host validation is disabled. Configure it with
+  the Origin allowlist for public-internet deployments.
+
+### Origin allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS`)
+
+The optional comma-separated allowlist contains fully qualified browser
+origins, such as `https://app.example.com` or `http://localhost:3000`.
+
+| Configuration | `Origin` absent | `Origin` listed | `Origin` unlisted | `null` / malformed |
+| --- | --- | --- | --- | --- |
+| Non-empty allowlist | Accepted | Accepted | HTTP `403` | HTTP `403` |
+| Omitted (default) | Accepted | HTTP `403` | HTTP `403` | HTTP `403` |
+
+An omitted Origin allowlist is not a bypass: every request carrying `Origin`
+is rejected until an allowlist is configured. There is no same-origin fallback,
+because an attacker can control both `Host` and `Origin` during DNS rebinding.
+
+Origins are validated strictly. Backslashes, userinfo (`@`), paths, queries,
+fragments, and opaque origins are rejected. Comparison uses typed origin
+equality with default-port normalization, so `https://app.example.com` equals
+`https://app.example.com:443`, while port `8443` is distinct. Configuration
+values must parse as URLs; invalid URL syntax fails CLI parsing before startup.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

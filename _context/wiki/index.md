@@ -16,8 +16,9 @@ then follow only the links that are relevant.
 | [failure-modes.md](failure-modes.md) | HTTP/MCP/routing/backend/plugin failure table — exact HTTP codes and JSON-RPC errors |
 | [config.md](config.md) | Key CLI flags, JWT claims, UserConfig shape, plugin config, telemetry debugging, startup validation, local observability stack |
 | [deployment.md](deployment.md) | Deployment checklist, health endpoint caveat, nginx routing, TLS choices, session affinity, Redis availability, image pinning |
-| [security.md](security.md) | Trust boundaries, identity/authorization model, compromise impact, transport security, secrets handling |
+| [security.md](security.md) | Trust boundaries, identity/authorization model, Origin/Host validation, transport security, secrets handling |
 | [performance.md](performance.md) | Dataplane-only load testing (Goose), full-stack Locust runs, benchmark settings, control-plane baseline |
+| [testing.md](testing.md) | Workspace checks, in-repo integration tests, full-stack harness lanes, settings, and control-plane baseline |
 
 ## Quick orientation
 
