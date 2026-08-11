@@ -4,7 +4,7 @@ mod prompts;
 mod resources;
 mod tools;
 
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 use contextforge_data_plane_apis::user_store::VirtualHost;
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
@@ -23,6 +23,8 @@ use typed_builder::TypedBuilder;
 
 use super::{DownstreamSubscriptionRegistry, backend_transports::BackendTransports, session_store::UserSessionStore};
 use crate::layers::request_context::GatewayRequestContext;
+
+const SUPPORTED_PROTOCOL_VERSIONS: &[ProtocolVersion] = &[ProtocolVersion::V_2026_07_28];
 
 #[derive(Clone, TypedBuilder)]
 #[builder(
@@ -77,6 +79,10 @@ impl<T> ServerHandler for McpService<T>
 where
     T: UserSessionStore + Send + Sync + 'static,
 {
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(SUPPORTED_PROTOCOL_VERSIONS)
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(self.capabilities.clone())
             .with_server_info(gateway_server_implementation())
