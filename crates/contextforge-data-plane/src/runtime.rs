@@ -98,13 +98,23 @@ impl Runtime {
             for i in 1..self.number_of_threads {
                 match Self::spawn_gateway_thread(format!("{}{i}", self.thread_name), gateway.clone(), None, None) {
                     Ok(handle) => handles.push(handle),
-                    Err(error) => warn!("Thread terminated at start with {error:?}"),
+                    Err(error) => warn!(
+                        component = "Runtime",
+                        operation = "spawn_gateway_thread",
+                        error = %error,
+                        "gateway thread failed to start"
+                    ),
                 }
             }
 
             for handle in handles {
                 let res = handle.join();
-                info!("Thread terminated with {res:?}");
+                info!(
+                    component = "Runtime",
+                    operation = "join_gateway_thread",
+                    succeeded = res.is_ok(),
+                    "gateway thread terminated"
+                );
             }
             Ok(())
         }
@@ -122,7 +132,12 @@ impl Runtime {
             let runtime = match builder.build_local(LocalOptions::default()) {
                 Ok(runtime) => runtime,
                 Err(error) => {
-                    warn!("Can't build thread {error:?}");
+                    warn!(
+                        component = "Runtime",
+                        operation = "build_gateway_thread",
+                        error = %error,
+                        "gateway runtime could not be built"
+                    );
                     return Err::<(), contextforge_data_plane_lib::Error>(error.into());
                 },
             };
@@ -154,16 +169,25 @@ impl Runtime {
         };
         match cpex_runtime.initialize().await {
             Ok(Some(handle)) => {
-                debug!("CPEX Plugins initialization successful");
+                debug!(component = "Plugins", operation = "initialize", "runtime plugins initialized");
                 Ok(Some(handle))
             },
             Ok(None) => {
-                debug!("CPEX Plugins initialization skipped");
+                debug!(component = "Plugins", operation = "initialize", "runtime plugin initialization skipped");
                 Ok(None)
             },
-            Err(e) => {
-                error!("CPEX Plugins initialization failed {e:?}");
-                Err(e)
+            Err(error) => {
+                error!(
+                    component = "Plugins",
+                    operation = "initialize",
+                    error_code = "CFDP-PLUGIN-INIT",
+                    root_cause = %error,
+                    impact_scope = "service-startup",
+                    retryable = false,
+                    error = ?error,
+                    "runtime plugin initialization failed"
+                );
+                Err(error)
             },
         }
     }
@@ -171,9 +195,19 @@ impl Runtime {
     async fn run_gateway(gateway: Gateway) -> contextforge_data_plane_lib::Result<()> {
         let res = gateway.run_gateway().await;
         if res.is_ok() {
-            debug!("Gateway process terminated");
+            debug!(component = "Gateway", operation = "run", "gateway process terminated");
         } else {
-            error!("Gateway process terminated {res:?}");
+            let error = res.as_ref().expect_err("checked error result");
+            error!(
+                component = "Gateway",
+                operation = "run",
+                error_code = "CFDP-GATEWAY-TERMINATED",
+                root_cause = %error,
+                impact_scope = "service-wide",
+                retryable = true,
+                error = ?error,
+                "gateway process terminated unexpectedly"
+            );
         }
         Ok(())
     }

@@ -110,9 +110,23 @@ fn log_backend_response<T, E: std::fmt::Debug>(
     item_count: impl Fn(&T) -> usize,
 ) {
     match response {
-        Some(Ok(response)) => info!("{kind}: backend {name} completed ({} items)", item_count(response)),
-        Some(Err(error)) => warn!("{kind}: backend {name} {error:?}"),
-        None => info!("{kind}: backend {name} unavailable"),
+        Some(Ok(response)) => info!(
+            component = "Routing",
+            operation = kind,
+            backend_name = name,
+            item_count = item_count(response),
+            "backend list request completed"
+        ),
+        Some(Err(error)) => warn!(
+            component = "Routing",
+            operation = kind,
+            backend_name = name,
+            error = ?error,
+            "backend list request failed"
+        ),
+        None => {
+            info!(component = "Routing", operation = kind, backend_name = name, "backend unavailable for list request");
+        },
     }
 }
 

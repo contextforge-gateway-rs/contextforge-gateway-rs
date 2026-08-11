@@ -12,7 +12,7 @@ use redis::{
     cmd,
 };
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::{debug, error};
 
 use super::{ConfigStoreError, UserConfigStore};
 use crate::{
@@ -54,7 +54,17 @@ impl RedisUserConfigStore {
                 )
                 .await
                 .map_err(|error| {
-                    warn!("RedisUserConfigStore::new - failed to create Redis user config connection error = {error}");
+                    tracing::error!(
+                        component = "UserConfig",
+                        operation = "connect",
+                        dependency = "redis",
+                        error_code = "CFDP-USER-CONFIG-CONNECT",
+                        root_cause = %error,
+                        impact_scope = "service-startup",
+                        retryable = true,
+                        error = %error,
+                        "user config store connection failed"
+                    );
                     ConfigStoreError::InvalidConnection
                 })?,
             cache: (!cache_expiry.is_zero()).then(|| {
@@ -75,19 +85,41 @@ impl UserConfigStore for RedisUserConfigStore {
                 if entry.is_fresh(self.cache_expiry) {
                     let virtual_hosts = entry.config.virtual_hosts.len();
                     debug!(
-                        "RedisUserConfigStore::get_config - user config cache hit subject = {subject} virtual_hosts = {virtual_hosts}"
+                        component = "UserConfig",
+                        operation = "cache_get",
+                        cache_result = "hit",
+                        virtual_hosts,
+                        "user config cache lookup completed"
                     );
                     return Ok(entry.config.clone());
                 }
 
-                debug!("RedisUserConfigStore::get_config - user config cache entry expired subject = {subject}");
+                debug!(
+                    component = "UserConfig",
+                    operation = "cache_get",
+                    cache_result = "expired",
+                    "user config cache lookup completed"
+                );
             } else {
-                debug!("RedisUserConfigStore::get_config - user config cache miss subject = {subject}");
+                debug!(
+                    component = "UserConfig",
+                    operation = "cache_get",
+                    cache_result = "miss",
+                    "user config cache lookup completed"
+                );
             }
         }
 
         let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
-            warn!("RedisUserConfigStore::get_config - failed to encode Redis user config key subject = {subject}");
+            error!(
+                component = "UserConfig",
+                operation = "encode_key",
+                error_code = "CFDP-USER-CONFIG-ENCODE",
+                root_cause = "user config key serialization failed",
+                impact_scope = "request",
+                retryable = false,
+                "user config key encoding failed"
+            );
             return Err(ConfigStoreError::DataEncoding);
         };
 
@@ -99,17 +131,29 @@ impl UserConfigStore for RedisUserConfigStore {
             Ok(Some(user_config)) => {
                 let bytes = user_config.len();
                 debug!(
-                    "RedisUserConfigStore::get_config - loaded user config blob from Redis subject = {subject} bytes = {bytes}"
+                    component = "UserConfig",
+                    operation = "read",
+                    dependency = "redis",
+                    bytes,
+                    "user config blob loaded"
                 );
                 user_config
             },
             Ok(None) => {
-                debug!("RedisUserConfigStore::get_config - no user config found in Redis subject = {subject}");
+                debug!(component = "UserConfig", operation = "read", dependency = "redis", "user config was not found");
                 return Err(ConfigStoreError::NoDataForKey);
             },
             Err(error) => {
-                warn!(
-                    "RedisUserConfigStore::get_config - failed to load user config from Redis subject = {subject} error = {error}"
+                error!(
+                    component = "UserConfig",
+                    operation = "read",
+                    dependency = "redis",
+                    error_code = "CFDP-USER-CONFIG-READ",
+                    root_cause = %error,
+                    impact_scope = "request",
+                    retryable = true,
+                    error = %error,
+                    "user config store read failed"
                 );
                 return Err(ConfigStoreError::NoDataForKey);
             },
@@ -118,17 +162,22 @@ impl UserConfigStore for RedisUserConfigStore {
         let user_config = match rmp_serde::decode::from_slice::<UserConfig>(&user_config) {
             Ok(user_config) => user_config,
             Err(error) => {
-                warn!(
-                    "RedisUserConfigStore::get_config - failed to decode Redis user config blob subject = {subject} error = {error}"
+                error!(
+                    component = "UserConfig",
+                    operation = "decode",
+                    error_code = "CFDP-USER-CONFIG-DECODE",
+                    root_cause = %error,
+                    impact_scope = "request",
+                    retryable = false,
+                    error = %error,
+                    "user config blob decoding failed"
                 );
                 return Err(ConfigStoreError::DataWrongFormat);
             },
         };
 
         let virtual_hosts = user_config.virtual_hosts.len();
-        debug!(
-            "RedisUserConfigStore::get_config - decoded user config subject = {subject} virtual_hosts = {virtual_hosts}"
-        );
+        debug!(component = "UserConfig", operation = "decode", virtual_hosts, "user config decoded");
 
         if let Some(cache) = &self.cache {
             cache.lock().await.insert(subject.to_owned(), CachedUserConfig::new(user_config.clone()));
@@ -140,14 +189,29 @@ impl UserConfigStore for RedisUserConfigStore {
         let subject = user_key.key();
 
         let Ok(key) = rmp_serde::encode::to_vec::<User>(user_key) else {
-            warn!("RedisUserConfigStore::set_config - failed to encode Redis user config key subject = {subject}");
+            error!(
+                component = "UserConfig",
+                operation = "encode_key",
+                error_code = "CFDP-USER-CONFIG-ENCODE",
+                root_cause = "user config key serialization failed",
+                impact_scope = "request",
+                retryable = false,
+                "user config key encoding failed"
+            );
             return Err(ConfigStoreError::DataEncoding);
         };
 
         let Ok(encoded) = rmp_serde::encode::to_vec::<UserConfig>(config) else {
             let virtual_hosts = config.virtual_hosts.len();
-            warn!(
-                "RedisUserConfigStore::set_config - failed to encode user config subject = {subject} virtual_hosts = {virtual_hosts}"
+            error!(
+                component = "UserConfig",
+                operation = "encode",
+                virtual_hosts,
+                error_code = "CFDP-USER-CONFIG-ENCODE",
+                root_cause = "user config serialization failed",
+                impact_scope = "request",
+                retryable = false,
+                "user config encoding failed"
             );
             return Err(ConfigStoreError::DataEncoding);
         };
@@ -159,7 +223,12 @@ impl UserConfigStore for RedisUserConfigStore {
                 let bytes = encoded.len();
                 let virtual_hosts = config.virtual_hosts.len();
                 debug!(
-                    "RedisUserConfigStore::set_config - wrote user config to Redis subject = {subject} bytes = {bytes} virtual_hosts = {virtual_hosts}"
+                    component = "UserConfig",
+                    operation = "write",
+                    dependency = "redis",
+                    bytes,
+                    virtual_hosts,
+                    "user config written"
                 );
                 if let Some(cache) = &self.cache {
                     cache.lock().await.insert(subject.to_owned(), CachedUserConfig::new(config.clone()));
@@ -167,8 +236,16 @@ impl UserConfigStore for RedisUserConfigStore {
                 Ok(())
             },
             Err(error) => {
-                warn!(
-                    "RedisUserConfigStore::set_config - failed to write user config to Redis subject = {subject} error = {error}"
+                error!(
+                    component = "UserConfig",
+                    operation = "write",
+                    dependency = "redis",
+                    error_code = "CFDP-USER-CONFIG-WRITE",
+                    root_cause = %error,
+                    impact_scope = "request",
+                    retryable = true,
+                    error = %error,
+                    "user config store write failed"
                 );
                 Err(ConfigStoreError::CantWriteData)
             },

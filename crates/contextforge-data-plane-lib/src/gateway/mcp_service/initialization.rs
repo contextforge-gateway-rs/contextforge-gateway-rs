@@ -65,44 +65,56 @@ where
             let backend_url = backend.url.clone();
             let backend_cfg = backend.clone();
             let downstream_headers = downstream_headers.clone();
-            let downstream_session_id = downstream_session_id.clone();
 
             Box::pin(async move {
                 let mut headers = HashMap::new();
                 if let Some(host) = backend_url.host_str()
                     && backend_url.scheme() == "https"
                 {
-                    let host = if let Some(port) = backend_url.port() {
-                        format!("{host}:{port}")
-                    } else {
-                        host.to_owned()
-                    };
+                    let host =
+                        if let Some(port) = backend_url.port() { format!("{host}:{port}") } else { host.to_owned() };
 
                     if let Ok(value) = http::HeaderValue::from_str(&host) {
                         headers.insert(http::header::HOST, value);
                     } else {
-                        warn!("Really can't set the host header for {:?}", backend_url.host_str());
+                        warn!(
+                            component = "Routing",
+                            operation = "initialize_backend",
+                            backend_name = name,
+                            "backend Host header could not be constructed"
+                        );
                     }
                 }
 
                 apply_header_config(&mut headers, &backend_cfg, downstream_headers.as_ref());
 
-                // Propagate the active W3C trace context to the backend so the
-                // gateway span links to the downstream MCP server's spans.
+                // Propagate request correlation and W3C trace context to the
+                // backend so logs and spans remain linked across services.
                 crate::telemetry::inject_current_context(&mut headers);
 
                 let config =
                     StreamableHttpClientTransportConfig::with_uri(backend_url.to_string()).custom_headers(headers);
                 let transport = StreamableHttpClientTransport::with_client(client, config);
-                let maybe_running_service = backend_client.serve(transport).await;
-                if let Ok(running_service) = maybe_running_service {
-                    info!("initialize: intialized for {downstream_session_id:?} {name:?}");
-                    (name, Some(running_service))
-                } else {
-                    warn!(
-                        "initialize: Unable to initialize for {downstream_session_id:?} {name:?} {maybe_running_service:?}",
-                    );
-                    (name, None)
+                match backend_client.serve(transport).await {
+                    Ok(running_service) => {
+                        info!(
+                            component = "Routing",
+                            operation = "initialize_backend",
+                            backend_name = name,
+                            "backend initialized"
+                        );
+                        (name, Some(running_service))
+                    },
+                    Err(error) => {
+                        warn!(
+                            component = "Routing",
+                            operation = "initialize_backend",
+                            backend_name = name,
+                            error = ?error,
+                            "backend initialization failed"
+                        );
+                        (name, None)
+                    },
                 }
             })
         })
@@ -115,7 +127,11 @@ where
         .into_iter()
         .map(|(name, running_service): (_, _)| {
             info!(
-                "initialize: Adding transport: session_id {downstream_session_id:#?} backend {name} {running_service:?}"
+                component = "Routing",
+                operation = "register_backend_transport",
+                backend_name = name,
+                backend_connected = running_service.is_some(),
+                "backend transport registered"
             );
 
             let server_capabilities = running_service

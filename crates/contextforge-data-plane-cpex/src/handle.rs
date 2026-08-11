@@ -118,7 +118,12 @@ impl CpexRuntimeRegistry {
                         match result {
                             Ok(()) => last_applied_config = Some(fingerprint),
                             Err(error) => {
-                                tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
+                                tracing::warn!(
+                                    component = "Plugins",
+                                    operation = "reload_config",
+                                    error = %error,
+                                    "runtime plugin config reload failed"
+                                );
                                 set_runtime_failed(&runtime, &error);
                                 last_applied_config = None;
                             },
@@ -126,12 +131,22 @@ impl CpexRuntimeRegistry {
                     },
                     Ok(None) => {
                         let error = GatewayPluginRuntimeError::ConfigMissing;
-                        tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
+                        tracing::warn!(
+                            component = "Plugins",
+                            operation = "reload_config",
+                            error = %error,
+                            "runtime plugin config is missing"
+                        );
                         set_runtime_failed(&runtime, &error);
                         last_applied_config = None;
                     },
                     Err(error) => {
-                        tracing::warn!(%error, "failed to load CPEX runtime plugin config");
+                        tracing::warn!(
+                            component = "Plugins",
+                            operation = "load_config",
+                            error = %error,
+                            "runtime plugin config load failed"
+                        );
                         set_runtime_failed(&runtime, &error);
                         last_applied_config = None;
                     },
@@ -292,7 +307,12 @@ impl GatewayPluginRuntimeHandle {
 
 fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
     if let RuntimeState::Failed(error) = state {
-        tracing::warn!(%error, "rejecting tool call because CPEX runtime is failed");
+        tracing::warn!(
+            component = "Plugins",
+            operation = "tool_call",
+            error = %error,
+            "tool call rejected because the runtime plugin is unavailable"
+        );
     }
     ErrorData { code: ErrorCode::INTERNAL_ERROR, message: "Runtime plugin reload failed".into(), data: None }
 }

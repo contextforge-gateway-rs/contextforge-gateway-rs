@@ -31,7 +31,15 @@ impl<'a> AuthorizedCallValidator<'a> {
         let has_claims = maybe_claims.is_some();
         let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", |id| id.value().as_str());
         debug!(
-            "AuthorizedCallValidator::validate - mcp call validation call_name = {call_name} has_user_config = {has_user_config} virtual_hosts = {virtual_hosts} has_session_id = {has_session_id} has_claims = {has_claims} virtual_host_id = {virtual_host_id}"
+            component = "Authorization",
+            operation = "validate_call",
+            call_name,
+            has_user_config,
+            virtual_hosts,
+            has_session_id,
+            has_claims,
+            virtual_host_id,
+            "validated MCP call context"
         );
 
         let Some(session_id) = maybe_session_id else {
@@ -63,7 +71,12 @@ impl<'a> AuthorizedCallValidator<'a> {
             let virtual_host_id = virtual_host_id.value();
             let virtual_hosts = user_config.virtual_hosts.len();
             debug!(
-                "AuthorizedCallValidator::validate - mcp virtual host config missing call_name = {call_name} virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
+                component = "Authorization",
+                operation = "validate_call",
+                call_name,
+                virtual_host_id,
+                virtual_hosts,
+                "virtual host config is missing"
             );
             return Err(ErrorData {
                 code: ErrorCode::RESOURCE_NOT_FOUND,
@@ -106,7 +119,15 @@ impl<'a> InitializeCallValidator<'a> {
         let has_claims = maybe_claims.is_some();
         let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", |id| id.value().as_str());
         debug!(
-            "InitializeCallValidator::validate - mcp call validation call_name = {call_name} has_user_config = {has_user_config} virtual_hosts = {virtual_hosts} has_session_id = {has_session_id} has_claims = {has_claims} virtual_host_id = {virtual_host_id}"
+            component = "Authorization",
+            operation = "validate_initialize",
+            call_name,
+            has_user_config,
+            virtual_hosts,
+            has_session_id,
+            has_claims,
+            virtual_host_id,
+            "validated MCP initialize context"
         );
 
         let Some(user_config) = maybe_user_config else {
@@ -130,7 +151,12 @@ impl<'a> InitializeCallValidator<'a> {
             let virtual_host_id = virtual_host_id.value();
             let virtual_hosts = user_config.virtual_hosts.len();
             debug!(
-                "InitializeCallValidator::validate - mcp virtual host config missing call_name = {call_name} virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
+                component = "Authorization",
+                operation = "validate_initialize",
+                call_name,
+                virtual_host_id,
+                virtual_hosts,
+                "virtual host config is missing"
             );
             return Err(ErrorData {
                 code: ErrorCode::RESOURCE_NOT_FOUND,

@@ -79,4 +79,7 @@ These routes are registered **outside the authentication middleware** — unauth
 ## Secrets Handling
 
 - The HMAC secret is held as a `SecretString`; key and certificate material is read from disk paths at startup.
-- Never log: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig` documents, or backend credentials.
+- Never log: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig` documents, backend
+  credentials, raw user subjects, session IDs, resource URIs, or progress tokens.
+- Use generated or caller-supplied transaction/correlation IDs to join request events. Keep `user_id` null unless a
+  future privacy-reviewed pseudonymous identifier is explicitly introduced.

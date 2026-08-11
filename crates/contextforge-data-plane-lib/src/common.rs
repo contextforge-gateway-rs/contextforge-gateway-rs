@@ -178,7 +178,7 @@ pub struct Config {
     pub otlp_headers: Option<String>,
 
     /// Overrides the `service.name` OpenTelemetry resource attribute.
-    /// Defaults to `CONTEXTFORGE-DATA-PLANE`.
+    /// Defaults to `contextforge-data-plane`.
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_OTEL_SERVICE_NAME")]
     pub otlp_service_name: Option<String>,
 
@@ -257,6 +257,14 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_LOG_ROTATION")]
     pub log_rotation: Option<LogRotation>,
+
+    /// Deployment environment included in every structured log event.
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_ENVIRONMENT")]
+    pub environment: Option<String>,
+
+    /// Cluster identifier included in every structured log event.
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_CLUSTER_ID")]
+    pub cluster_id: Option<String>,
 
     #[arg(
         long,

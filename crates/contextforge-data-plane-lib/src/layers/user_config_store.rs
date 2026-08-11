@@ -2,7 +2,7 @@ use axum::{body::Body, extract::State, middleware::Next, response::Response};
 use contextforge_data_plane_apis::User;
 use http::{StatusCode, header};
 //use openid::Claims;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     common::{ContextForgeClaims, ContextForgeDataPlaneAppState},
@@ -20,21 +20,27 @@ pub async fn user_config_store_layer(
     if let Some(claims) = maybe_claims {
         let subject = claims.sub.clone();
         debug!(
-            "user_config_store_layer - getting user config for request subject = {subject} method = {method} path = {path}"
+            component = "UserConfig",
+            operation = "load",
+            method = %method,
+            path,
+            "loading user config"
         );
         match state.config_store.get_config(&User::new(&subject)).await {
             Ok(user_config) => {
                 let virtual_hosts = user_config.virtual_hosts.len();
-                info!(
-                    "user_config_store_layer - loaded user config subject = {subject} virtual_hosts = {virtual_hosts}"
-                );
+                info!(component = "UserConfig", operation = "load", virtual_hosts, "user config loaded");
                 request.extensions_mut().insert(user_config);
                 next.run(request).await
             },
 
             Err(ConfigStoreError::NoDataForKey) => {
                 debug!(
-                    "user_config_store_layer - user config lookup returned no data subject = {subject} method = {method} path = {path}"
+                    component = "UserConfig",
+                    operation = "load",
+                    method = %method,
+                    path,
+                    "user config was not found"
                 );
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -44,8 +50,18 @@ pub async fn user_config_store_layer(
             },
 
             Err(error) => {
-                debug!(
-                    "user_config_store_layer - user config lookup failed subject = {subject} method = {method} path = {path} error = {error}"
+                error!(
+                    component = "UserConfig",
+                    operation = "load",
+                    method = %method,
+                    path,
+                    error_code = "CFDP-USER-CONFIG-LOAD",
+                    root_cause = %error,
+                    impact_scope = "request",
+                    retryable = true,
+                    http_status = 500_u16,
+                    error = %error,
+                    "user config lookup failed"
                 );
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -55,7 +71,13 @@ pub async fn user_config_store_layer(
             },
         }
     } else {
-        warn!("user_config_store_layer - no claims found in request extensions method = {method} path = {path}");
+        warn!(
+            component = "Authorization",
+            operation = "load_user_config",
+            method = %method,
+            path,
+            "request has no authorization claims"
+        );
         Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "text/plain")

@@ -3,7 +3,7 @@ mod runtime;
 #[cfg(feature = "test-plugins")]
 mod test_plugins;
 
-use std::sync::Arc;
+use std::{process::ExitCode, sync::Arc};
 
 use clap::Parser;
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
@@ -15,13 +15,49 @@ use tracing::info;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> ExitCode {
     let provider = crypto::ring::default_provider();
     _ = provider.install_default();
 
     let config = Config::parse();
-    let _guard = logging::init_tracing_logging(&config)?;
+    let _guard = match logging::init_tracing_logging(&config) {
+        Ok(guard) => guard,
+        Err(error) => {
+            logging::emit_bootstrap_failure(&config, error.as_ref());
+            return ExitCode::FAILURE;
+        },
+    };
+
+    match run(config) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(
+                fatal = true,
+                component = "Bootstrap",
+                operation = "startup",
+                error = %error,
+                error_code = "CFDP-BOOTSTRAP",
+                root_cause = %error,
+                impact_scope = "service-wide",
+                retryable = false,
+                "service startup failed"
+            );
+            ExitCode::FAILURE
+        },
+    }
+}
+
+fn run(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let feature_flags =
+        [cfg!(feature = "plugins").then_some("plugins"), cfg!(feature = "test-plugins").then_some("test-plugins")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(",");
+    let feature_flags = if feature_flags.is_empty() { "none" } else { &feature_flags };
     info!(
+        component = "Bootstrap",
+        operation = "startup",
         address = ?config.address,
         tls_address = ?config.tls_address,
         redis_mode = ?config.redis_mode,
@@ -31,6 +67,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         otel_metrics_enabled = config.enable_otel_metrics.unwrap_or(false),
         single_runtime = config.single_runtime.unwrap_or(true),
         configured_cpus = ?config.number_of_cpus,
+        git_commit_sha = option_env!("GIT_COMMIT_SHA").unwrap_or("unknown"),
+        build_timestamp = option_env!("BUILD_TIMESTAMP").unwrap_or("unknown"),
+        config_profile = config.environment.as_deref().unwrap_or("unknown"),
+        feature_flags,
+        db_version = "not_applicable",
+        external_dependencies_reachable = "not_checked",
         "starting contextforge-data-plane"
     );
 

@@ -17,7 +17,11 @@ pub async fn virtual_host_config_layer(request: http::Request<axum::body::Body>,
         let virtual_host_id = virtual_host_id.value();
         let virtual_hosts = user_config.virtual_hosts.len();
         debug!(
-            "virtual_host_config_layer - virtual host config missing virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
+            component = "Routing",
+            operation = "load_virtual_host_config",
+            virtual_host_id,
+            virtual_hosts,
+            "virtual host config is missing"
         );
         return server_not_found_response();
     }

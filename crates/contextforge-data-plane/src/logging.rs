@@ -1,5 +1,8 @@
+mod formatter;
+
 use std::collections::HashMap;
 
+use chrono::{SecondsFormat, Utc};
 use contextforge_data_plane_lib::{Config, LogRotation, OtlpProtocol};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
@@ -8,12 +11,9 @@ use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler};
 use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{
-    Layer, Registry, filter,
-    fmt::{self, format::FmtSpan},
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-};
+use tracing_subscriber::{Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+
+use formatter::{LoggingMetadata, StructuredJsonFormatter};
 
 /// Holds RAII handles whose lifetime must match the process so background
 /// telemetry tasks keep running. The file appender's worker thread needs
@@ -24,9 +24,20 @@ use tracing_subscriber::{
 pub struct Guard {
     appender: WorkerGuard,
     meter_provider: Option<SdkMeterProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 }
 
-const CONTROLLER_NAME: &str = "CONTEXTFORGE-DATA-PLANE";
+impl Drop for Guard {
+    fn drop(&mut self) {
+        if let Some(provider) = self.meter_provider.take() {
+            let _ = provider.shutdown();
+        }
+        if let Some(provider) = self.tracer_provider.take() {
+            let _ = provider.shutdown();
+        }
+    }
+}
+
 const DEFAULT_GRPC_TRACES_ENDPOINT: &str = "http://127.0.0.1:4317";
 const DEFAULT_GRPC_METRICS_ENDPOINT: &str = "http://127.0.0.1:4317";
 const DEFAULT_HTTP_TRACES_ENDPOINT: &str = "http://127.0.0.1:4318/v1/traces";
@@ -35,6 +46,7 @@ const METRICS_EXPORT_INTERVAL: std::time::Duration = std::time::Duration::from_s
 
 pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std::error::Error + Send + Sync>> {
     let registry = Registry::default();
+    let metadata = LoggingMetadata::from_config(configuration);
 
     let log_name = configuration.log_name.clone().unwrap_or("contextforge-data-plane.log".to_owned());
 
@@ -47,31 +59,28 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
 
     let (non_blocking_appender, guard) = tracing_appender::non_blocking(file_appender);
     let file_filter =
-        tracing_subscriber::EnvFilter::new(std::env::var("RUST_FILE_LOG").unwrap_or_else(|_| "debug".to_owned()));
+        tracing_subscriber::EnvFilter::new(std::env::var("RUST_FILE_LOG").unwrap_or_else(|_| "info".to_owned()));
     let console_filter =
-        tracing_subscriber::EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_owned()));
+        tracing_subscriber::EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned()));
     let tracing_filter =
         tracing_subscriber::EnvFilter::new(std::env::var("RUST_TRACE_LOG").unwrap_or_else(|_| "info".to_owned()));
 
     let console_layer = fmt::layer()
-        .event_format(fmt::format().compact())
-        .with_target(true)
-        .with_span_events(FmtSpan::NONE)
+        .event_format(StructuredJsonFormatter::new(metadata.clone()))
+        .fmt_fields(fmt::format::JsonFields::new())
         .with_ansi(false)
-        .with_filter(filter::filter_fn(|meta| !meta.is_span()))
         .with_filter(console_filter);
 
     let file_layer = fmt::layer()
         .with_writer(non_blocking_appender)
-        .with_target(true)
-        .with_span_events(FmtSpan::NONE)
+        .event_format(StructuredJsonFormatter::new(metadata.clone()))
+        .fmt_fields(fmt::format::JsonFields::new())
         .with_ansi(false)
-        .with_filter(filter::filter_fn(|meta| !meta.is_span()))
         .with_filter(file_filter);
 
     if let Some(true) = configuration.enable_open_telemetry {
         let protocol = configuration.otlp_protocol.clone().unwrap_or_default();
-        let service_name = configuration.otlp_service_name.clone().unwrap_or_else(|| CONTROLLER_NAME.to_owned());
+        let service_name = metadata.service_name().to_owned();
         let headers = parse_otlp_headers(configuration.otlp_headers.as_deref())?;
 
         let exporter = match protocol {
@@ -119,18 +128,45 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
         // outbound requests carry it. Without this, inject/extract are no-ops.
         global::set_text_map_propagator(opentelemetry_sdk::propagation::TraceContextPropagator::new());
 
-        let tracer = tracer_provider.tracer(CONTROLLER_NAME);
+        let tracer = tracer_provider.tracer(service_name.clone());
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
         let meter_provider = init_meter_provider(configuration, &service_name)?;
 
         registry.with(console_layer).with(file_layer).with(telemetry.with_filter(tracing_filter)).init();
 
-        Ok(Guard { appender: guard, meter_provider })
+        Ok(Guard { appender: guard, meter_provider, tracer_provider: Some(tracer_provider) })
     } else {
         registry.with(console_layer).with(file_layer).init();
-        Ok(Guard { appender: guard, meter_provider: None })
+        Ok(Guard { appender: guard, meter_provider: None, tracer_provider: None })
     }
+}
+
+#[allow(clippy::print_stderr)]
+pub fn emit_bootstrap_failure(configuration: &Config, error: &dyn std::fmt::Display) {
+    let metadata = LoggingMetadata::from_config(configuration);
+    let event = serde_json::json!({
+        "timestamp": Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
+        "service_name": metadata.service_name(),
+        "version": metadata.version(),
+        "environment": metadata.environment(),
+        "cluster_id": metadata.cluster_id(),
+        "transaction_id": serde_json::Value::Null,
+        "correlation_id": serde_json::Value::Null,
+        "trace_id": serde_json::Value::Null,
+        "span_id": serde_json::Value::Null,
+        "user_id": serde_json::Value::Null,
+        "log_level": "FATAL",
+        "error_code": "CFDP-BOOTSTRAP",
+        "message": "logging initialization failed",
+        "component": "Bootstrap",
+        "root_cause": error.to_string(),
+        "impact_scope": "service-wide",
+        "retryable": false,
+        "http_status": serde_json::Value::Null,
+        "stack_trace": serde_json::Value::Null,
+    });
+    eprintln!("{event}");
 }
 
 /// Builds an OTLP metrics pipeline and installs it as the process-wide

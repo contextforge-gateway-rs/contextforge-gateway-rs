@@ -40,7 +40,6 @@ impl<'a> SessionManager<'a> {
 
     // pub async fn return_transports(&self, backend_transports: impl Iterator<Item = ServiceHolder>) {
     //     let backend_transports = backend_transports.collect::<Vec<_>>();
-    //     info!("Returning transports {:?} {backend_transports:?}", self.session_id);
     //     let mut transports = self.transports.inner().lock().await;
     //     for svc_holder in backend_transports {
     //         transports
@@ -51,11 +50,23 @@ impl<'a> SessionManager<'a> {
 
     pub async fn cleanup_backends(&self, reason: &'static str) {
         let names: Vec<_> = self.virtual_host.backends.keys().cloned().collect();
-        info!("Cleaning up backends {:?}", self.session_id);
+        info!(
+            component = "Session",
+            operation = "cleanup_backends",
+            backend_count = names.len(),
+            reason,
+            "cleaning up backend transports"
+        );
         let mut transports = self.transports.inner().lock().await;
         for name in names {
             let key = BackendTransportKey::from((&name, self.session_id, self.principal));
-            debug!("session_manager: removing transport for {key:?} {reason}");
+            debug!(
+                component = "Session",
+                operation = "cleanup_backend",
+                backend_name = name,
+                reason,
+                "removing backend transport"
+            );
             transports.remove(&key);
         }
     }

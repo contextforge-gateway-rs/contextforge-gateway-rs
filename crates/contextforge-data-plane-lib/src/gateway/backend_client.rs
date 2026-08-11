@@ -63,7 +63,14 @@ impl GatewayBackendClient {
         downstream: Peer<RoleServer>,
         post_state: Option<RuntimeHookState>,
     ) -> Result<RequestHandle<RoleClient>, ServiceError> {
-        debug!("track_tool_call {tool_name} {downstream_progress_token:?} {post_state:?}");
+        debug!(
+            component = "Routing",
+            operation = "track_tool_call",
+            tool_name,
+            has_progress_token = downstream_progress_token.is_some(),
+            has_post_hook_state = post_state.is_some(),
+            "tracking backend tool call"
+        );
         let Some(downstream_progress_token) = downstream_progress_token else {
             return start_backend_tool_call(peer, request).await;
         };
@@ -80,7 +87,7 @@ impl GatewayBackendClient {
     }
 
     pub(crate) async fn stop_tracking_tool_call(&self, backend_progress_token: &ProgressToken) {
-        debug!("stop_tracking_tool_call {backend_progress_token:?}");
+        debug!(component = "Routing", operation = "stop_tracking_tool_call", "stopped tracking backend tool call");
         let mut calls = self.in_flight_calls.write().await;
         calls.remove(backend_progress_token);
     }
@@ -91,13 +98,23 @@ impl GatewayBackendClient {
     }
 
     pub(crate) async fn track_resource_subscription(&self, resource_uri: &str, downstream: Peer<RoleServer>) {
-        debug!("track_resource_subscription backend {} uri {resource_uri}", self.backend_name);
+        debug!(
+            component = "Routing",
+            operation = "track_resource_subscription",
+            backend_name = self.backend_name,
+            "tracking backend resource subscription"
+        );
         let mut subscriptions = self.resource_subscriptions.lock().await;
         subscriptions.insert(resource_uri.to_owned(), downstream);
     }
 
     pub(crate) async fn stop_tracking_resource_subscription(&self, resource_uri: &str) {
-        debug!("stop_tracking_resource_subscription backend {} uri {resource_uri}", self.backend_name);
+        debug!(
+            component = "Routing",
+            operation = "stop_tracking_resource_subscription",
+            backend_name = self.backend_name,
+            "stopped tracking backend resource subscription"
+        );
         let mut subscriptions = self.resource_subscriptions.lock().await;
         subscriptions.remove(resource_uri);
     }
@@ -117,7 +134,12 @@ impl GatewayBackendClient {
         match plugin_runtime.after_stream_event(&call.tool_name, event, call.post_state.clone()).await {
             Ok(event) => event,
             Err(error) => {
-                warn!("call_tool: plugin rejected backend notification: {error:?}");
+                warn!(
+                    component = "Plugins",
+                    operation = "filter_backend_notification",
+                    error = ?error,
+                    "runtime plugin rejected backend notification"
+                );
                 None
             },
         }
@@ -140,18 +162,24 @@ impl ClientHandler for GatewayBackendClient {
     async fn on_progress(&self, mut progress: ProgressNotificationParam, _context: NotificationContext<RoleClient>) {
         let Some(call) = self.progress_call(&progress.progress_token).await else {
             debug!(
-                "call_tool: dropping backend progress notification with unknown token {:?}",
-                progress.progress_token
+                component = "Routing",
+                operation = "forward_progress",
+                "backend progress notification dropped because its token is unknown"
             );
             return;
         };
         progress.progress_token.clone_from(&call.downstream_progress_token);
-        debug!("Processing Progress Notification {progress:?} {call:?}");
+        debug!(component = "Routing", operation = "forward_progress", "processing backend progress notification");
         let Some(progress) = self.stream_event_post_hook(&call, progress).await else {
             return;
         };
         if let Err(error) = call.downstream.notify_progress(progress).await {
-            warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
+            warn!(
+                component = "Routing",
+                operation = "forward_progress",
+                error = ?error,
+                "backend progress notification could not be forwarded"
+            );
         }
     }
 
@@ -161,13 +189,24 @@ impl ClientHandler for GatewayBackendClient {
         _context: NotificationContext<RoleClient>,
     ) {
         let Some(downstream) = self.resource_subscription(&params.uri).await else {
-            debug!("resource_updated: dropping backend notification for unsubscribed uri {}", params.uri);
+            debug!(
+                component = "Routing",
+                operation = "forward_resource_update",
+                backend_name = self.backend_name,
+                "backend resource notification dropped because there is no subscription"
+            );
             return;
         };
 
         params.uri = resource_uri_for_downstream(&self.backend_name, params.uri, self.namespace_identifiers);
         if let Err(error) = downstream.notify_resource_updated(params).await {
-            warn!("resource_updated: unable to forward backend notification downstream: {error:?}");
+            warn!(
+                component = "Routing",
+                operation = "forward_resource_update",
+                backend_name = self.backend_name,
+                error = ?error,
+                "backend resource notification could not be forwarded"
+            );
         }
     }
 }
@@ -202,7 +241,12 @@ pub(crate) async fn call_backend_tool(
     let Some(response) = response else {
         let reason = "tool call cancelled by the downstream client".to_owned();
         if let Err(error) = handle.cancel(Some(reason.clone())).await {
-            warn!("call_tool: unable to relay cancellation to the backend: {error:?}");
+            warn!(
+                component = "Routing",
+                operation = "cancel_tool_call",
+                error = ?error,
+                "tool call cancellation could not be relayed to the backend"
+            );
         }
         return Err(ServiceError::Cancelled { reason: Some(reason) });
     };

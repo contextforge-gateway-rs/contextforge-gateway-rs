@@ -156,7 +156,12 @@ impl Gateway {
         let app = app.with_state(mcp_add_state);
         let app = axum::Router::new()
             .nest("/contextforge-rs", app)
-            .layer(TraceLayer::new_for_http().make_span_with(telemetry::ExtractingMakeSpan))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(telemetry::ExtractingMakeSpan)
+                    .on_response(telemetry::LogOnResponse),
+            )
+            .layer(middleware::from_fn(telemetry::correlation_layer))
             .layer(HttpMetricsLayerBuilder::new().build());
 
         let mut handlers = vec![];

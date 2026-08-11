@@ -71,7 +71,13 @@ pub(crate) fn plugin_denied_error(result: PipelineResult) -> ErrorData {
     let code = result
         .violation
         .and_then(|violation| {
-            warn!("Plugin denied tool call: code={} plugin={:?}", violation.code, violation.plugin_name);
+            warn!(
+                component = "Plugins",
+                operation = "tool_call",
+                violation_code = violation.code,
+                plugin = ?violation.plugin_name,
+                "runtime plugin denied tool call"
+            );
             violation.proto_error_code.and_then(|code| i32::try_from(code).ok()).map(ErrorCode)
         })
         .unwrap_or(ErrorCode::INVALID_REQUEST);
@@ -82,11 +88,13 @@ pub(crate) fn plugin_denied_error(result: PipelineResult) -> ErrorData {
 pub(crate) fn log_pipeline_errors(hook: &'static str, result: &PipelineResult) {
     for error in &result.errors {
         warn!(
+            component = "Plugins",
+            operation = "pipeline_hook",
             hook,
             plugin = error.plugin_name,
-            code = error.code.as_deref().unwrap_or(""),
+            plugin_error_code = error.code.as_deref().unwrap_or(""),
             proto_error_code = error.proto_error_code,
-            "CPEX plugin soft error"
+            "runtime plugin reported a recoverable error"
         );
     }
 }

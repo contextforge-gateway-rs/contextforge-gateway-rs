@@ -84,9 +84,11 @@ origins such as `https://app.example.com`; Host entries are authorities such as
 | `--otlp-endpoint <uri>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_ENDPOINT` | Protocol-specific | Trace endpoint; defaults to `http://127.0.0.1:4317` for gRPC or `http://127.0.0.1:4318/v1/traces` for HTTP. |
 | `--otlp-metrics-endpoint <uri>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Protocol-specific | Metrics endpoint; defaults to `http://127.0.0.1:4317` for gRPC or `http://127.0.0.1:4318/v1/metrics` for HTTP. |
 | `--otlp-headers <headers>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_HEADERS` | None | Comma-separated `key=value` exporter headers. |
-| `--otlp-service-name <name>` | `CONTEXTFORGE_DATA_PLANE_OTEL_SERVICE_NAME` | `CONTEXTFORGE-DATA-PLANE` | OpenTelemetry `service.name`. |
+| `--otlp-service-name <name>` | `CONTEXTFORGE_DATA_PLANE_OTEL_SERVICE_NAME` | `contextforge-data-plane` | OpenTelemetry `service.name` and structured-log `service_name`. |
 | `--log-name <name>` | `CONTEXTFORGE_DATA_PLANE_LOG_NAME` | `contextforge-data-plane.log` | File log name in the current directory. |
 | `--log-rotation <mode>` | `CONTEXTFORGE_DATA_PLANE_LOG_ROTATION` | `hourly` | `minutely`, `hourly`, `daily`, or `never`. |
+| `--environment <name>` | `CONTEXTFORGE_DATA_PLANE_ENVIRONMENT` | `unknown` | Deployment environment included in every log event. |
+| `--cluster-id <id>` | `CONTEXTFORGE_DATA_PLANE_CLUSTER_ID` | `unknown` | Cluster identifier included in every log event. |
 
 ## JWT Claims (validated by `claims_layer`)
 
@@ -242,10 +244,17 @@ cargo nextest run --locked -p contextforge-data-plane-lib --test gateway_plugins
 
 | Var | Default | Controls |
 | --- | --- | --- |
-| `RUST_LOG` | `debug` | Console filter |
-| `RUST_FILE_LOG` | `debug` | File filter |
+| `RUST_LOG` | `info` | Console filter |
+| `RUST_FILE_LOG` | `info` | File filter |
 | `RUST_TRACE_LOG` | `info` | OTLP span filter (`debug` for local trace verification) |
 
+Console and rolling-file logs are newline-delimited JSON with the common fields
+listed in [Working Preferences](preferences.md#logging-tracing). Requests
+preserve or generate `x-contextforge-transaction-id` and
+`x-contextforge-correlation-id` and return both headers to the caller. During
+`initialize`, both IDs and standard W3C `traceparent` context are snapshotted
+into the backend transport. As with other downstream headers, backend
+propagation is session-scoped until transports become per-request.
 
 ## Telemetry Debugging Notes
 
@@ -253,27 +262,27 @@ cargo nextest run --locked -p contextforge-data-plane-lib --test gateway_plugins
 
 Metrics are pushed by a `PeriodicReader` every **30 seconds**. Allow ~35s after the first request before data appears downstream.
 
-**Stable log prefixes for grepping** (use these to scope log searches by boundary):
+**Stable structured fields for filtering** (use these to scope searches by boundary):
 
-| Prefix | Boundary |
+| Filter | Boundary |
 | --- | --- |
-| `claims_layer` | JWT validation failures |
-| `user_config_store_layer` | Config lookup / Redis errors |
-| `virtual_host_config_layer` | Unknown virtual host |
-| `AuthorizedCallValidator::validate` | Post-session MCP validation |
-| `initialize:` | Backend session creation |
-| `call_tool` | Tool routing and backend invocation |
+| `component=Authorization` | JWT and MCP call validation |
+| `component=UserConfig` | Config cache, serialization, and Redis access |
+| `component=Routing` | Virtual-host routing and backend invocation |
+| `component=Plugins` | Runtime plugin lifecycle and hook results |
+| `component=HttpServer event_type=PERFORMANCE` | Request status and latency |
+| `error_code=CFDP-*` | Stable operator-facing failures |
 
 **Debugging by symptom:**
 
 | Symptom | Where to look |
 | --- | --- |
-| `401` | `claims_layer` logs: missing/invalid token, unsupported algorithm, no decoder key |
-| `400` config error | `user_config_store_layer` logs + Redis content for the JWT subject |
-| `404 Server not found` | `virtual_host_config_layer` debug: requested vhost id vs caller's config |
-| MCP routing errors | `AuthorizedCallValidator::validate` debug, then `call_tool`/`read_resource`/`get_prompt` warns |
-| Backend failures | `initialize:` warns for failed backends; routed-call warns name the failing backend |
-| Plugin problems | CPEX pipeline error logs; invalid reload marks runtime failed |
+| `401` | `component=Authorization`; inspect the stable message and rejection fields. |
+| `400` config error | `component=UserConfig`; correlate with `transaction_id` rather than logging the JWT subject. |
+| `404 Server not found` | `component=Routing operation=load_virtual_host_config`. |
+| MCP routing errors | `component=Authorization` followed by `component=Routing` with the same correlation ID. |
+| Backend failures | `component=Routing` and the relevant `backend_name`. |
+| Plugin problems | `component=Plugins`; invalid reloads mark the runtime failed. |
 
 ## Local Telemetry Verification Stack
 
@@ -315,12 +324,12 @@ flowchart TD
     SYM --> SBACK["Backend failure"]
     SYM --> SPLUG["Plugin problem"]
 
-    S401 --> L401["grep: claims_layer\nmissing/invalid token\nbad algorithm / no decoder key"]
-    S400 --> L400["grep: user_config_store_layer\n+ Redis content for JWT subject"]
-    S404 --> L404["grep: virtual_host_config_layer\nrequested vhost vs caller config"]
-    SMCP --> LMCP["grep: AuthorizedCallValidator::validate\nthen call_tool / read_resource / get_prompt warns"]
-    SBACK --> LBACK["grep: initialize: warns\nrouted-call warns name failing backend"]
-    SPLUG --> LPLUG["CPEX pipeline error logs\ninvalid reload marks runtime failed"]
+    S401 --> L401["filter: component=Authorization"]
+    S400 --> L400["filter: component=UserConfig\ncorrelate by transaction_id"]
+    S404 --> L404["filter: component=Routing\noperation=load_virtual_host_config"]
+    SMCP --> LMCP["filter: component=Routing\ncorrelation_id"]
+    SBACK --> LBACK["filter: component=Routing\nbackend_name"]
+    SPLUG --> LPLUG["filter: component=Plugins"]
 ```
 
 

@@ -66,7 +66,13 @@ pub(super) fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, 
 }
 
 pub(super) fn backend_forward_error(op: &str, backend_name: &str, error: &ServiceError) -> ErrorData {
-    warn!("{op}: backend {backend_name} error = {error:?}");
+    warn!(
+        component = "Routing",
+        operation = op,
+        backend_name,
+        error = ?error,
+        "backend request failed"
+    );
 
     match error {
         ServiceError::McpError(mcp_error) => mcp_error.to_owned(),
@@ -104,13 +110,19 @@ pub(super) async fn resolve_backend(
     backend_name: &str,
 ) -> Result<(String, McpClientService), ErrorData> {
     let backend_transports = session_manager.borrow_transports().await;
-    debug!("{op}: resolving backend {backend_name} from {backend_transports:?}");
+    debug!(
+        component = "Routing",
+        operation = op,
+        backend_name,
+        backend_count = backend_transports.len(),
+        "resolving backend transport"
+    );
 
     let mut target = None;
     for service_holder in backend_transports {
         if service_holder.name == backend_name {
             if target.is_some() {
-                warn!("{op}: more than one backend matching {backend_name}");
+                warn!(component = "Routing", operation = op, backend_name, "duplicate backend transports matched");
                 session_manager.cleanup_backends("invalid session.. duplicate backends detected").await;
                 return Err(ErrorData {
                     code: ErrorCode::INVALID_REQUEST,
@@ -130,7 +142,7 @@ pub(super) async fn resolve_backend(
         });
     };
     let Some(service) = running_service else {
-        warn!("{op}: no running backend for {backend_name}");
+        warn!(component = "Routing", operation = op, backend_name, "backend transport is not running");
         return Err(ErrorData {
             code: ErrorCode::INTERNAL_ERROR,
             message: "Routing problem... got no responses from backends".into(),

@@ -90,6 +90,12 @@ where
         .get_prompt(routed_request)
         .await
         .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
-    info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
+    info!(
+        component = "Routing",
+        operation = "get_prompt",
+        backend_name = service_name,
+        message_count = response.messages.len(),
+        "backend prompt request completed"
+    );
     Ok(response.into())
 }

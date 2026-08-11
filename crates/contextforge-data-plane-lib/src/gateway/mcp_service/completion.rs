@@ -49,6 +49,12 @@ where
         .complete(routed_request)
         .await
         .map_err(|error| backend_forward_error("complete", &service_name, &error))?;
-    info!("complete: backend {service_name} returned {} values", response.completion.values.len());
+    info!(
+        component = "Routing",
+        operation = "complete",
+        backend_name = service_name,
+        value_count = response.completion.values.len(),
+        "backend completion request completed"
+    );
     Ok(response)
 }

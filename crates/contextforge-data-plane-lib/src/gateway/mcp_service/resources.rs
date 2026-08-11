@@ -93,7 +93,13 @@ where
         .read_resource(routed_request)
         .await
         .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
-    info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
+    info!(
+        component = "Routing",
+        operation = "read_resource",
+        backend_name = service_name,
+        content_count = response.contents.len(),
+        "backend resource request completed"
+    );
     Ok(response.into())
 }
 
@@ -178,7 +184,12 @@ where
         service.service().stop_tracking_resource_subscription(&resource_uri).await;
         return Err(backend_forward_error("subscribe", &service_name, &error));
     }
-    info!("subscribe: backend {service_name} completed");
+    info!(
+        component = "Routing",
+        operation = "subscribe",
+        backend_name = service_name,
+        "backend resource subscription completed"
+    );
     Ok(())
 }
 
@@ -210,6 +221,11 @@ where
         .await
         .map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
     service.service().stop_tracking_resource_subscription(&resource_uri).await;
-    info!("unsubscribe: backend {service_name} completed");
+    info!(
+        component = "Routing",
+        operation = "unsubscribe",
+        backend_name = service_name,
+        "backend resource unsubscribe completed"
+    );
     Ok(())
 }

@@ -53,43 +53,75 @@ pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Reque
     if let Some(ref allowed_hosts) = config.mcp_allowed_hosts {
         match request_authority(&request) {
             None => {
-                warn!("mcp_origin_layer - rejected request: Host header missing or unparseable");
+                warn!(
+                    component = "Security",
+                    operation = "validate_origin",
+                    rejection_reason = "missing_or_invalid_host",
+                    "request rejected by origin validation"
+                );
                 return forbidden_response();
             },
             Some(ref authority) if !authority_in_allowlist(authority, allowed_hosts) => {
-                warn!("mcp_origin_layer - rejected request: Host not in allowlist host = {authority}");
+                warn!(
+                    component = "Security",
+                    operation = "validate_origin",
+                    host = %authority,
+                    rejection_reason = "host_not_allowed",
+                    "request rejected by origin validation"
+                );
                 return forbidden_response();
             },
-            Some(_) => debug!("mcp_origin_layer - Host is in allowlist"),
+            Some(_) => debug!(component = "Security", operation = "validate_origin", "request host accepted"),
         }
     }
 
     let Some(origin_header) = request.headers().get(header::ORIGIN) else {
-        debug!("mcp_origin_layer - no Origin header, allowing request");
+        debug!(component = "Security", operation = "validate_origin", "request has no Origin header");
         return next.run(request).await;
     };
 
     let Ok(origin_str) = origin_header.to_str() else {
-        warn!("mcp_origin_layer - rejected non-UTF-8 Origin header");
+        warn!(
+            component = "Security",
+            operation = "validate_origin",
+            rejection_reason = "invalid_origin_encoding",
+            "request rejected by origin validation"
+        );
         return forbidden_response();
     };
 
     let Some(request_origin) = parse_origin(origin_str) else {
-        warn!("mcp_origin_layer - rejected malformed Origin header origin = {origin_str}");
+        warn!(
+            component = "Security",
+            operation = "validate_origin",
+            rejection_reason = "malformed_origin",
+            "request rejected by origin validation"
+        );
         return forbidden_response();
     };
 
     let Some(ref allowed_origins) = config.mcp_allowed_origins else {
-        warn!("mcp_origin_layer - rejected Origin: no allowed origins configured origin = {origin_str}");
+        warn!(
+            component = "Security",
+            operation = "validate_origin",
+            rejection_reason = "origin_allowlist_missing",
+            "request rejected by origin validation"
+        );
         return forbidden_response();
     };
 
     let allowed = allowed_origins.iter().map(Url::origin).any(|o| o == request_origin);
     if allowed {
-        debug!("mcp_origin_layer - Origin accepted via allowlist origin = {origin_str}");
+        debug!(component = "Security", operation = "validate_origin", origin = origin_str, "request origin accepted");
         next.run(request).await
     } else {
-        warn!("mcp_origin_layer - rejected Origin not in allowlist origin = {origin_str}");
+        warn!(
+            component = "Security",
+            operation = "validate_origin",
+            origin = origin_str,
+            rejection_reason = "origin_not_allowed",
+            "request rejected by origin validation"
+        );
         forbidden_response()
     }
 }

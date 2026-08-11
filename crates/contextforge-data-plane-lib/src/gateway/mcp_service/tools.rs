@@ -126,6 +126,6 @@ where
         },
         _ => response,
     };
-    info!("call_tool: backend {service_name} completed");
+    info!(component = "Routing", operation = "call_tool", backend_name = service_name, "backend tool call completed");
     Ok(response.into())
 }

@@ -16,13 +16,19 @@ impl Tcp {
     }
 
     pub async fn handle_tcp(self, service: Router) -> crate::Result<()> {
-        info!("Starting TCP listener at {}", self.address);
+        info!(
+            component = "Transport",
+            operation = "listen",
+            transport = "tcp",
+            address = %self.address,
+            "listener starting"
+        );
         let tcp_listener: TcpListener = self.try_into()?;
 
         Ok(axum::serve(tcp_listener, service)
             .with_graceful_shutdown(async {
                 tokio::signal::ctrl_c().await.ok();
-                info!("Shutting down...");
+                info!(component = "Transport", operation = "shutdown", transport = "tcp", "listener shutting down");
             })
             .await?)
     }

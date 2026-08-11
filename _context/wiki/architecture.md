@@ -7,7 +7,8 @@ Tower layers execute outside-in. A request reaches MCP handlers with these exten
 ```text
 TCP/TLS listener
   -> HttpMetricsLayer
-  -> TraceLayer
+  -> correlation_layer          → transaction/correlation request scope + response headers
+  -> TraceLayer                 → request span + structured status/latency event
   -> /contextforge-rs nested router
   -> mcp_origin_layer          → validates Host then Origin       (403 when disallowed)
   -> CORS layer
@@ -30,6 +31,7 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 
 ```text
 downstream request
+  -> correlation + W3C trace extraction
   -> Host/Origin validation → virtual host extraction → JWT validation → session extraction
   -> user config lookup → MCP handler validation
   -> request plugin hooks
@@ -37,7 +39,7 @@ downstream request
 
 upstream response
   -> response plugin hooks → merge/namespace/passthrough
-  -> metrics, tracing, logging → downstream response
+  -> structured status/latency log → correlation response headers → metrics → downstream response
 ```
 
 ```mermaid
@@ -90,6 +92,7 @@ Order is invariant: auth/config before backend selection; request plugins before
 | JWT decoders | `ContextForgeDataPlaneAppState` | Process |
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
+| Transaction and correlation IDs | Request extension + task-local scope | One HTTP request; returned in response headers and snapshotted into backend transport during initialize |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |
 | Backend RMCP services | `BackendTransports` map | Local process, per principal/backend/session |
 | Local user session mapping | `LocalUserSessionStore` | Local LRU, 50k entries, 1 hour |
@@ -165,7 +168,7 @@ backend response
   -> session_id_layer response side  ← on DELETE success: remove session + backend transports
   -> claims_layer response side
   -> virtual_host_id_layer response side
-  -> CORS, mcp_origin_layer, TraceLayer, HttpMetricsLayer
+  -> CORS, mcp_origin_layer, TraceLayer, correlation_layer, HttpMetricsLayer
   -> downstream response
 ```
 

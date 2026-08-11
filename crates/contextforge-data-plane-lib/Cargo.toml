@@ -29,7 +29,7 @@ tower = "0.5.3"
 http.workspace = true
 futures = { version = "0.3", features = ["std", "alloc"] }
 jsonwebtoken.workspace = true
-chrono = "0.4.44"
+chrono.workspace = true
 redis.workspace = true
 clap.workspace = true
 thiserror.workspace = true

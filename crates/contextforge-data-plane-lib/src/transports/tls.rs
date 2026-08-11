@@ -9,7 +9,7 @@ use rustls_pki_types::{self, CertificateDer, PrivateKeyDer, pem::PemObject};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower::Service;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::{Config, Error, transports::tcp::Tcp};
 
@@ -48,7 +48,13 @@ impl TryFrom<&Config> for Option<DownstreamTls> {
 impl DownstreamTls {
     pub async fn handle_tls(self, service: Router) -> crate::Result<()> {
         let DownstreamTls { tcp, server_config } = self;
-        info!("Starting TLS listener at {}", tcp.address);
+        info!(
+            component = "Transport",
+            operation = "listen",
+            transport = "tls",
+            address = %tcp.address,
+            "listener starting"
+        );
         let tcp_listener: TcpListener = tcp.try_into()?;
 
         let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
@@ -59,11 +65,24 @@ impl DownstreamTls {
                         let tower_service = service.clone();
                         let tls_acceptor = tls_acceptor.clone();
 
-                        if let Ok((tcp_stream, addr)) = maybe_stream {
+                        if let Ok((tcp_stream, _addr)) = maybe_stream {
                             tokio::spawn(async move {
-                                let Ok(stream) = tls_acceptor.accept(tcp_stream).await else {
-                                    error!("error during tls handshake connection from {}", addr);
-                                    return;
+                                let stream = match tls_acceptor.accept(tcp_stream).await {
+                                    Ok(stream) => stream,
+                                    Err(error) => {
+                                        tracing::error!(
+                                            component = "Transport",
+                                            operation = "tls_handshake",
+                                            transport = "tls",
+                                            error_code = "CFDP-TLS-HANDSHAKE",
+                                            root_cause = %error,
+                                            impact_scope = "connection",
+                                            retryable = true,
+                                            error = %error,
+                                            "TLS handshake failed"
+                                        );
+                                        return;
+                                    },
                                 };
 
                                 let stream = TokioIo::new(stream);
@@ -77,11 +96,23 @@ impl DownstreamTls {
                                     .await;
 
                                 if let Err(err) = ret {
-                                    warn!("error serving connection from {addr}: {err}");
+                                    warn!(
+                                        component = "Transport",
+                                        operation = "serve_connection",
+                                        transport = "tls",
+                                        error = %err,
+                                        "TLS connection terminated with an error"
+                                    );
                                 }
                             })
                         } else {
-                            warn!("Problem during TCP handshake {maybe_stream:?}");
+                            warn!(
+                                component = "Transport",
+                                operation = "accept_connection",
+                                transport = "tcp",
+                                error = ?maybe_stream,
+                                "TCP connection accept failed"
+                            );
                             return Err(maybe_stream.expect_err("Expect this to work").into());
                         };
                     }

@@ -32,11 +32,17 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 ## Logging (tracing)
 
 - Use `tracing` for all log output.
-- **Prefer message-embedded fields**: `level!("method_name - event field = {val} other_field = {other}")`.
-  Do **not** use structured field syntax (`, field = val`) for dataplane logs.
-- Keep method/event prefixes stable and reuse the same field names and order for related events.
+- Emit queryable fields with structured syntax:
+  `level!(component = "Routing", operation = "call_tool", backend_name, "backend tool call completed")`.
+- Console and rolling-file output are newline-delimited JSON. The formatter adds the common contract:
+  `timestamp`, `service_name`, `version`, `environment`, `cluster_id`, `transaction_id`,
+  `correlation_id`, `trace_id`, `span_id`, `user_id`, `log_level`, `error_code`, `message`, and `component`.
+- `error!` and fatal events must add a stable `CFDP-*` error code, root cause, impact scope, and retryability.
+  Add `http_status` and `stack_trace` when available; the formatter supplies explicit null/default values otherwise.
+- Use short stable messages and stable field names. Put variable data in fields, not message text.
 - `warn!` is for unexpected conditions that need operator attention. Expected user/config misses → `debug!` or `info!`.
-- **Never log**: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig`, or backend credentials.
+- **Never log**: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig`, backend credentials,
+  raw user subjects, session IDs, resource URIs, or progress tokens.
 
 ## Change discipline
 

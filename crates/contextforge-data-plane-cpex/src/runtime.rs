@@ -88,7 +88,12 @@ impl Drop for GatewayPluginRuntime {
                     manager.shutdown().await;
                 });
             },
-            Err(error) => tracing::warn!(%error, "skipping CPEX plugin shutdown outside a Tokio runtime"),
+            Err(error) => tracing::warn!(
+                component = "Plugins",
+                operation = "shutdown",
+                error = %error,
+                "runtime plugin shutdown skipped outside a Tokio runtime"
+            ),
         }
     }
 }

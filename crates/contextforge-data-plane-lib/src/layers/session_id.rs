@@ -39,7 +39,7 @@ pub async fn session_id_layer(State(state): State<SessionIdState>, mut request: 
         .map(|_| MOCK_SESSION_ID.to_owned());
 
     if let Some(session_id) = &session_id {
-        info!("MCP Session ID {session_id}");
+        info!(component = "Session", operation = "attach_session", "MCP session attached to request");
         request.extensions_mut().insert(SessionId { value: session_id.clone() });
     }
 
