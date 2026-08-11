@@ -9,9 +9,9 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, GetPromptRequestParams,
-        GetPromptResponse, InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
-        SubscribeRequestParams, UnsubscribeRequestParams,
+        GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
+        PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, SubscribeRequestParams,
+        UnsubscribeRequestParams,
     },
     service::RequestContext,
 };
@@ -37,14 +37,6 @@ impl<T> ServerHandler for McpService<T>
 where
     T: UserSessionStore + Send + Sync + 'static,
 {
-    async fn initialize(
-        &self,
-        request: InitializeRequestParams,
-        cx: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, ErrorData> {
-        initialization::initialize(self, request, cx).await
-    }
-
     async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
         Ok(())
     }

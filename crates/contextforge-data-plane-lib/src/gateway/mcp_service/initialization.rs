@@ -1,212 +1,80 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use contextforge_data_plane_apis::user_store::BackendMCPGateway;
 use http::request::Parts;
 use rmcp::{
-    ErrorData, RoleClient, RoleServer, ServiceExt,
-    model::{ErrorCode, Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities},
+    ClientLifecycleMode, ClientServiceExt, ErrorData, RoleClient, RoleServer,
+    model::{
+        ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, ProtocolVersion, ServerCapabilities,
+    },
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
 use tracing::{info, warn};
 
 use super::McpService;
-use crate::gateway::{
-    backend_client::GatewayBackendClient,
-    backend_transports::{BackendTransportKey, BackendTransportService},
-    mcp_call_validator::InitializeCallValidator,
-    session_store::{UserSession, UserSessionStore},
-};
+use crate::gateway::{backend_client::GatewayBackendClient, backend_transports::BackendTransportService, session_store::UserSessionStore};
 
-pub(super) async fn initialize<T>(
+pub(super) async fn connect_backend_for_request<T>(
     mcp_service: &McpService<T>,
-    request: InitializeRequestParams,
-    cx: RequestContext<RoleServer>,
-) -> Result<InitializeResult, ErrorData>
+    backend_name: &str,
+    backend: &BackendMCPGateway,
+    namespace_identifiers: bool,
+    cx: &RequestContext<RoleServer>,
+) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData>
 where
     T: UserSessionStore + Send + Sync + 'static,
 {
-    let call_validator = InitializeCallValidator::new(&cx);
-    let (virtual_host, downstream_session_id, claims) = call_validator.validate()?;
-    let session_mapping = if let Ok(maybe_session_mapping) = mcp_service
-        .user_session_store
-        .get_session(&UserSession::new(claims.sub.clone(), Arc::from(downstream_session_id.value().as_str())))
-        .await
+    let mut headers = HashMap::new();
+    let downstream_headers = cx.extensions.get::<Parts>().map(|parts| &parts.headers);
+
+    if let Some(host) = backend.url.host_str()
+        && backend.url.scheme() == "https"
     {
-        maybe_session_mapping.unwrap_or_default()
-    } else {
-        return Err(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Internal problem... session store can't be accessed".into(),
-            data: None,
-        });
-    };
+        let authority = if let Some(port) = backend.url.port() { format!("{host}:{port}") } else { host.to_owned() };
+        if let Ok(value) = http::HeaderValue::from_str(&authority) {
+            headers.insert(http::header::HOST, value);
+        } else {
+            warn!("connect_backend_for_request - invalid backend host backend_name = {backend_name}");
+        }
+    }
 
-    let namespace_identifiers = virtual_host.backends.len() > 1;
-    // SESSION-SCOPED: downstream headers are snapshotted here and baked into
-    // the StreamableHttpClientTransportConfig for the lifetime of the backend
-    // transport. Post-initialize calls (tools, resources, prompts) reuse these
-    // headers. True per-request propagation requires either per-request transport
-    // reconstruction or an SDK-level per-call header injection API on RunningService.
-    // When the stateless path (MCP 2026-07-28, SEP-2575/SEP-2567) is implemented,
-    // transports will be per-request and headers will naturally be request-scoped.
-    let downstream_headers = cx.extensions.get::<Parts>().map(|parts| parts.headers.clone());
-    let tasks: Vec<_> = virtual_host
-        .backends
-        .iter()
-        .map(|(name, backend)| {
-            let client = mcp_service.http_client.clone();
-            let backend_client = GatewayBackendClient::new(
-                name.clone(),
-                namespace_identifiers,
-                request.clone(),
-                mcp_service.plugin_runtime.clone(),
-            );
-            let backend_url = backend.url.clone();
-            let backend_cfg = backend.clone();
-            let downstream_headers = downstream_headers.clone();
-            let downstream_session_id = downstream_session_id.clone();
+    apply_header_config(&mut headers, backend, downstream_headers);
+    crate::telemetry::inject_current_context(&mut headers);
 
-            Box::pin(async move {
-                let mut headers = HashMap::new();
-                if let Some(host) = backend_url.host_str()
-                    && backend_url.scheme() == "https"
-                {
-                    let host = if let Some(port) = backend_url.port() {
-                        format!("{host}:{port}")
-                    } else {
-                        host.to_owned()
-                    };
+    let config = StreamableHttpClientTransportConfig::with_uri(backend.url.to_string()).custom_headers(headers);
+    let transport = StreamableHttpClientTransport::with_client(mcp_service.http_client.clone(), config);
+    let client_info = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("contextforge-data-plane", env!("CARGO_PKG_VERSION")),
+    )
+    .with_protocol_version(ProtocolVersion::V_2026_07_28);
+    let backend_client = GatewayBackendClient::new(
+        backend_name.to_owned(),
+        namespace_identifiers,
+        client_info,
+        mcp_service.plugin_runtime.clone(),
+    );
 
-                    if let Ok(value) = http::HeaderValue::from_str(&host) {
-                        headers.insert(http::header::HOST, value);
-                    } else {
-                        warn!("Really can't set the host header for {:?}", backend_url.host_str());
-                    }
-                }
-
-                apply_header_config(&mut headers, &backend_cfg, downstream_headers.as_ref());
-
-                // Propagate the active W3C trace context to the backend so the
-                // gateway span links to the downstream MCP server's spans.
-                crate::telemetry::inject_current_context(&mut headers);
-
-                let config =
-                    StreamableHttpClientTransportConfig::with_uri(backend_url.to_string()).custom_headers(headers);
-                let transport = StreamableHttpClientTransport::with_client(client, config);
-                let maybe_running_service = backend_client.serve(transport).await;
-                if let Ok(running_service) = maybe_running_service {
-                    info!("initialize: intialized for {downstream_session_id:?} {name:?}");
-                    (name, Some(running_service))
-                } else {
-                    warn!(
-                        "initialize: Unable to initialize for {downstream_session_id:?} {name:?} {maybe_running_service:?}",
-                    );
-                    (name, None)
-                }
-            })
-        })
-        .collect();
-
-    let initialization_results: Vec<(&String, Option<RunningService<RoleClient, GatewayBackendClient>>)> =
-        futures::future::join_all(tasks).await;
-
-    let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
-        .into_iter()
-        .map(|(name, running_service): (_, _)| {
-            info!(
-                "initialize: Adding transport: session_id {downstream_session_id:#?} backend {name} {running_service:?}"
-            );
-
-            let server_capabilities = running_service
-                .as_ref()
-                .and_then(|rs| rs.peer().peer_info().as_ref().map(|pi| pi.capabilities.clone()));
-            (
-                (name.clone(), server_capabilities.clone()),
-                (name.clone(), BackendTransportService::from((server_capabilities, running_service.map(Arc::new)))),
-            )
-        })
-        .unzip();
-
-    if mcp_service
-        .user_session_store
-        .set_session(
-            &UserSession::new(claims.sub.clone(), Arc::from(downstream_session_id.value().as_str())),
-            &session_mapping,
+    backend_client
+        .serve_with_lifecycle(
+            transport,
+            ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
         )
         .await
-        .is_err()
-    {
-        return Err(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Internal problem... session store can't be written".into(),
-            data: None,
-        });
-    }
-
-    let mut transports = mcp_service.transports.inner().lock().await;
-    for (name, service) in backend_services {
-        transports
-            .entry(BackendTransportKey::from((
-                name.as_str(),
-                downstream_session_id.value().as_str(),
-                claims.sub.as_str(),
-            )))
-            .insert_entry(service);
-    }
-    drop(transports);
-
-    Ok(InitializeResult::new(merge_and_build_capabilities(capabilities))
-        .with_server_info(Implementation::new("rust-conformance-server", "0.1.0"))
-        .with_instructions("Rust MCP conformance test server"))
-}
-
-fn merge_and_build_capabilities(server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
-    let mut merged = ServerCapabilities::default();
-
-    for (_, capabilities) in server_capabilities {
-        let Some(capabilities) = capabilities else {
-            continue;
-        };
-
-        if capabilities.completions.is_some() {
-            merged.completions.get_or_insert_default();
-        }
-
-        if capabilities.prompts.is_some() {
-            merged.prompts.get_or_insert_default();
-        }
-
-        if let Some(resources) = capabilities.resources {
-            let merged_resources = merged.resources.get_or_insert_default();
-            if resources.subscribe == Some(true) {
-                merged_resources.subscribe = Some(true);
+        .map_err(|error| {
+            warn!(
+                "connect_backend_for_request - backend connection failed backend_name = {backend_name} error = {error:?}"
+            );
+            ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... backend unavailable".into(),
+                data: None,
             }
-        }
-
-        if capabilities.tools.is_some() {
-            merged.tools.get_or_insert_default();
-        }
-    }
-
-    merged
+        })
 }
 
-/// Apply a backend's header config to the upstream header map.
-///
-/// Order: passthrough (copy named headers from the downstream request) -> add
-/// (inject/override static headers) -> remove (strip named headers).
-///
-/// Protected headers are silently skipped in every phase:
-/// - Gateway-managed: `Host` (set from backend URL before this runs)
-/// - Body-framing: `Content-Length`, `Content-Type` (gateway owns framing)
-/// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`,
-///   `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
-/// - Non-standard hop-by-hop: `Proxy-Connection`
-/// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
-///
-/// ponytail: single-value per name; a repeated downstream header keeps its first value.
-fn apply_header_config(
+pub(super) fn apply_header_config(
     headers: &mut HashMap<http::HeaderName, http::HeaderValue>,
     backend: &BackendMCPGateway,
     downstream: Option<&http::HeaderMap>,
@@ -241,12 +109,6 @@ fn apply_header_config(
     }
 }
 
-/// Returns `true` for headers that config must never touch:
-/// - Gateway-managed: `Host`
-/// - Body-framing: `Content-Length`, `Content-Type` (gateway owns framing; forwarding corrupts body or enables encoding-dispatch bypass)
-/// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
-/// - Non-standard hop-by-hop: `Proxy-Connection` (must not cross gateway boundary)
-/// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
 fn is_protected_header(name: &http::HeaderName) -> bool {
     const PROTECTED: &[&str] = &[
         "host",
@@ -277,19 +139,6 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn merge_and_build_capabilities_only_advertises_upstream_capabilities() {
-        let capabilities = merge_and_build_capabilities(vec![
-            ("first".to_owned(), Some(ServerCapabilities::builder().enable_tools().build())),
-            ("second".to_owned(), Some(ServerCapabilities::builder().enable_resources().enable_completions().build())),
-            ("third".to_owned(), Some(ServerCapabilities::builder().enable_tools().build())),
-        ]);
-
-        assert!(capabilities.tools.is_some());
-        assert!(capabilities.completions.is_some());
-        assert!(capabilities.resources.is_some());
-        assert!(capabilities.prompts.is_none());
-    }
 
     fn backend(passthrough: &[&str], add: &[(&str, &str)], remove: &[&str]) -> BackendMCPGateway {
         BackendMCPGateway {
