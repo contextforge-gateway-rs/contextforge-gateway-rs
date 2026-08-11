@@ -35,20 +35,14 @@ VirtualHost
 BackendMCPGateway
   name: String
   url: Url
-  transport: Transport
   passthrough_headers: Vec<String>
   allowed_tool_names: Vec<String>
   allowed_resource_names: Vec<String>
   allowed_prompt_names: Vec<String>
 ```
 
-`Transport` currently declares:
-
-```text
-STREAMABLEHTTP
-SSE
-STDIO
-```
+Backend MCP transport is intentionally absent from `UserConfig`. The dataplane
+always builds an upstream Streamable HTTP client.
 
 The Rust types above are easier to picture as JSON. For a complete, working
 `UserConfig` document, see the seed request body in
@@ -65,7 +59,6 @@ but the distinction should stay explicit:
 | `VirtualHost.backends` map key | Required. Selects backend session state and becomes the public prefix when a multi-backend identifier has no explicit alias. |
 | `BackendMCPGateway.url` | Required. Used to build the upstream `StreamableHttpClientTransport`. |
 | `BackendMCPGateway.name` | Present in the model. Current routing uses the backend map key, not this field, as the namespace. |
-| `transport` | Present in the model. Current upstream code always builds a streamable HTTP client transport. |
 | `passthrough_headers` | Applied during `initialize`: named downstream request headers are copied onto the upstream connection header map. Body-framing (`Content-Length`, `Content-Type`), hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. Propagation is session-scoped — headers are snapshotted from the initialize request; see note below. |
 | `add_headers` | Static `{name: value}` headers injected onto the upstream connection after passthrough (override passthrough values). Body-framing, hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. |
 | `remove_headers` | Header names stripped from the upstream connection after add (applied last). Body-framing, hop-by-hop, non-standard hop-by-hop (`Proxy-Connection`), and RMCP-reserved headers are silently skipped. |

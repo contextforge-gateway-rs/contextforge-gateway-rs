@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{Config, Gateway, Result, UserConfigStore, UserConfigStoreType};
 use rmcp::{
@@ -24,7 +24,6 @@ fn paginating_backend(port: u16) -> BackendMCPGateway {
     BackendMCPGateway {
         name: format!("backend-{port}"),
         url: format!("http://127.0.0.1:{port}/mcp").parse().expect("valid url"),
-        transport: Transport::default(),
         passthrough_headers: Vec::new(),
         add_headers: HashMap::new(),
         remove_headers: Vec::new(),

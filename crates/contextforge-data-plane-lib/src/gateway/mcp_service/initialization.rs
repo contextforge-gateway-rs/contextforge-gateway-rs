@@ -275,8 +275,6 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use contextforge_data_plane_apis::user_store::Transport;
-
     use super::*;
 
     #[test]
@@ -297,7 +295,6 @@ mod tests {
         BackendMCPGateway {
             name: "b".into(),
             url: "https://upstream.example/mcp".parse().unwrap(),
-            transport: Transport::default(),
             passthrough_headers: passthrough.iter().map(|s| (*s).to_owned()).collect(),
             add_headers: add.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
             remove_headers: remove.iter().map(|s| (*s).to_owned()).collect(),

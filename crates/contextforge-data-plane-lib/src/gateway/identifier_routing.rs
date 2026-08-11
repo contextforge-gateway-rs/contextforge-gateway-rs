@@ -182,7 +182,6 @@ mod tests {
                 "79fabb70-2188-4de8-95ed-dc1e976e14d4": {
                     "name": "compliance_reference",
                     "url": "http://upstream:9000/mcp",
-                    "transport": "STREAMABLEHTTP",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats", "echo"],
                     "tool_name_aliases": {
@@ -214,7 +213,6 @@ mod tests {
                 "compliance-reference": {
                     "name": "compliance_reference",
                     "url": "http://upstream:9000/mcp",
-                    "transport": "STREAMABLEHTTP",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats"],
                     "allowed_resource_names": [],
@@ -223,7 +221,6 @@ mod tests {
                 "other": {
                     "name": "other",
                     "url": "http://other:9000/mcp",
-                    "transport": "STREAMABLEHTTP",
                     "passthrough_headers": [],
                     "allowed_tool_names": [],
                     "allowed_resource_names": [],

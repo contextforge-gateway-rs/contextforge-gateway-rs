@@ -18,9 +18,9 @@ architecture roles.
 | Upstream backend | Shared `reqwest::Client` plus RMCP `StreamableHttpClientTransport`. | `common.rs`, `gateway/mcp_service/initialization.rs`, and `gateway/backend_transports.rs`. | Open MCP client sessions to configured backend MCP servers. |
 | Config store | Redis plain, TLS, or mTLS connection manager. | `common.rs` and `user_config_store/`. | Load `UserConfig` and plugin runtime config from control-plane authored storage. |
 
-The current MCP dataplane only uses streamable HTTP for backend MCP traffic.
-`BackendMCPGateway.transport` already has `STREAMABLEHTTP`, `SSE`, and `STDIO`,
-but upstream routing does not branch on that field yet.
+The MCP dataplane always uses Streamable HTTP for backend MCP traffic.
+`BackendMCPGateway` has no transport selector, and upstream routing always
+builds `StreamableHttpClientTransport`.
 
 ## Downstream Listeners
 
@@ -126,7 +126,6 @@ but it is not the final shape for every backend-specific decision.
 | Downstream TLS certificate | Process config. | Process config. It belongs to the gateway listener. |
 | Upstream trust bundle and mTLS identity | Process config. | Runtime config per backend or referenced secret material. |
 | Backend auth headers | Delegated to `passthrough_headers` / `add_headers` / `remove_headers` in `BackendMCPGateway`. | — |
-| Backend transport type | Model field exists, not routed yet. | Runtime config per backend. |
 | Header pass-through policy | Implemented via `passthrough_headers`, `add_headers`, `remove_headers` on `BackendMCPGateway`. Headers are session-scoped (snapshotted at initialize); request-scoped propagation is future work. | — |
 
 The boundary to preserve is simple: listener code should not know Redis schema,
