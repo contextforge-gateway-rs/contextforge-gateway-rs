@@ -266,7 +266,6 @@ mod tests {
                 backend_id: {
                     "name": "backend",
                     "url": "http://upstream:9000/mcp",
-                    "transport": "STREAMABLEHTTP",
                     "passthrough_headers": [],
                     "allowed_tool_names": [],
                     "allowed_resource_names": [],

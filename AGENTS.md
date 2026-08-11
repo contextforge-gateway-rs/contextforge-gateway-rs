@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## Start with the wiki
+
+At the start of each task, check `_context/wiki/index.md` to decide
+whether wiki context is needed before acting. Don't read the wiki in
+full. Use the index and follow links only when they are relevant to
+the task.
+
+## Update the wiki
+
+After completing a task, offer to update the wiki if the task yielded durable knowledge that could benefit future work, then wait for user approval. This includes new processes, architecture decisions, or insights that go beyond the immediate task.
+
+When adding a new wiki page, also update:
+- `_context/wiki/index.md` — add a row to the pages table
+- `_context/wiki/SUMMARY.md` — add the page under the appropriate section so it appears in the published book
+
+---
+
 Guidance for agents working on `contextforge-data-plane`.
 
 This repo is the Rust dataplane part of ContextForge. It must stay compatible
@@ -23,30 +40,6 @@ control-plane, UI, IAM, or metrics-storage app.
 - Temporary compatibility shims in the current implementation are migration
   details, not supported client contracts. Do not build new behavior on them.
 
-## Architecture
-
-Architecture documentation lives in The ContextForge Data Plane Book under
-[docs/book](docs/book/README.md). Read the relevant page before changing the
-hot path:
-
-| Page | Read it for |
-| --- | --- |
-| [What is ContextForge Data Plane?](docs/book/src/what-is-contextforge-data-plane.md) | Scope, boundaries, key terms, and the mental model. |
-| [System Shape](docs/book/src/system-shape.md) | Crate layout, control-plane boundary, pipeline shape, state ownership, and module boundaries. |
-| [Request Flow](docs/book/src/request-flow.md) | Startup, middleware order, initialize fanout, authorized calls, and the response path. |
-| [Concurrency And Runtime Model](docs/book/src/concurrency-and-runtime.md) | Executor shapes, shared state and locks, fanout, and cancellation. |
-| [Authentication And User Config Lookup](docs/book/src/authentication-and-user-config.md) | JWT validation, config keying, cache behavior, and failure responses. |
-| [Security Model And Trust Boundaries](docs/book/src/security-model.md) | Trust boundaries, compromise impact, and transport security posture. |
-| [Runtime Configuration](docs/book/src/runtime-configuration.md) | The `UserConfig` model, Redis/MessagePack persistence, and plugin runtime config. |
-| [Control-Plane Integration](docs/book/src/control-plane-integration.md) | Redis keys, schemas, token shape, and route parity with the control plane. |
-| [Backend Connections And Transports](docs/book/src/backend-connections-and-transports.md) | Downstream, upstream, and config-store transports plus TLS direction. |
-| [Session Ownership](docs/book/src/session-ownership.md) | Backend session state, cleanup, and load-balancing constraints. |
-| [MCP Routing Semantics](docs/book/src/mcp-routing-semantics.md) | The backend prefix namespace and routing contract. |
-| [Architectural Choices](docs/book/src/architectural-choices.md) | Invariants and tradeoffs that must not change accidentally. |
-
-The book is rendered from `docs/book/src/` and published through GitHub Pages;
-see [docs/book/README.md](docs/book/README.md) for build and validation steps.
-
 ## Working Rules
 
 - Most product behavior belongs in `contextforge-data-plane-lib`; avoid adding
@@ -57,13 +50,5 @@ see [docs/book/README.md](docs/book/README.md) for build and validation steps.
   logic, split logic, and tests.
 - This project is still early development with no external users; prefer the
   right architecture over preserving unstable APIs or compatibility surfaces.
-- When behavior on the hot path changes, update the matching book page in the
+- When behavior on the hot path changes, update the matching wiki page in the
   same change.
-
-## Logging
-
-- Use consistent formatted tracing messages for related events so logs are easy to grep across request paths.
-- Prefer captured variables inside the message, for example `level!("method_name - event text field = {field} other_field = {other_field}")`, over structured field syntax for dataplane logs.
-- Keep the method/event prefix stable and reuse the same field names/order for related events.
-- Keep warning logs for unexpected conditions that likely need operator attention. Expected user/config misses should be debug or info unless they indicate a platform problem.
-- Do not log tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig`, or backend credentials.

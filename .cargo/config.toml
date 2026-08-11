@@ -1,5 +1,4 @@
 [build]
-jobs = 4
 
 [http]
 timeout = 10                # timeout for each HTTP request, in seconds

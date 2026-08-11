@@ -8,7 +8,7 @@ git config --global http.sslVerify false
 git clone https://github.com/contextforge-gateway-rs/mcp-rust-sdk.git rust-sdk
 EOF
 WORKDIR /tmp/rust-sdk
-RUN git checkout enabling_propagation_of_new_session_id_2 
+RUN git checkout enabling_propagation_of_new_session_id_2
 WORKDIR /tmp/rust-sdk/examples/servers
 
 RUN \
