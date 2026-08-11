@@ -361,13 +361,14 @@ mod tests {
     };
 
     use crate::config::LoadedRuntimePluginConfig;
-    use crate::{CmfPluginFactory, ToolArgumentsUpdate};
+    use crate::{CmfPluginFactory, PromptArgumentsUpdate, ToolArgumentsUpdate};
 
     use super::*;
 
     const TEST_MISSING_CONTEXT_ERROR_CODE: i64 = -32003;
     const TEST_REWRITTEN_SUM_A: i64 = 10;
     const TEST_REWRITTEN_SUM_B: i64 = 20;
+    const TEST_REWRITTEN_PROMPT_TOPIC: &str = "rewritten-topic";
     const TEST_SHUTDOWN_RETRY_COUNT: usize = 20;
     const TEST_SHUTDOWN_RETRY_INTERVAL: Duration = Duration::from_millis(10);
     const TEST_WATCHER_INTERVAL: Duration = Duration::from_millis(10);
@@ -587,6 +588,15 @@ mod tests {
                                 ("b".to_owned(), json!(TEST_REWRITTEN_SUM_B)),
                             ]);
                         }
+                        if let Some(ContentPart::PromptRequest { content }) = modified
+                            .message
+                            .content
+                            .iter_mut()
+                            .find(|part| matches!(part, ContentPart::PromptRequest { .. }))
+                        {
+                            content.arguments =
+                                HashMap::from([("topic".to_owned(), json!(TEST_REWRITTEN_PROMPT_TOPIC))]);
+                        }
                         PluginResult::modify_payload(modified)
                     },
                     PreBehavior::SetContext => {
@@ -646,6 +656,11 @@ mod tests {
     fn sum_request(a: i64, b: i64) -> CallToolRequestParams {
         CallToolRequestParams::new("sum")
             .with_arguments(serde_json::Map::from_iter([("a".to_owned(), json!(a)), ("b".to_owned(), json!(b))]))
+    }
+
+    fn review_request(topic: &str) -> GetPromptRequestParams {
+        GetPromptRequestParams::new("review")
+            .with_arguments(serde_json::Map::from_iter([("topic".to_owned(), json!(topic))]))
     }
 
     fn progress_event() -> ProgressNotificationParam {
@@ -784,6 +799,59 @@ mod tests {
         let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
 
         assert!(matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn generic_cmf_factory_registers_prompt_only_plugin() {
+        let config = config_document(json!({
+            "plugins": [{
+                "name": "generic-prompt",
+                "kind": "generic",
+                "hooks": [cmf_hook_names::PROMPT_PRE_FETCH]
+            }]
+        }));
+        let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
+        runtime
+            .register_factory("generic", Box::new(CmfPluginFactory::new(TestPlugin::rewrite_from_config)))
+            .expect("test factory registers");
+        runtime.initialize().await.expect("runtime initializes");
+
+        let result = runtime
+            .handle()
+            .before_get_prompt(&review_request("weather"), "review", "backend")
+            .await
+            .expect("prompt pre hook runs");
+
+        assert!(
+            matches!(result.arguments, PromptArgumentsUpdate::Replace(Some(_))),
+            "the prompt hook must actually run, not merely be accepted by config validation"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn generic_cmf_factory_registers_mixed_tool_and_prompt_plugin() {
+        let config = config_document(json!({
+            "plugins": [{
+                "name": "generic-mixed",
+                "kind": "generic",
+                "hooks": [cmf_hook_names::TOOL_PRE_INVOKE, cmf_hook_names::PROMPT_PRE_FETCH]
+            }]
+        }));
+        let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
+        runtime
+            .register_factory("generic", Box::new(CmfPluginFactory::new(TestPlugin::rewrite_from_config)))
+            .expect("test factory registers");
+        runtime.initialize().await.expect("runtime initializes");
+
+        let tool = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("tool pre hook runs");
+        let prompt = runtime
+            .handle()
+            .before_get_prompt(&review_request("weather"), "review", "backend")
+            .await
+            .expect("prompt pre hook runs");
+
+        assert!(matches!(tool.arguments, ToolArgumentsUpdate::Replace(Some(_))));
+        assert!(matches!(prompt.arguments, PromptArgumentsUpdate::Replace(Some(_))));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

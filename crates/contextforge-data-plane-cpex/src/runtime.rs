@@ -203,7 +203,7 @@ impl GatewayPluginRuntime {
         let original_payload = tool_call_payload(request, tool_name, backend_name, &tool_call_id);
         let pre_result = self.invoke_tool_pre(original_payload).await;
         if pre_result.is_denied() {
-            return Err(plugin_denied_error(pre_result));
+            return Err(plugin_denied_error("tool call", pre_result));
         }
 
         let arguments = effective_pre_args(request.arguments.as_ref(), &pre_result)?;
@@ -255,7 +255,7 @@ impl GatewayPluginRuntime {
         let payload = prompt_request_payload(request, prompt_name, backend_name, &prompt_request_id);
         let pre_result = self.invoke_prompt_pre(payload).await;
         if pre_result.is_denied() {
-            return Err(plugin_denied_error(pre_result));
+            return Err(plugin_denied_error("prompt", pre_result));
         }
 
         let arguments = effective_pre_prompt_args(request.arguments.as_ref(), &pre_result)?;
@@ -280,7 +280,7 @@ impl GatewayPluginRuntime {
         let payload = prompt_result_payload(&response, prompt_name, &state.prompt_request_id);
         let post_result = self.invoke_prompt_post(payload, Some(state.context_table.clone())).await;
         if post_result.is_denied() {
-            return Err(plugin_denied_error(post_result));
+            return Err(plugin_denied_error("prompt", post_result));
         }
 
         effective_post_prompt_result(response, &post_result)
@@ -307,7 +307,7 @@ impl GatewayPluginRuntime {
             )
             .await;
         if post_result.is_denied() {
-            return Err(plugin_denied_error(post_result));
+            return Err(plugin_denied_error("tool call", post_result));
         }
 
         state.context_table = post_result.context_table.clone();

@@ -108,16 +108,16 @@ where
     })
 }
 
-pub(crate) fn plugin_denied_error(result: PipelineResult) -> ErrorData {
+pub(crate) fn plugin_denied_error(subject: &str, result: PipelineResult) -> ErrorData {
     let code = result
         .violation
         .and_then(|violation| {
-            warn!("Plugin denied tool call: code={} plugin={:?}", violation.code, violation.plugin_name);
+            warn!("Plugin denied {subject}: code={} plugin={:?}", violation.code, violation.plugin_name);
             violation.proto_error_code.and_then(|code| i32::try_from(code).ok()).map(ErrorCode)
         })
         .unwrap_or(ErrorCode::INVALID_REQUEST);
 
-    ErrorData { code, message: "Plugin denied tool call".into(), data: None }
+    ErrorData { code, message: format!("Plugin denied {subject}").into(), data: None }
 }
 
 pub(crate) fn log_pipeline_errors(hook: &'static str, result: &PipelineResult) {

@@ -1,7 +1,13 @@
+use std::collections::HashMap;
+
 use cpex::cpex_core::cmf::{
-    ContentPart, Message, MessagePayload, PromptRequest, PromptResult, Role, ToolCall, ToolResult,
+    AudioSource, ContentPart, ImageSource, Message, MessagePayload, PromptRequest, PromptResult,
+    Resource as CmfResource, ResourceReference, ResourceType, Role, ToolCall, ToolResult,
 };
-use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult, PromptMessage,
+    Resource as McpResource, ResourceContents, Role as McpRole,
+};
 use serde_json::{Map, Value};
 
 pub(crate) fn tool_call_payload(
@@ -148,64 +154,237 @@ pub(crate) fn prompt_result_payload(
     prompt_name: &str,
     prompt_request_id: &str,
 ) -> MessagePayload {
-    let mut content = vec![ContentPart::PromptResult {
-        content: PromptResult {
-            prompt_request_id: prompt_request_id.to_owned(),
-            prompt_name: prompt_name.to_owned(),
-            messages: Vec::new(),
-            content: None,
-            is_error: false,
-            error_message: None,
-        },
-    }];
-    content.extend(
-        response
-            .messages
-            .iter()
-            .filter_map(|message| message.content.as_text())
-            .map(|text| ContentPart::Text { text: text.text.clone() }),
-    );
+    let messages =
+        response.messages.iter().map(|message| cmf_prompt_message(message, prompt_request_id)).collect::<Vec<_>>();
 
     MessagePayload {
-        message: Message { schema_version: "2.0".to_owned(), role: Role::Assistant, content, channel: None },
+        message: Message {
+            schema_version: "2.0".to_owned(),
+            role: Role::Assistant,
+            content: vec![ContentPart::PromptResult {
+                content: PromptResult {
+                    prompt_request_id: prompt_request_id.to_owned(),
+                    prompt_name: prompt_name.to_owned(),
+                    messages,
+                    content: None,
+                    is_error: false,
+                    error_message: None,
+                },
+            }],
+            channel: None,
+        },
     }
 }
 
+/// `None` means refuse: falling back to the backend's original would undo a plugin's redaction.
 pub(crate) fn prompt_result_response(
     mut original: GetPromptResult,
     payload: &MessagePayload,
 ) -> Option<GetPromptResult> {
-    let mut texts = payload.message.content.iter().filter_map(|part| match part {
-        ContentPart::Text { text } => Some(text),
-        _ => None,
-    });
-
-    for message in &mut original.messages {
-        if message.content.as_text().is_none() {
-            continue;
-        }
-        message.content = ContentBlock::text(texts.next()?.clone());
-    }
-
-    if texts.next().is_some() {
+    let results = payload.message.get_prompt_results();
+    let result = results.first()?;
+    if result.messages.len() != original.messages.len() {
         return None;
     }
+
+    for (message, edited) in original.messages.iter_mut().zip(&result.messages) {
+        let projected = cmf_prompt_message(message, &result.prompt_request_id);
+        if serde_json::to_value(&projected).ok()? == serde_json::to_value(edited).ok()? {
+            continue;
+        }
+        *message = mcp_prompt_message(edited)?;
+    }
+
     Some(original)
+}
+
+fn cmf_prompt_message(message: &PromptMessage, prompt_request_id: &str) -> Message {
+    Message {
+        schema_version: "2.0".to_owned(),
+        role: match message.role {
+            McpRole::Assistant => Role::Assistant,
+            McpRole::User => Role::User,
+        },
+        content: cmf_content_part(&message.content, prompt_request_id).into_iter().collect(),
+        channel: None,
+    }
+}
+
+fn cmf_content_part(block: &ContentBlock, prompt_request_id: &str) -> Option<ContentPart> {
+    let part = match block {
+        ContentBlock::Text(text) => ContentPart::Text { text: text.text.clone() },
+        ContentBlock::Image(image) => ContentPart::Image {
+            content: ImageSource {
+                source_type: "base64".to_owned(),
+                data: image.data.clone(),
+                media_type: Some(image.mime_type.clone()),
+            },
+        },
+        ContentBlock::Audio(audio) => ContentPart::Audio {
+            content: AudioSource {
+                source_type: "base64".to_owned(),
+                data: audio.data.clone(),
+                media_type: Some(audio.mime_type.clone()),
+                duration_ms: None,
+            },
+        },
+        ContentBlock::Resource(resource) => {
+            let (uri, mime_type, content) = match &resource.resource {
+                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+                    (uri.clone(), mime_type.clone(), Some(text.clone()))
+                },
+                ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
+                _ => return None,
+            };
+            ContentPart::Resource {
+                content: CmfResource {
+                    resource_request_id: prompt_request_id.to_owned(),
+                    uri,
+                    name: None,
+                    description: None,
+                    resource_type: ResourceType::Uri,
+                    content,
+                    blob: None,
+                    mime_type,
+                    size_bytes: None,
+                    annotations: HashMap::new(),
+                    version: None,
+                },
+            }
+        },
+        ContentBlock::ResourceLink(link) => ContentPart::ResourceRef {
+            content: ResourceReference {
+                resource_request_id: prompt_request_id.to_owned(),
+                uri: link.uri.clone(),
+                name: Some(link.name.clone()),
+                resource_type: ResourceType::Uri,
+                range_start: None,
+                range_end: None,
+                selector: None,
+            },
+        },
+        _ => return None,
+    };
+
+    Some(part)
+}
+
+fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
+    let role = match message.role {
+        Role::Assistant => McpRole::Assistant,
+        Role::User => McpRole::User,
+        _ => return None,
+    };
+
+    let [part] = message.content.as_slice() else { return None };
+    let content = match part {
+        ContentPart::Text { text } => ContentBlock::text(text.clone()),
+        ContentPart::Image { content } => {
+            ContentBlock::image(content.data.clone(), content.media_type.clone().unwrap_or_default())
+        },
+        ContentPart::Audio { content } => {
+            ContentBlock::audio(content.data.clone(), content.media_type.clone().unwrap_or_default())
+        },
+        ContentPart::Resource { content } => ContentBlock::resource(ResourceContents::TextResourceContents {
+            uri: content.uri.clone(),
+            mime_type: content.mime_type.clone(),
+            text: content.content.clone()?,
+            meta: None,
+        }),
+        ContentPart::ResourceRef { content } => {
+            ContentBlock::ResourceLink(McpResource::new(content.uri.clone(), content.name.clone().unwrap_or_default()))
+        },
+        _ => return None,
+    };
+
+    Some(PromptMessage::new(role, content))
 }
 
 #[cfg(test)]
 mod tests {
-    use rmcp::model::{PromptMessage, Role as McpRole};
-
     use super::*;
 
+    fn text_prompt() -> GetPromptResult {
+        GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, "review of weather")])
+    }
+
+    fn edited_messages(payload: &mut MessagePayload) -> &mut Vec<Message> {
+        payload
+            .message
+            .content
+            .iter_mut()
+            .find_map(|part| match part {
+                ContentPart::PromptResult { content } => Some(&mut content.messages),
+                _ => None,
+            })
+            .expect("payload carries a prompt result")
+    }
+
     #[test]
-    fn prompt_result_response_rejects_added_text() {
-        let original = GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, "review of weather")]);
+    fn prompt_result_response_rejects_added_message() {
+        let original = text_prompt();
         let mut payload = prompt_result_payload(&original, "review", "prompt-1");
-        payload.message.content.push(ContentPart::Text { text: "extra".to_owned() });
+        let extra = edited_messages(&mut payload).first().cloned().expect("one message");
+        edited_messages(&mut payload).push(extra);
 
         assert!(prompt_result_response(original, &payload).is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_removed_message() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        edited_messages(&mut payload).clear();
+
+        assert!(prompt_result_response(original, &payload).is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_unmappable_role() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        edited_messages(&mut payload)[0].role = Role::System;
+
+        assert!(prompt_result_response(original, &payload).is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_preserves_unmodified_messages() {
+        let original = text_prompt();
+        let payload = prompt_result_payload(&original, "review", "prompt-1");
+
+        let result = prompt_result_response(original.clone(), &payload).expect("unmodified payload applies");
+
+        assert_eq!(
+            serde_json::to_value(&original).expect("original serializes"),
+            serde_json::to_value(&result).expect("result serializes")
+        );
+    }
+
+    #[test]
+    fn prompt_result_response_round_trips_embedded_resource() {
+        let original = GetPromptResult::new(vec![PromptMessage::new(
+            McpRole::User,
+            ContentBlock::resource(ResourceContents::text("token=secret", "file:///app.env")),
+        )]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+
+        let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("embedded resource reaches the plugin as a CMF resource part");
+        };
+        assert_eq!(Some("token=secret"), content.content.as_deref());
+        content.content = Some("token=[REDACTED]".to_owned());
+
+        let result = prompt_result_response(original, &payload).expect("resource edit applies");
+
+        let ContentBlock::Resource(resource) = &result.messages[0].content else {
+            panic!("expected an embedded resource");
+        };
+        let ResourceContents::TextResourceContents { text, uri, .. } = &resource.resource else {
+            panic!("expected text resource contents");
+        };
+        assert_eq!("token=[REDACTED]", text);
+        assert_eq!("file:///app.env", uri);
     }
 
     #[test]

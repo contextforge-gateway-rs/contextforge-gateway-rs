@@ -26,3 +26,10 @@ pub(crate) fn error_code(error: ServiceError) -> ErrorCode {
     };
     error.code
 }
+
+pub(crate) fn error_parts(error: ServiceError) -> (ErrorCode, String) {
+    let ServiceError::McpError(error) = error else {
+        panic!("expected MCP error, got {error:?}");
+    };
+    (error.code, error.message.into_owned())
+}
