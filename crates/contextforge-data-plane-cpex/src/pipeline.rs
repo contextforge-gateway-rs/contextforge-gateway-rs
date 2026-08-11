@@ -10,8 +10,8 @@ use tracing::warn;
 use crate::{
     PromptArgumentsUpdate, ToolArgumentsUpdate,
     cmf::{
-        prompt_request_arguments, prompt_result_response, tool_call_arguments, tool_result_content,
-        tool_result_response,
+        prompt_request_arguments, prompt_result_rejection, prompt_result_response, tool_call_arguments,
+        tool_result_content, tool_result_response,
     },
 };
 
@@ -79,6 +79,10 @@ pub(crate) fn effective_post_prompt_result(
     let Some(payload) = modified_message_payload(result) else {
         return Ok(original);
     };
+
+    if let Some(message) = prompt_result_rejection(payload) {
+        return Err(ErrorData { code: ErrorCode::INVALID_REQUEST, message: message.into(), data: None });
+    }
 
     prompt_result_response(original, payload).ok_or_else(|| ErrorData {
         code: ErrorCode::INTERNAL_ERROR,

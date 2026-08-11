@@ -164,7 +164,8 @@ Current routed method families:
 | --- | --- |
 | `list_tools`, `list_resources`, `list_prompts`, `list_resource_templates` | Decode the incoming gateway cursor (if present) to recover per-backend positions. On the first request (no cursor) all configured backend services are queried; on a resume request only backends that still have pages are queried. Call each selected backend concurrently via `fan_out_list`, passing its own per-backend cursor. Preserve identifiers for a single backend or namespace them for multiple backends. Sort the merged page output. Encode a new gateway cursor when at least one backend returned a `next_cursor`; omit it when all are exhausted. Explicit tool aliases are preserved exactly. An undecodable cursor returns `−32602 Invalid params`. |
 | `call_tool` | Resolve an exact tool alias first; otherwise preserve the name for one backend or split `{backend_name}-{tool_name}` for multiple backends. Resolve one backend, run the optional tool hooks, track progress, call the backend, and return the result. |
-| `read_resource`, `subscribe`, `unsubscribe`, `get_prompt` | Select the only backend and forward the identifier unchanged, or split and strip the prefix for a multi-backend host, then call the resolved backend. |
+| `read_resource`, `subscribe`, `unsubscribe` | Select the only backend and forward the identifier unchanged, or split and strip the prefix for a multi-backend host, then call the resolved backend. |
+| `get_prompt` | Route as above, then run the optional prompt hooks around the backend call: the pre hook sees the backend-local prompt name and may rewrite arguments or deny, and the post hook sees the rendered messages and may rewrite or reject them. |
 | `complete` | Apply the same conditional routing to the prompt name or resource URI in `ref`, then return the selected backend's completion result. |
 
 `GatewayBackendClient` handles backend progress notifications for `call_tool`.
@@ -194,8 +195,8 @@ backend fanout or identifier routing.
 
 ## Response Path
 
-Backend responses return to `McpService` first. `call_tool` may run response
-plugin hooks before returning.
+Backend responses return to `McpService` first. `call_tool` and `get_prompt`
+may run response plugin hooks before returning.
 
 List calls decode the incoming gateway cursor, fan out to the active backends,
 merge the current page of output (preserving single-backend identifiers and

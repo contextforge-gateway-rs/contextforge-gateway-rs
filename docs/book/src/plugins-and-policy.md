@@ -92,12 +92,18 @@ The supported surface is deliberately narrow:
 ```text
 cmf.tool_pre_invoke
 cmf.tool_post_invoke
+cmf.prompt_pre_fetch
+cmf.prompt_post_fetch
 ```
 
 The gateway rejects route-based plugin selection, plugin directories, global
-policies/defaults, non-tool hooks, and plugin conditions. Those features need
-clear behavior for streaming, failures, timeouts, backpressure, context
+policies/defaults, resource and LLM hooks, and plugin conditions. Those features
+need clear behavior for streaming, failures, timeouts, backpressure, context
 propagation, and observability before they belong on the hot path.
+
+Configuration validation and factory registration must agree on this list. A
+hook accepted by validation but not registered by `CmfPluginFactory` leaves the
+plugin loaded and silently inert.
 
 ## Tool Call Behavior
 
@@ -117,6 +123,41 @@ After the upstream backend returns, the post hook can:
 
 Hook state is carried across the upstream call so pre and post hooks can share
 CPEX context for the same logical tool call.
+
+## Prompt Fetch Behavior
+
+For `get_prompt`, the pre hook runs after backend routing, so the plugin sees
+the backend-local prompt name and the owning backend separately rather than the
+gateway-prefixed identifier. It can leave the arguments unchanged, replace them,
+or deny the fetch before the backend renders anything.
+
+The post hook receives the rendered prompt as one CMF message per rendered MCP
+message, each carrying its role and its content block: text, image, audio,
+embedded resource, or resource link. A plugin can inspect or rewrite any of
+them, which is what lets a policy act on a file interpolated into a prompt
+rather than only on its surrounding text.
+
+Writing plugin edits back follows three rules:
+
+- A message the plugin left unchanged is returned exactly as the backend sent
+  it, so annotations, `_meta`, and binary resource blobs survive untouched.
+- A message the plugin changed is rebuilt from CMF. CMF does not model MCP
+  annotations or `_meta`, so an edited message loses them.
+- Edits that cannot be applied faithfully fail the call rather than falling back
+  to the backend's original. A changed message count, more than one prompt
+  result in the payload, a role MCP prompts cannot express, or a resource whose
+  text the plugin removed all return an error. Silently restoring the backend's
+  content would undo a redaction.
+
+MCP prompt results carry no error flag, so a plugin setting `is_error` on the
+CMF prompt result is rejecting the prompt rather than describing it. The gateway
+turns that into an MCP error carrying the plugin's `error_message`; the rendered
+content never reaches the client. This differs from tools, where `is_error` is a
+field on `CallToolResult` and is forwarded as a successful response.
+
+Binary resource blobs reach plugins by URI and MIME type but not by content:
+CMF stores decoded bytes while MCP sends base64. A plugin can deny such a
+message; editing one fails the write-back.
 
 ## Boundary Rules
 

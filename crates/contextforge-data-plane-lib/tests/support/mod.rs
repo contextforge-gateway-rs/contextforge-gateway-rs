@@ -24,9 +24,9 @@ pub(crate) use list_tools_gateway::{
     create_tls_gateway_with_four_tls_counters, plaintext_config,
 };
 pub(crate) use plugin::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin,
-    REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B,
-    TestPlugin, TestPluginFactory,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior,
+    PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A,
+    REWRITTEN_SUM_B, TestPlugin, TestPluginFactory,
 };
 pub(crate) use plugin_gateway::{
     BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, RunningGateway, start_gateway, start_gateway_with_events,

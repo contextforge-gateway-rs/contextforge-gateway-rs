@@ -18,7 +18,7 @@ They describe the shape of the current Rust dataplane, not just preferences.
 | Backend names are public | The backend map key is part of tool/resource/prompt names. | Backend renames are client-visible behavior changes. |
 | Sessions are local today | Backend RMCP services live in `BackendTransports` inside one process. | Load-balanced deployments need sticky routing or a new session ownership design. |
 | Merged MCP semantics define the contract | The client sees one gateway MCP server with namespaced backend objects. | Backend topology should not become a hard client dependency beyond the namespace contract. |
-| Plugin boundaries stay explicit | Tool pre/post hooks are integrated at known points around backend invocation. | Payload mutation needs clear failure, timeout, cancellation, and telemetry behavior. |
+| Plugin boundaries stay explicit | Tool and prompt pre/post hooks are integrated at known points around backend invocation. | Payload mutation needs clear failure, timeout, cancellation, and telemetry behavior. |
 
 ## Dataplane, Not Control Plane
 

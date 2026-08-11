@@ -318,6 +318,7 @@ pub(crate) const REWRITTEN_PROMPT_TOPIC: &str = "rewritten-topic";
 pub(crate) const REWRITTEN_PROMPT_TEXT: &str = "review of [REDACTED]";
 pub(crate) const REWRITTEN_PROMPT_RESOURCE: &str = "config with [REDACTED]";
 pub(crate) const PROMPT_POST_DENY_ERROR_CODE: i32 = -32004;
+pub(crate) const PROMPT_ERROR_MESSAGE: &str = "prompt blocked by policy";
 
 fn prompt_result_mut(payload: &mut MessagePayload) -> Option<&mut CmfPromptResult> {
     payload.message.content.iter_mut().find_map(|part| match part {
@@ -333,6 +334,7 @@ pub(crate) enum PromptBehavior {
     DropText,
     ContextRoundtrip,
     Deny,
+    MarkError,
 }
 
 pub(crate) struct PromptTestPlugin {
@@ -410,7 +412,7 @@ impl PromptTestPlugin {
                 ctx.set_global("prompt_pre_seen", json!(true));
                 PluginResult::allow()
             },
-            PromptBehavior::Rewrite | PromptBehavior::DropText | PromptBehavior::Deny => {
+            PromptBehavior::Rewrite | PromptBehavior::DropText | PromptBehavior::Deny | PromptBehavior::MarkError => {
                 let mut modified = payload.clone();
                 if let Some(ContentPart::PromptRequest { content }) =
                     modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::PromptRequest { .. }))
@@ -453,6 +455,14 @@ impl PromptTestPlugin {
                 let mut modified = payload.clone();
                 if let Some(result) = prompt_result_mut(&mut modified) {
                     result.messages.clear();
+                }
+                PluginResult::modify_payload(modified)
+            },
+            PromptBehavior::MarkError => {
+                let mut modified = payload.clone();
+                if let Some(result) = prompt_result_mut(&mut modified) {
+                    result.is_error = true;
+                    result.error_message = Some(PROMPT_ERROR_MESSAGE.to_owned());
                 }
                 PluginResult::modify_payload(modified)
             },

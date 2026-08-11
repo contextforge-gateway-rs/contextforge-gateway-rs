@@ -18,7 +18,7 @@ use rmcp::{
 use serde_json::{Map, Value, json};
 
 use support::{
-    BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE,
+    BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE,
     PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT,
     REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID, TestPlugin, error_code,
     error_parts, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin,
@@ -813,6 +813,23 @@ async fn prompt_post_hook_denial_returns_plugin_error_code() {
         message.contains("prompt"),
         "a denied prompt must not be reported to the client as a denied tool call: {message}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_error_flag_fails_the_call() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new("prompt-post-error", vec![cmf_hook_names::PROMPT_POST_FETCH])
+            .with_behavior(PromptBehavior::MarkError),
+    );
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let error = service.get_prompt(review_request("weather")).await.expect_err("flagged prompt fails the call");
+    let (code, message) = error_parts(error);
+    assert_eq!(ErrorCode::INVALID_REQUEST, code);
+    assert_eq!(PROMPT_ERROR_MESSAGE, message);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

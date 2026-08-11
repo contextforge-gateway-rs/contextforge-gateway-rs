@@ -132,7 +132,7 @@ pub(crate) fn prompt_request_payload(
                 content: PromptRequest {
                     prompt_request_id: prompt_request_id.to_owned(),
                     name: prompt_name.to_owned(),
-                    arguments: request.arguments.clone().unwrap_or_default().into_iter().collect(),
+                    arguments: request.arguments.clone().map(HashMap::from_iter).unwrap_or_default(),
                     server_id: Some(backend_name.to_owned()),
                 },
             }],
@@ -176,13 +176,25 @@ pub(crate) fn prompt_result_payload(
     }
 }
 
-/// `None` means refuse: falling back to the backend's original would undo a plugin's redaction.
+fn prompt_result(payload: &MessagePayload) -> Option<&PromptResult> {
+    let results = payload.message.get_prompt_results();
+    let [result] = results.as_slice() else { return None };
+    Some(*result)
+}
+
+pub(crate) fn prompt_result_rejection(payload: &MessagePayload) -> Option<String> {
+    let result = prompt_result(payload)?;
+    result
+        .is_error
+        .then(|| result.error_message.clone().unwrap_or_else(|| "Plugin rejected the rendered prompt".to_owned()))
+}
+
+// `None` means refuse: falling back to the backend's original would undo a plugin's redaction.
 pub(crate) fn prompt_result_response(
     mut original: GetPromptResult,
     payload: &MessagePayload,
 ) -> Option<GetPromptResult> {
-    let results = payload.message.get_prompt_results();
-    let result = results.first()?;
+    let result = prompt_result(payload)?;
     if result.messages.len() != original.messages.len() {
         return None;
     }
@@ -308,16 +320,20 @@ mod tests {
         GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, "review of weather")])
     }
 
-    fn edited_messages(payload: &mut MessagePayload) -> &mut Vec<Message> {
+    fn prompt_result_mut(payload: &mut MessagePayload) -> &mut PromptResult {
         payload
             .message
             .content
             .iter_mut()
             .find_map(|part| match part {
-                ContentPart::PromptResult { content } => Some(&mut content.messages),
+                ContentPart::PromptResult { content } => Some(content),
                 _ => None,
             })
             .expect("payload carries a prompt result")
+    }
+
+    fn edited_messages(payload: &mut MessagePayload) -> &mut Vec<Message> {
+        &mut prompt_result_mut(payload).messages
     }
 
     #[test]
@@ -328,6 +344,44 @@ mod tests {
         edited_messages(&mut payload).push(extra);
 
         assert!(prompt_result_response(original, &payload).is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_extra_prompt_result() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let duplicate = payload.message.content[0].clone();
+        payload.message.content.push(duplicate);
+
+        assert!(prompt_result_response(original, &payload).is_none());
+    }
+
+    #[test]
+    fn prompt_result_rejection_reports_the_plugin_error_message() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let result = prompt_result_mut(&mut payload);
+        result.is_error = true;
+        result.error_message = Some("blocked by policy".to_owned());
+
+        assert_eq!(Some("blocked by policy".to_owned()), prompt_result_rejection(&payload));
+    }
+
+    #[test]
+    fn prompt_result_rejection_falls_back_when_the_plugin_gives_no_message() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        prompt_result_mut(&mut payload).is_error = true;
+
+        assert_eq!(Some("Plugin rejected the rendered prompt".to_owned()), prompt_result_rejection(&payload));
+    }
+
+    #[test]
+    fn prompt_result_rejection_is_absent_for_a_normal_result() {
+        let original = text_prompt();
+        let payload = prompt_result_payload(&original, "review", "prompt-1");
+
+        assert_eq!(None, prompt_result_rejection(&payload));
     }
 
     #[test]

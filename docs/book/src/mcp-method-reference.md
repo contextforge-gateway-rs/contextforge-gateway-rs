@@ -45,7 +45,7 @@ single-backend pass-through, or a multi-backend prefix:
 | `call_tool` | Resolves an exact control-plane alias first, then falls back to the single-versus-multi rule. It runs the optional plugin hooks, tracks progress, forwards the backend-local tool name, and propagates downstream cancellation. |
 | `read_resource` | Preserves a single-backend URI or strips a multi-backend prefix, then returns the selected backend's result. |
 | `subscribe`, `unsubscribe` | Apply the same resource-URI routing, track the downstream subscription, and forward or stop forwarding matching resource-update notifications. |
-| `get_prompt` | Preserves a single-backend prompt name or strips a multi-backend prefix, then returns the selected backend's result. |
+| `get_prompt` | Preserves a single-backend prompt name or strips a multi-backend prefix, runs the optional plugin hooks either side of the backend call, and returns the selected backend's result. |
 | `complete` | Applies the same routing to the prompt name or resource URI in `ref` and returns the selected backend's completion result. |
 
 Routed failures are JSON-RPC errors: an identifier that cannot select a backend
