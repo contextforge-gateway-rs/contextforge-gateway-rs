@@ -40,7 +40,9 @@ These run in `cargo nextest run` with no Docker dependencies.
 `@modelcontextprotocol/conformance@0.2.0-alpha.11` server requirements for MCP
 `2026-07-28`. It uses `--requirements 2026-07-28`, rather than a moving suite,
 so both the scenario set and the stateless wire version are fixed to that
-specification revision.
+specification revision. The workflow delegates stack setup, provisioning,
+route verification, runner execution, and cleanup to the Bash scripts in
+`.github/conformance/`.
 
 The job launches a deliberately small live stack: Redis, the published
 `ghcr.io/ibm/mcp-context-forge:latest` control-plane image, the published
