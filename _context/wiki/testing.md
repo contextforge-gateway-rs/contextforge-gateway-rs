@@ -46,9 +46,8 @@ is unnecessary. The harness lives in `tests/conformance/`.
 Because this conformance CLI cannot set a bearer header, nginx adds an
 ephemeral control-plane token when one is absent; there is no auth proxy or
 repository-owned JavaScript. A route probe prevents control-plane fallback.
-Counts appear in the Actions log, full output is uploaded as the
-`mcp-conformance-results` artifact, and `expected-failures.yml` guards the
-current baseline.
+Counts appear directly in the Actions log, and `expected-failures.yml` guards
+the current baseline. The job does not retain a separate conformance artifact.
 
 ## Full-Stack Integration Harness
 

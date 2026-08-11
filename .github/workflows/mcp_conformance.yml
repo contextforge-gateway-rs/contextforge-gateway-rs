@@ -70,23 +70,6 @@ jobs:
         id: runner
         run: tests/conformance/run-conformance.sh
 
-      - name: Collect stack logs
-        if: always()
-        run: >-
-          docker compose -f tests/conformance/docker-compose.yml
-          logs --no-color > conformance-logs/stack.log 2>&1 || true
-
-      - name: Upload conformance results
-        if: always()
-        uses: actions/upload-artifact@v6.0.0
-        with:
-          name: mcp-conformance-results
-          path: |
-            conformance-results/
-            conformance-logs/
-          if-no-files-found: warn
-          retention-days: 14
-
       - name: Stop the live stack
         if: always()
         run: tests/conformance/stop-live-stack.sh

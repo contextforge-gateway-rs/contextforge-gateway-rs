@@ -19,8 +19,8 @@ set +e
     --requirements "${MCP_CONFORMANCE_SPEC_VERSION}" \
     --expected-failures "${script_dir}/expected-failures.yml" \
     --output-dir "${repo_root}/conformance-results"
-) 2>&1 | tee "${repo_root}/conformance-logs/runner.log"
-runner_status="${PIPESTATUS[0]}"
+)
+runner_status="$?"
 set -e
 
 echo "status=${runner_status}" >> "${GITHUB_OUTPUT}"
