@@ -3,7 +3,7 @@
 ## Checklist
 
 1. Front door routes only `/contextforge-rs` to the dataplane.
-2. JWT verification key/secret in place and rotated with the control plane's signing key.
+2. JWT verification key/secret matches the control plane's signing material; clients use control-plane API tokens whose `sub` matches the published user-config key.
 3. Redis reachable; TLS/mTLS across trust zones; write access restricted to the control plane; `DATAPLANE_PUBLISHER=true` on the control plane.
 4. Upstream connection mode matches backend URL schemes.
 5. One replica per `Mcp-session-id` (single replica or sticky routing).
@@ -65,7 +65,7 @@ Both default to ~60s. For functional tests, shorten the publisher interval and d
 | Concern | Current state |
 | --- | --- |
 | JWT revocation | None. A leaked token is valid until `exp`. Rotate the key and restart to invalidate. |
-| CORS | Wide open (any origin, method, header). Bearer-token based + cookie-free → no CSRF risk, but expect tightening as policy work lands. |
+| CORS / Origin | CORS response headers are permissive. DNS-rebinding protection is enforced separately by `mcp_origin_layer`: configure both `--mcp-allowed-hosts` and `--mcp-allowed-origins` for production. |
 | Local bootstrap routes | `/contextforge-rs/admin/tokens/{user}`, `/admin/userconfigs/{user}`, `/health` are **outside auth middleware — unauthenticated by design.** Only exist with `with_tools`. Production builds must not enable `with_tools`. |
 | Redis trust | Whoever can write Redis controls routing (arbitrary backend URLs receive caller traffic) AND which registered plugin hooks execute on payloads. Protect with TLS/mTLS and restrict write access to the control plane. |
 | Downstream TLS | Optional. Plain HTTP is acceptable only behind a trusted front door on a private network. Identity is always the bearer JWT, not mTLS. |

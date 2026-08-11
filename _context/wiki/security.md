@@ -18,7 +18,61 @@ Authentication is bearer-JWT only:
 - `iss` must be `mcpgateway`, `aud` must be `mcpgateway-api`, and `exp` is validated.
 - **No revocation list.** A leaked token is valid until it expires. Rotate the key and restart to invalidate all outstanding tokens.
 - Authorization is config existence. The `sub` claim selects the caller's `UserConfig`; the path selects one virtual host inside it. A caller can never reach a backend not in their own config. Unknown virtual hosts return `404` before MCP handling.
-- `jti`, `token_use`, `iat`, `teams`, `user`, and `scopes` are carried but not yet enforced. Fine-grained permissions are future policy work.
+- `jti` and `user` are required by the accepted token shape but are not used for policy decisions. `token_use`, `iat`, `teams`, and `scopes` are optional and are also not enforced. Fine-grained permissions are future policy work.
+
+## Authentication Responsibility Split
+
+Authentication is coordinated across the two planes but does not require a
+runtime HTTP call between them.
+
+| Concern | Control plane (`IBM/mcp-context-forge`) | Data plane (this repository) |
+| --- | --- | --- |
+| Human identity | Owns login, password/SSO/OAuth flows, users, teams, management sessions, and IAM policy. | Has no user database, login flow, cookies, or IAM service. |
+| Token issuance | Creates and manages API JWTs and signs them with the configured private key or HMAC secret. The API-token path emits the rich claim shape accepted by the dataplane. | Does not mint production tokens. It receives only the RSA public key or HMAC verification secret at startup. |
+| Authorization material | Applies database visibility/team rules and periodically publishes a per-user `UserConfig` snapshot to Redis. | Reads that snapshot through `UserConfigStore`; it never asks the control plane to authorize a request. |
+| Request authentication | Authenticates and authorizes requests served on control-plane routes, including management and legacy MCP traffic. | Independently validates every modern MCP request routed to `/contextforge-rs`. |
+| Revocation and lifecycle | Owns token catalogs, revocation/blocklists, user disablement, and management-session lifecycle for its own request paths. | Does not consult the control-plane database or token blocklist. Revocation alone does not stop local JWT validation; published config can separately remove routing access. |
+
+### Current end-to-end flow
+
+1. A user authenticates to the control plane and creates an API token. The
+   compatible API-token path sets `sub` to the user's email and includes `jti`,
+   `user`, `token_use: api`, plus optional `teams` and `scopes`.
+2. The control-plane `dataplane_publisher.py` reads active users, team
+   membership, visibility, and enabled server/backend associations. It writes
+   a filtered `UserConfig` snapshot to Redis under the same user email.
+3. The MCP client sends that bearer token to the modern dataplane route. A
+   control-plane browser/login session token is a management-plane credential,
+   not the documented dataplane credential: its subject semantics may differ
+   from the email key used by the publisher.
+4. `mcp_origin_layer` performs Host/Origin DNS-rebinding checks before
+   authentication.
+5. `claims_layer` requires `Authorization: Bearer ...`, accepts only
+   `RS256/384/512` or `HS256/384/512`, verifies the signature, issuer
+   (`mcpgateway`), audience (`mcpgateway-api`), and expiration, then inserts
+   `ContextForgeClaims` into the request.
+6. `user_config_store_layer` uses `claims.sub` as the Redis lookup key. Missing
+   config returns HTTP `400`; the dataplane does not fall back to a live
+   control-plane lookup.
+7. `virtual_host_config_layer` checks that the requested virtual host exists in
+   that user's published config. A missing virtual host returns the
+   control-plane-compatible HTTP `404`; accepted requests continue to MCP
+   routing with backend session state scoped by principal and session id.
+
+The current authorization boundary is therefore coarse: valid token plus a
+published virtual host for `sub`. JWT `teams`/`scopes` and the model's
+`allowed_tool_names`, `allowed_resource_names`, and `allowed_prompt_names` are
+not yet enforced by dataplane routing. The control plane must publish only the
+backends a user may reach, and this limitation must remain visible until
+fine-grained enforcement lands. Publishing a backend currently makes every
+object exposed by that backend reachable, regardless of those allowlist fields.
+
+> **Revocation gap:** revoking one API token in the control plane does not make
+> the dataplane consult that blocklist. The token continues to pass local JWT
+> validation until `exp` unless the signing key is rotated and the dataplane is
+> restarted. Removing the subject's published config can stop routing after the
+> publisher TTL and dataplane cache expire, but removes access for every token
+> belonging to that subject rather than revoking one token.
 
 ## What Compromise Means
 
