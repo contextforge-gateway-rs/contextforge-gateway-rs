@@ -1,0 +1,275 @@
+name: MCP Conformance
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MCP_CONFORMANCE_VERSION: 0.2.0-alpha.11
+  MCP_CONFORMANCE_SOURCE_SHA: c321dd32035556e6769d3724a8ee97d87c3faaac
+  MCP_CONFORMANCE_SPEC_VERSION: 2026-07-28
+  MCP_CONFORMANCE_SERVER_ID: 3f33286667d34b65a31c3bafd30e4c21
+  CF_CONTROLPLANE_IMAGE: ghcr.io/ibm/mcp-context-forge:latest
+  CF_DATAPLANE_IMAGE: ghcr.io/contextforge-org/contextforge-data-plane:latest
+
+jobs:
+  conformance:
+    name: MCP 2026-07-28 through nginx and dataplane
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out data plane
+        uses: actions/checkout@v6.0.2
+
+      - name: Check out the alpha.11 conformance fixture
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: modelcontextprotocol/conformance
+          ref: ${{ env.MCP_CONFORMANCE_SOURCE_SHA }}
+          path: .conformance-suite
+          persist-credentials: false
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@v6.5.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: .conformance-suite/package-lock.json
+
+      - name: Install official conformance dependencies
+        working-directory: .conformance-suite
+        run: |
+          test "$(node -p "require('./package.json').version")" = "${MCP_CONFORMANCE_VERSION}"
+          npm ci --ignore-scripts
+
+      - name: Pull the latest ContextForge images
+        run: >-
+          docker compose -f .github/conformance/docker-compose.yml
+          pull redis control-plane data-plane nginx
+
+      - name: Start the fixture and control plane
+        run: |
+          mkdir -p conformance-logs conformance-results
+
+          (
+            cd .conformance-suite
+            PORT=3000 npm exec -- tsx examples/servers/typescript/everything-server.ts
+          ) > conformance-logs/reference-server.log 2>&1 &
+          echo "$!" > conformance-logs/reference-server.pid
+
+          docker compose -f .github/conformance/docker-compose.yml \
+            up -d --wait redis control-plane
+
+          for _ in $(seq 1 120); do
+            if curl --silent --output /dev/null http://127.0.0.1:3000/mcp; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          echo "Timed out waiting for the official conformance fixture" >&2
+          exit 1
+
+      - name: Register the official fixture through the control plane
+        run: |
+          bootstrap_token="$({
+            docker compose -f .github/conformance/docker-compose.yml exec -T control-plane \
+              python3 -m mcpgateway.utils.create_jwt_token \
+              --username admin@example.com --admin --exp 120
+          } 2>/dev/null | tail -n 1)"
+          test -n "${bootstrap_token}"
+          echo "::add-mask::${bootstrap_token}"
+
+          api_request() {
+            local method="$1"
+            local path="$2"
+            local body="${3-}"
+            local args=(
+              --silent --show-error --fail-with-body
+              --request "${method}"
+              --header "Authorization: Bearer ${bootstrap_token}"
+              --header "Content-Type: application/json"
+              "http://127.0.0.1:4444${path}"
+            )
+            if [ -n "${body}" ]; then
+              args+=(--data "${body}")
+            fi
+            curl "${args[@]}"
+          }
+
+          gateway="$(api_request POST /gateways '{
+            "name": "_",
+            "url": "http://host.docker.internal:3000/mcp",
+            "transport": "STREAMABLEHTTP",
+            "authType": "authheaders",
+            "authHeaders": [{"key": "Host", "value": "localhost:3000"}],
+            "description": "Official MCP alpha.11 conformance fixture"
+          }')"
+          gateway_id="$(jq --exit-status --raw-output '.id' <<< "${gateway}")"
+
+          api_request POST \
+            "/gateways/${gateway_id}/tools/refresh?include_resources=true&include_prompts=true" \
+            '{}' > /dev/null
+
+          tool_ids='[]'
+          resource_ids='[]'
+          prompt_ids='[]'
+          for _ in $(seq 1 120); do
+            tools="$(api_request GET /tools)"
+            resources="$(api_request GET /resources)"
+            prompts="$(api_request GET /prompts)"
+
+            tool_ids="$(jq --compact-output --arg id "${gateway_id}" \
+              '[.[] | select((.gateway_id // .gatewayId) == $id) | .id]' <<< "${tools}")"
+            resource_ids="$(jq --compact-output --arg id "${gateway_id}" \
+              '[.[] | select((.gateway_id // .gatewayId) == $id) | .id]' <<< "${resources}")"
+            prompt_ids="$(jq --compact-output --arg id "${gateway_id}" \
+              '[.[] | select((.gateway_id // .gatewayId) == $id) | .id]' <<< "${prompts}")"
+
+            has_tool="$(jq --arg id "${gateway_id}" \
+              '[.[] | select((.gateway_id // .gatewayId) == $id and .name == "test_simple_text")] | length' \
+              <<< "${tools}")"
+            has_resource="$(jq --arg id "${gateway_id}" \
+              '[.[] | select((.gateway_id // .gatewayId) == $id and .uri == "test://static-text")] | length' \
+              <<< "${resources}")"
+            has_prompt="$(jq --arg id "${gateway_id}" \
+              '[.[] | select((.gateway_id // .gatewayId) == $id and .name == "test_simple_prompt")] | length' \
+              <<< "${prompts}")"
+            if [ "${has_tool}" -gt 0 ] && [ "${has_resource}" -gt 0 ] && [ "${has_prompt}" -gt 0 ]; then
+              break
+            fi
+            sleep 0.5
+          done
+          test "${has_tool}" -gt 0
+          test "${has_resource}" -gt 0
+          test "${has_prompt}" -gt 0
+
+          server_payload="$(jq --null-input --compact-output \
+            --arg id "${MCP_CONFORMANCE_SERVER_ID}" \
+            --argjson tools "${tool_ids}" \
+            --argjson resources "${resource_ids}" \
+            --argjson prompts "${prompt_ids}" \
+            '{server: {
+              id: $id,
+              name: "Official MCP Conformance Server",
+              description: "Virtual server for alpha.11 conformance",
+              associated_tools: $tools,
+              associated_resources: $resources,
+              associated_prompts: $prompts
+            }}')"
+          api_request POST /servers "${server_payload}" > /dev/null
+
+          token_response="$(api_request POST /v1/tokens '{
+            "name": "MCP conformance CI",
+            "description": "Ephemeral dataplane token",
+            "expires_in_days": 1,
+            "user_email": "admin@example.com"
+          }')"
+          conformance_token="$(jq --exit-status --raw-output '.access_token' <<< "${token_response}")"
+          echo "::add-mask::${conformance_token}"
+          echo "MCP_CONFORMANCE_TOKEN=${conformance_token}" >> "${GITHUB_ENV}"
+
+      - name: Start dataplane and nginx
+        run: |
+          docker compose -f .github/conformance/docker-compose.yml \
+            up -d --wait data-plane nginx
+
+          endpoint="http://127.0.0.1:8080/servers/${MCP_CONFORMANCE_SERVER_ID}/mcp"
+          request='{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {
+                  "name": "ci-route-probe",
+                  "version": "1.0.0"
+                },
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            }
+          }'
+          for _ in $(seq 1 120); do
+            curl --silent --show-error \
+              --dump-header conformance-logs/route-probe-headers.txt \
+              --output conformance-logs/route-probe-body.txt \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --header 'Accept: application/json, text/event-stream' \
+              --header 'MCP-Protocol-Version: 2026-07-28' \
+              --header 'MCP-Method: server/discover' \
+              --data "${request}" \
+              "${endpoint}" || true
+            if grep --ignore-case --quiet '^X-CF-Conformance-Backend: dataplane' \
+              conformance-logs/route-probe-headers.txt \
+              && sed -n 's/^data: //p' conformance-logs/route-probe-body.txt \
+                | jq --exit-status \
+                  '.result.supportedVersions | index("2026-07-28") != null' \
+                  > /dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "Modern MCP route did not reach the dataplane through nginx" >&2
+          cat conformance-logs/route-probe-headers.txt >&2
+          cat conformance-logs/route-probe-body.txt >&2
+          exit 1
+
+      - name: Run MCP 2026-07-28 requirements
+        id: runner
+        run: |
+          set +e
+          (
+            cd .conformance-suite
+            npm start -- \
+              server \
+              --url "http://127.0.0.1:8080/servers/${MCP_CONFORMANCE_SERVER_ID}/mcp" \
+              --requirements "${MCP_CONFORMANCE_SPEC_VERSION}" \
+              --expected-failures ../.github/conformance/expected-failures.yml \
+              --output-dir ../conformance-results
+          ) 2>&1 | tee conformance-logs/runner.log
+          runner_status="${PIPESTATUS[0]}"
+          set -e
+          echo "status=${runner_status}" >> "${GITHUB_OUTPUT}"
+
+      - name: Collect stack logs
+        if: always()
+        run: >-
+          docker compose -f .github/conformance/docker-compose.yml
+          logs --no-color > conformance-logs/stack.log 2>&1 || true
+
+      - name: Upload conformance results
+        if: always()
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: mcp-conformance-results
+          path: |
+            conformance-results/
+            conformance-logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop the live stack
+        if: always()
+        run: |
+          if [ -f conformance-logs/reference-server.pid ]; then
+            kill "$(cat conformance-logs/reference-server.pid)" 2>/dev/null || true
+          fi
+          docker compose -f .github/conformance/docker-compose.yml \
+            down --volumes --remove-orphans
+
+      - name: Enforce conformance baseline
+        if: always()
+        env:
+          RUNNER_STATUS: ${{ steps.runner.outputs.status }}
+        run: test "${RUNNER_STATUS}" = "0"
