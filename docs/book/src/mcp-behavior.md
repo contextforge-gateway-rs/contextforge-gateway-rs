@@ -9,6 +9,9 @@ The downstream dataplane contract is MCP `2026-07-28` over Streamable HTTP.
 Modern clients use `server/discover` and provide the required client context on
 each request.
 
+The RMCP server implementation advertises only `2026-07-28` from
+`server/discover`.
+
 Older MCP versions, legacy session initialization, and the legacy SSE transport
 are not target dataplane compatibility surfaces. The external ContextForge
 control plane serves those clients on its own routes. Legacy traffic does not

@@ -1,5 +1,7 @@
 mod support;
 
+use std::time::{Duration, Instant};
+
 use contextforge_data_plane_lib::Result;
 use rmcp::{
     ClientLifecycleMode, ClientServiceExt,
@@ -13,6 +15,9 @@ use support::{
     plaintext_config,
 };
 
+const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
+const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
 async fn modern_discover_reports_context_capabilities_and_listen_acknowledges_filter() -> Result<()> {
@@ -23,6 +28,7 @@ async fn modern_discover_reports_context_capabilities_and_listen_acknowledges_fi
     else {
         panic!("invalid test gateway configuration");
     };
+    wait_for_gateway_port(gateway_port).await;
 
     let maybe_passed = assert_modern_discover_and_listen(gateway_url, user).await;
 
@@ -32,7 +38,7 @@ async fn modern_discover_reports_context_capabilities_and_listen_acknowledges_fi
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
-async fn rmcp_gates_legacy_and_modern_subscription_methods() -> Result<()> {
+async fn modern_endpoint_rejects_legacy_protocol_and_legacy_methods() -> Result<()> {
     let gateway_port = create_ports(1)[0];
     let user = TEST_USER_ID;
     let Ok(ListToolsGatewaySettings { handle, gateway_url, .. }) =
@@ -40,6 +46,7 @@ async fn rmcp_gates_legacy_and_modern_subscription_methods() -> Result<()> {
     else {
         panic!("invalid test gateway configuration");
     };
+    wait_for_gateway_port(gateway_port).await;
 
     let maybe_passed = assert_rmcp_subscription_method_gating(&gateway_url, user).await;
 
@@ -49,6 +56,22 @@ async fn rmcp_gates_legacy_and_modern_subscription_methods() -> Result<()> {
 
 async fn assert_modern_discover_and_listen(gateway_url: String, user: &str) -> Result<()> {
     let client = create_client(user);
+    let discover = post_raw_mcp(
+        &client,
+        &gateway_url,
+        MODERN_PROTOCOL_VERSION,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {
+                "_meta": request_meta(MODERN_PROTOCOL_VERSION)
+            }
+        }),
+    )
+    .await?;
+    assert_eq!(json!([MODERN_PROTOCOL_VERSION]), discover["result"]["supportedVersions"]);
+
     let transport =
         StreamableHttpClientTransport::with_client(client, StreamableHttpClientTransportConfig::with_uri(gateway_url));
     let running_service = ClientInfo::default()
@@ -90,14 +113,14 @@ async fn assert_rmcp_subscription_method_gating(gateway_url: &str, user: &str) -
     let modern_subscribe = post_raw_mcp(
         &client,
         gateway_url,
-        "2026-07-28",
+        MODERN_PROTOCOL_VERSION,
         json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "resources/subscribe",
             "params": {
                 "uri": "memo://known",
-                "_meta": request_meta("2026-07-28")
+                "_meta": request_meta(MODERN_PROTOCOL_VERSION)
             }
         }),
     )
@@ -107,7 +130,7 @@ async fn assert_rmcp_subscription_method_gating(gateway_url: &str, user: &str) -
     let legacy_listen = post_raw_mcp(
         &client,
         gateway_url,
-        "2025-11-25",
+        LEGACY_PROTOCOL_VERSION,
         json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -116,12 +139,12 @@ async fn assert_rmcp_subscription_method_gating(gateway_url: &str, user: &str) -
                 "notifications": {
                     "toolsListChanged": true
                 },
-                "_meta": request_meta("2025-11-25")
+                "_meta": request_meta(LEGACY_PROTOCOL_VERSION)
             }
         }),
     )
     .await?;
-    assert_jsonrpc_error_code(&legacy_listen, i64::from(ErrorCode::METHOD_NOT_FOUND.0));
+    assert_jsonrpc_error_code(&legacy_listen, i64::from(ErrorCode::UNSUPPORTED_PROTOCOL_VERSION.0));
 
     Ok(())
 }
@@ -185,4 +208,15 @@ fn assert_jsonrpc_error_code(response: &Value, expected_code: i64) {
         response.pointer("/error/code").and_then(Value::as_i64),
         "unexpected JSON-RPC response: {response}"
     );
+}
+
+async fn wait_for_gateway_port(port: u16) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "gateway did not start on port {port}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }

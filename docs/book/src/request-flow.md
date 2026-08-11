@@ -87,6 +87,10 @@ The public route is nested under:
 The route segment is named `virtual_host_name`, but the layer stores the value
 as `VirtualHostId`.
 
+`McpService::supported_protocol_versions()` advertises only `2026-07-28`.
+Requests that declare older protocol versions fail protocol validation before
+method-specific legacy routing is considered.
+
 ## Flow Checkpoints
 
 | Checkpoint | Established fact | Next dependency |
@@ -197,7 +201,7 @@ backend-routed:
 | Method | Current behavior |
 | --- | --- |
 | `ping` | Returns success. |
-| `server/discover` | Uses RMCP's default handler over `McpService::get_info()`. For modern stateless requests this reports capabilities derived from the authenticated user's selected virtual host. |
+| `server/discover` | Uses RMCP's default handler over `McpService::get_info()`. For modern stateless requests this reports capabilities derived from the authenticated user's selected virtual host and advertises only `2026-07-28` in `supportedVersions`. |
 | `subscriptions/listen` | Uses RMCP's subscription machinery. The gateway narrows the requested filter against the selected virtual host, registers RMCP `SubscriptionSink`s for accepted notification kinds, and removes those registrations when the listen request closes. |
 
 This path still passes through the same HTTP middleware, but it does not use
