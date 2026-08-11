@@ -4,16 +4,14 @@ use contextforge_data_plane_apis::user_store::BackendMCPGateway;
 use http::request::Parts;
 use rmcp::{
     ClientLifecycleMode, ClientServiceExt, ErrorData, RoleClient, RoleServer,
-    model::{
-        ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, ProtocolVersion, ServerCapabilities,
-    },
+    model::{ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, ProtocolVersion},
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-use tracing::{info, warn};
+use tracing::warn;
 
 use super::McpService;
-use crate::gateway::{backend_client::GatewayBackendClient, backend_transports::BackendTransportService, session_store::UserSessionStore};
+use crate::gateway::{backend_client::GatewayBackendClient, session_store::UserSessionStore};
 
 pub(super) async fn connect_backend_for_request<T>(
     mcp_service: &McpService<T>,
@@ -138,7 +136,6 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     fn backend(passthrough: &[&str], add: &[(&str, &str)], remove: &[&str]) -> BackendMCPGateway {
         BackendMCPGateway {
