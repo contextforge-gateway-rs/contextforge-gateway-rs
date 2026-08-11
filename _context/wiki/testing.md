@@ -36,42 +36,19 @@ These run in `cargo nextest run` with no Docker dependencies.
 
 ## MCP Conformance CI
 
-`.github/workflows/mcp_conformance.yml` runs the official
-`@modelcontextprotocol/conformance@0.2.0-alpha.11` server requirements for MCP
-`2026-07-28`. It uses `--requirements 2026-07-28`, rather than a moving suite,
-so both the scenario set and the stateless wire version are fixed to that
-specification revision. The workflow delegates stack setup, provisioning,
-route verification, runner execution, and cleanup to the Bash scripts in
-`.github/conformance/`.
+`.github/workflows/mcp_conformance.yml` runs the pinned official conformance
+suite `0.2.0-alpha.11` with `--requirements 2026-07-28`. Its small live path is
+official runner → nginx → published `latest` dataplane → official fixture,
+with the published `latest` control plane registering and publishing the
+fixture through Redis. The control plane uses ephemeral SQLite, so PostgreSQL
+is unnecessary. Workflow helpers live in `.github/conformance/`.
 
-The job launches a deliberately small live stack: Redis, the published
-`ghcr.io/ibm/mcp-context-forge:latest` control-plane image, the published
-`ghcr.io/contextforge-org/contextforge-data-plane:latest` dataplane image, and
-nginx. The control plane uses an ephemeral SQLite database, so PostgreSQL and
-PgBouncer are not needed in this conformance lane.
-
-The official TypeScript everything server runs at the npm release's source
-SHA and is registered through the real control-plane API. The control-plane
-publisher writes the virtual-server snapshot to Redis. The official runner
-then targets nginx at `/servers/{virtual_host_id}/mcp`; nginx rewrites that
-modern route to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the
-dataplane. A route probe requires the dataplane response marker before the
-suite starts, so the test cannot silently fall back to the control plane.
-
-The conformance CLI has no bearer-header option. Nginx therefore adds a real
-control-plane test token only when the runner did not supply one. There is no
-separate authentication proxy or repository-owned JavaScript helper.
-
-This exercises nginx routing, dataplane authentication, Redis config lookup,
-control-plane publication, virtual-host lookup, and upstream gateway routing.
-Because both ContextForge images use the mutable `latest` tag, the job tests
-the currently published images rather than the pull-request commit.
-
-The job prints the official runner's pass and failure details directly in its
-GitHub Actions log and writes the raw results and process logs to the
-`mcp-conformance-results` artifact. Known failures live in
-`.github/conformance/expected-failures.yml`; a new failure or a now-stale
-baseline entry fails CI.
+Because this conformance CLI cannot set a bearer header, nginx adds an
+ephemeral control-plane token when one is absent; there is no auth proxy or
+repository-owned JavaScript. A route probe prevents control-plane fallback.
+Counts appear in the Actions log, full output is uploaded as the
+`mcp-conformance-results` artifact, and `expected-failures.yml` guards the
+current baseline.
 
 ## Full-Stack Integration Harness
 
