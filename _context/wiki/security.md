@@ -10,69 +10,30 @@
 | Backend MCP servers | Trusted per configured URL. The gateway forwards caller traffic to them and merges their responses. | `UserConfig` backend URLs plus the upstream connection mode. |
 | Plugins | Fully trusted code. Hooks run in-process and can read and mutate tool payloads. | Compiled-in factories only; Redis config activates registered factories, it cannot load new code. |
 
-## Identity And Authorization
+## Authentication And Authorization
 
-Authentication is bearer-JWT only:
+| Plane | Current responsibility |
+| --- | --- |
+| Control plane | Owns login/SSO, users, teams, IAM, API-token issuance and revocation, and legacy routes. `dataplane_publisher.py` writes visibility-filtered `UserConfig` snapshots to Redis by user email. |
+| Data plane | Has no IAM or user database. It verifies modern MCP bearer JWTs locally, loads `UserConfig` by `sub`, and requires the requested virtual host to exist. No runtime control-plane call occurs. |
 
-- Accepted algorithms: `RS256/RS384/RS512` (public key configured) or `HS256/HS384/HS512` (shared secret configured). Anything else is rejected.
-- `iss` must be `mcpgateway`, `aud` must be `mcpgateway-api`, and `exp` is validated.
-- **No revocation list.** A leaked token is valid until it expires. Rotate the key and restart to invalidate all outstanding tokens.
-- Authorization is config existence. The `sub` claim selects the caller's `UserConfig`; the path selects one virtual host inside it. A caller can never reach a backend not in their own config. Unknown virtual hosts return `404` before MCP handling.
-- `jti` and `user` are required by the accepted token shape but are not used for policy decisions. `token_use`, `iat`, `teams`, and `scopes` are optional and are also not enforced. Fine-grained permissions are future policy work.
+Request path: control-plane API token (`sub` = email) → Origin/Host check →
+`claims_layer` → Redis config lookup → virtual-host check → MCP routing.
+Browser/login session tokens are management-plane credentials, not the
+dataplane contract.
 
-## Authentication Responsibility Split
-
-Authentication is coordinated across the two planes but does not require a
-runtime HTTP call between them.
-
-| Concern | Control plane (`IBM/mcp-context-forge`) | Data plane (this repository) |
-| --- | --- | --- |
-| Human identity | Owns login, password/SSO/OAuth flows, users, teams, management sessions, and IAM policy. | Has no user database, login flow, cookies, or IAM service. |
-| Token issuance | Creates and manages API JWTs and signs them with the configured private key or HMAC secret. The API-token path emits the rich claim shape accepted by the dataplane. | Does not mint production tokens. It receives only the RSA public key or HMAC verification secret at startup. |
-| Authorization material | Applies database visibility/team rules and periodically publishes a per-user `UserConfig` snapshot to Redis. | Reads that snapshot through `UserConfigStore`; it never asks the control plane to authorize a request. |
-| Request authentication | Authenticates and authorizes requests served on control-plane routes, including management and legacy MCP traffic. | Independently validates every modern MCP request routed to `/contextforge-rs`. |
-| Revocation and lifecycle | Owns token catalogs, revocation/blocklists, user disablement, and management-session lifecycle for its own request paths. | Does not consult the control-plane database or token blocklist. Revocation alone does not stop local JWT validation; published config can separately remove routing access. |
-
-### Current end-to-end flow
-
-1. A user authenticates to the control plane and creates an API token. The
-   compatible API-token path sets `sub` to the user's email and includes `jti`,
-   `user`, `token_use: api`, plus optional `teams` and `scopes`.
-2. The control-plane `dataplane_publisher.py` reads active users, team
-   membership, visibility, and enabled server/backend associations. It writes
-   a filtered `UserConfig` snapshot to Redis under the same user email.
-3. The MCP client sends that bearer token to the modern dataplane route. A
-   control-plane browser/login session token is a management-plane credential,
-   not the documented dataplane credential: its subject semantics may differ
-   from the email key used by the publisher.
-4. `mcp_origin_layer` performs Host/Origin DNS-rebinding checks before
-   authentication.
-5. `claims_layer` requires `Authorization: Bearer ...`, accepts only
-   `RS256/384/512` or `HS256/384/512`, verifies the signature, issuer
-   (`mcpgateway`), audience (`mcpgateway-api`), and expiration, then inserts
-   `ContextForgeClaims` into the request.
-6. `user_config_store_layer` uses `claims.sub` as the Redis lookup key. Missing
-   config returns HTTP `400`; the dataplane does not fall back to a live
-   control-plane lookup.
-7. `virtual_host_config_layer` checks that the requested virtual host exists in
-   that user's published config. A missing virtual host returns the
-   control-plane-compatible HTTP `404`; accepted requests continue to MCP
-   routing with backend session state scoped by principal and session id.
-
-The current authorization boundary is therefore coarse: valid token plus a
-published virtual host for `sub`. JWT `teams`/`scopes` and the model's
-`allowed_tool_names`, `allowed_resource_names`, and `allowed_prompt_names` are
-not yet enforced by dataplane routing. The control plane must publish only the
-backends a user may reach, and this limitation must remain visible until
-fine-grained enforcement lands. Publishing a backend currently makes every
-object exposed by that backend reachable, regardless of those allowlist fields.
-
-> **Revocation gap:** revoking one API token in the control plane does not make
-> the dataplane consult that blocklist. The token continues to pass local JWT
-> validation until `exp` unless the signing key is rotated and the dataplane is
-> restarted. Removing the subject's published config can stop routing after the
-> publisher TTL and dataplane cache expire, but removes access for every token
-> belonging to that subject rather than revoking one token.
+- JWT validation accepts `RS256/384/512` or `HS256/384/512` and requires a valid
+  signature, `iss=mcpgateway`, `aud=mcpgateway-api`, and `exp`. `jti` and `user`
+  are required fields; `token_use`, `iat`, `teams`, and `scopes` are optional.
+- Failures: bad/missing JWT → `401`; no user config → `400`; unavailable virtual
+  host → `404`.
+- Authorization is currently coarse: valid JWT plus published virtual host.
+  JWT scopes/teams and object allowlists are not enforced; publishing a backend
+  exposes all objects returned by it.
+- Dataplane requests do not consult the control-plane token blocklist. Revoked
+  tokens pass JWT validation until `exp` or signing-key rotation/restart.
+  Removing a subject's config eventually blocks all its tokens after publisher
+  and cache expiry.
 
 ## What Compromise Means
 
@@ -93,41 +54,18 @@ object exposed by that backend reachable, regardless of those allowlist fields.
 
 ## MCP Origin and Host Validation
 
-The gateway enforces the MCP `2026-07-28` Streamable HTTP DNS-rebinding
-security requirement. `mcp_origin_layer` validates requests before JWT claims,
-session creation, virtual-host lookup, and backend fanout.
+`mcp_origin_layer` enforces MCP `2026-07-28` DNS-rebinding protection before
+authentication. Failures return HTTP `403`.
 
-### Host allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS`)
+| Environment variable | Default | Contract |
+| --- | --- | --- |
+| `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | Host check disabled | When set, request authority from `Host` (URI fallback) must match. A portless entry matches any port; an explicit port matches exactly. |
+| `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS` | Only requests without `Origin` pass | A present Origin must be a strict serialized origin in the allowlist. |
 
-The optional comma-separated allowlist contains trusted `Host` authorities,
-such as `gateway.example.com` or `gateway.example.com:8080`.
-
-- When configured, a missing, malformed, or unlisted request authority returns
-  HTTP `403` before Origin validation. The authority comes from `Host`, with an
-  absolute request URI as fallback. An entry without a port matches that host
-  on any port; an entry with a port matches only that port.
-- When omitted (the default), Host validation is disabled. Configure it with
-  the Origin allowlist for public-internet deployments.
-
-### Origin allowlist (`CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS`)
-
-The optional comma-separated allowlist contains fully qualified browser
-origins, such as `https://app.example.com` or `http://localhost:3000`.
-
-| Configuration | `Origin` absent | `Origin` listed | `Origin` unlisted | `null` / malformed |
-| --- | --- | --- | --- | --- |
-| Non-empty allowlist | Accepted | Accepted | HTTP `403` | HTTP `403` |
-| Omitted (default) | Accepted | HTTP `403` | HTTP `403` | HTTP `403` |
-
-An omitted Origin allowlist is not a bypass: every request carrying `Origin`
-is rejected until an allowlist is configured. There is no same-origin fallback,
-because an attacker can control both `Host` and `Origin` during DNS rebinding.
-
-Origins are validated strictly. Backslashes, userinfo (`@`), paths, queries,
-fragments, and opaque origins are rejected. Comparison uses typed origin
-equality with default-port normalization, so `https://app.example.com` equals
-`https://app.example.com:443`, while port `8443` is distinct. Configuration
-values must parse as URLs; invalid URL syntax fails CLI parsing before startup.
+Host is checked first. Missing Origin is accepted. `null`, malformed, unlisted,
+or path/query/fragment/userinfo-bearing origins are rejected. Default ports are
+normalized (`https://a` equals `https://a:443`). There is no same-origin
+fallback; configure both allowlists for public deployments.
 
 ## Local Bootstrap Helpers (`with_tools`)
 
