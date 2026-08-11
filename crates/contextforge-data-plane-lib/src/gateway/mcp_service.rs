@@ -245,7 +245,7 @@ fn is_routable_resource_subscription(virtual_host: &VirtualHost, uri: &str) -> b
 mod tests {
     use std::collections::HashMap;
 
-    use contextforge_data_plane_apis::user_store::{BackendMCPGateway, Transport};
+    use contextforge_data_plane_apis::user_store::BackendMCPGateway;
     use rmcp::model::RequestId;
 
     use super::*;
@@ -338,7 +338,6 @@ mod tests {
                         BackendMCPGateway {
                             name: (*name).to_owned(),
                             url: "http://127.0.0.1:9999/mcp".parse().expect("valid URL"),
-                            transport: Transport::default(),
                             passthrough_headers: Vec::new(),
                             add_headers: HashMap::new(),
                             remove_headers: Vec::new(),

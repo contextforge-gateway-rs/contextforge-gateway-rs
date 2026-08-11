@@ -134,7 +134,7 @@ fn subscription_key(
 mod tests {
     use std::collections::HashMap;
 
-    use contextforge_data_plane_apis::user_store::{BackendMCPGateway, Transport, VirtualHost};
+    use contextforge_data_plane_apis::user_store::{BackendMCPGateway, VirtualHost};
     use rmcp::model::RequestId;
 
     use super::*;
@@ -169,7 +169,6 @@ mod tests {
                 BackendMCPGateway {
                     name: "backend-one".to_owned(),
                     url: "http://127.0.0.1:9999/mcp".parse().expect("valid URL"),
-                    transport: Transport::default(),
                     passthrough_headers: Vec::new(),
                     add_headers: HashMap::new(),
                     remove_headers: Vec::new(),
