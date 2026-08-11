@@ -23,7 +23,7 @@ OTHER="$3"      # %B — incoming branch version
 BASENAME="$4"   # %P — path of the file being merged
 
 DETECT_SECRETS_SPEC="git+https://github.com/ibm/detect-secrets.git@076672a9a01abdfc7ecee2e7d14f08cdccb73976"
-EXCLUDE="'(?x)(Cargo\\.lock\$|\\.lock\$|target/)'"
+EXCLUDE="(?x)(Cargo\.lock$|\.lock$|target/|^\.secrets\.baseline$)"
 
 echo "🔀 secrets-baseline merge driver: regenerating $BASENAME from working tree..."
 
