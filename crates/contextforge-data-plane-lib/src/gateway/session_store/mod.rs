@@ -71,7 +71,9 @@ impl UserSession {
 
 #[async_trait]
 pub trait UserSessionStore: Send + Sync {
+    #[allow(dead_code)] // 2026-07-28 protocol transition
     async fn get_session<'a>(&self, key: &'a UserSession) -> Result<Option<SessionMapping>, SessionStoreError>;
+    #[allow(dead_code)] // 2026-07-28 protocol transition
     async fn set_session<'a>(
         &self,
         key: &'a UserSession,

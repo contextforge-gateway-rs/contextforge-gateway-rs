@@ -16,6 +16,7 @@ pub struct SessionId {
 }
 
 impl SessionId {
+    #[allow(dead_code)] // 2026-07-28 protocol transition
     pub(crate) fn mock() -> Self {
         Self { value: MOCK_SESSION_ID.to_owned() }
     }

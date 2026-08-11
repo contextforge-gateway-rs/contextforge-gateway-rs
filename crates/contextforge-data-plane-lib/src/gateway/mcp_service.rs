@@ -28,6 +28,7 @@ where
     #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
     http_client: reqwest::Client,
+    #[allow(dead_code)] // 2026-07-28 protocol transition
     user_session_store: T,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,

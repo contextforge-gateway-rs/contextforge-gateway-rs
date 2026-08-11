@@ -10,7 +10,7 @@ use support::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
-#[ignore]
+#[ignore = "2026-07-28 protocol transition"]
 async fn plaintext_completes_prompt_argument_through_prefixed_backend() -> Result<()> {
     let gateway_port = create_ports(1)[0];
     let user = TEST_USER_ID;
@@ -29,7 +29,7 @@ async fn plaintext_completes_prompt_argument_through_prefixed_backend() -> Resul
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
-#[ignore]
+#[ignore = "2026-07-28 protocol transition"]
 async fn plaintext_completes_resource_argument_through_prefixed_backend() -> Result<()> {
     let gateway_port = create_ports(1)[0];
     let user = TEST_USER_ID;
