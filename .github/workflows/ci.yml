@@ -29,40 +29,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6.0.2
-      - name: Check detect-secrets configuration
-        id: detect_secrets_config
-        shell: bash
-        run: |
-          hook_pattern='^[[:space:]]*-[[:space:]]+id:[[:space:]]+detect-secrets([[:space:]]|$)'
-          hook_configured=false
-          if [[ -f .pre-commit-config.yaml ]] && grep -Eq "${hook_pattern}" .pre-commit-config.yaml; then
-            hook_configured=true
-          fi
-
-          if [[ "${hook_configured}" == true && -f .secrets.baseline ]]; then
-            echo "configured=true" >> "${GITHUB_OUTPUT}"
-          elif [[ "${hook_configured}" == false && ! -e .secrets.baseline ]]; then
-            echo "configured=false" >> "${GITHUB_OUTPUT}"
-            echo "::notice::detect-secrets enforcement will start when its hook and baseline are added"
-          else
-            echo "::error::the detect-secrets hook and .secrets.baseline must be added together"
-            exit 1
-          fi
-      - name: Install pre-commit
-        if: steps.detect_secrets_config.outputs.configured == 'true'
-        env:
-          PIP_DISABLE_PIP_VERSION_CHECK: "1"
-        run: |
-          python3 -m venv "${RUNNER_TEMP}/pre-commit-venv"
-          "${RUNNER_TEMP}/pre-commit-venv/bin/python" -m pip install pre-commit==4.6.0
       - name: Run detect-secrets
-        if: steps.detect_secrets_config.outputs.configured == 'true'
-        env:
-          PRE_COMMIT_HOME: ${{ runner.temp }}/pre-commit-home
-        run: |
-          "${RUNNER_TEMP}/pre-commit-venv/bin/pre-commit" run detect-secrets \
-            --all-files \
-            --show-diff-on-failure
+        run: scripts/ci/detect-secrets.sh
 
   clippy:
     runs-on: ubuntu-latest
