@@ -28,6 +28,8 @@ Plus at least: `--address` or `--tls-address`, `--token-verification-public-key`
 | `--runtime-plugins-enabled` | `RUNTIME_PLUGINS_ENABLED` | `false` | Enables CPEX hooks |
 | `--enable-open-telemetry` | `ENABLE_OPEN_TELEMETRY` | `false` | OTLP traces |
 | `--enable-otel-metrics` | `ENABLE_OTEL_METRICS` | `false` | OTLP metrics |
+| `--mcp-allowed-origins` | `MCP_ALLOWED_ORIGINS` | — | Comma-separated Origin allowlist for DNS-rebinding protection |
+| `--mcp-allowed-hosts` | `MCP_ALLOWED_HOSTS` | — | Comma-separated Host allowlist for DNS-rebinding protection |
 
 ## JWT Claims (validated by `claims_layer`)
 
@@ -54,7 +56,6 @@ VirtualHost
 BackendMCPGateway
   name: String
   url: Url
-  transport: STREAMABLEHTTP | SSE | STDIO         ← only STREAMABLEHTTP used today
   passthrough_headers: Vec<String>                ← snapshotted at initialize; session-scoped
   add_headers: HashMap<String, String>            ← injected after passthrough
   remove_headers: Vec<String>                     ← stripped after add

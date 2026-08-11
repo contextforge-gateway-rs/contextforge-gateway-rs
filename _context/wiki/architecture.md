@@ -10,11 +10,12 @@ TCP/TLS listener
   -> TraceLayer
   -> /contextforge-rs nested router
   -> CORS layer
-  -> virtual_host_id_layer       → inserts VirtualHostId           (400 on path mismatch)
-  -> claims_layer                → inserts ContextForgeClaims      (401 on bad/missing JWT)
-  -> session_id_layer            → inserts SessionId if present
-  -> user_config_store_layer     → inserts UserConfig              (400 no config, 500 store error)
-  -> virtual_host_config_layer   → rejects unknown vhost           (404 "Server not found")
+  -> mcp_origin_layer              → DNS-rebinding protection        (403 on bad Host/Origin)
+  -> virtual_host_id_layer         → inserts VirtualHostId           (400 on path mismatch)
+  -> claims_layer                  → inserts ContextForgeClaims      (401 on bad/missing JWT)
+  -> session_id_layer              → inserts SessionId if present
+  -> user_config_store_layer       → inserts UserConfig              (400 no config, 500 store error)
+  -> virtual_host_config_layer     → rejects unknown vhost           (404 "Server not found")
   -> /servers/{virtual_host_name}/mcp RMCP service
 ```
 

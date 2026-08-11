@@ -37,7 +37,7 @@ Authentication is bearer-JWT only:
 | Upstream | HTTPS-only by default; plain HTTP must be opted into with `--upstream-connection-mode`. mTLS client identity is supported per process. |
 | Redis | Plain, TLS, or mTLS via `--redis-mode`. Use TLS or mTLS anywhere Redis crosses a trust zone — Redis is the config trust boundary. |
 
-CORS is currently wide open (any origin, method, and header). The API is bearer-token based and cookie-free, so CSRF does not apply, but expect this to tighten as policy work lands.
+CORS headers remain permissive (any origin, method, and header). The API is bearer-token based and cookie-free, so CSRF does not apply. DNS-rebinding protection is handled separately by `mcp_origin_layer`, which validates `Host` and `Origin` headers against configured allowlists (`--mcp-allowed-hosts`, `--mcp-allowed-origins`) before any request reaches authentication or routing. When no allowlist is configured, requests without an `Origin` header are allowed but requests with an `Origin` are rejected.
 
 ## Local Bootstrap Helpers (`with_tools`)
 
