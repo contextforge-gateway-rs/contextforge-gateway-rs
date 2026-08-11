@@ -98,9 +98,36 @@ Order is invariant: auth/config before backend selection; request plugins before
 | `true` (default) | One multi-thread Tokio runtime, `--number-of-cpus` workers. All connections share one `BackendTransports`. |
 | `false` | One OS thread per CPU, each with its own current-thread Tokio runtime and own `BackendTransports`. `SO_REUSEPORT` spreads connections — no session affinity. **Stateful MCP sessions need `--single-runtime true`**. |
 
+In multi-runtime mode, the first thread initializes the optional CPEX plugin runtime before the others start; the current-thread builders are tuned with a global queue interval of `1024` and `4` I/O events per tick.
+
+> **Multi-runtime consequence:** each runtime thread builds its own `BackendTransports` map and user-session store. Backend session state is per-runtime-thread, and `SO_REUSEPORT` gives no connection affinity — later requests in a streamable HTTP session can land on a thread that does not own the session. Treat single-runtime as the only mode supporting stateful MCP sessions today.
+
 ## Lock Design
 
-Locks guard maps of handles, not I/O. Backend calls, Redis reads, and plugin hooks run outside any gateway lock. `borrow_transports()` clones `Arc<RunningService>` so the lock is not held across calls.
+| State | Lock | Contention profile |
+| --- | --- | --- |
+| `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, per-call borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. |
+| Subscription set | `Arc<tokio::sync::Mutex<HashSet<String>>>` | Local `subscribe`/`unsubscribe` only. |
+| User config LRU cache | `Arc<tokio::sync::Mutex<LruCache>>` inside `RedisUserConfigStore` | One lock per config lookup on the hot path; misses add a Redis round trip. |
+| User session LRU cache | Same pattern in `LocalUserSessionStore` | Initialize and delete paths. |
+| JWT decoders, upstream `reqwest::Client`, process `Config` | No lock — immutable after startup, shared by `Arc`/clone. | None. |
+
+Design rule: locks guard maps of handles, not I/O. Backend calls, Redis reads, and plugin hooks all run outside any gateway lock.
+
+## Listener Behavior
+
+The TCP listener binds with `reuseaddr`, `reuseport`, and keepalive, listens with a backlog of `1024`, and serves Axum with graceful shutdown on `ctrl_c`. The TLS listener accepts by hand through Rustls and serves the same router via Hyper.
+
+## Allocator
+
+The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up better than the system allocator under the many small, short-lived allocations of per-request JSON and header processing.
+
+## Fanout And Cancellation
+
+- `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
+- List methods fan out to all connected backends concurrently and merge.
+- Targeted calls resolve exactly one backend service handle.
+- `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow
 

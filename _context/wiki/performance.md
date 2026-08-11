@@ -16,7 +16,7 @@ cargo run --release --bin contextforge-load-test -- \
   --host 'http://127.0.0.1:8001' \
   -u 120 -r 40 --run-time 120s \
   --report-file report.html
-```text
+```
 
 `-u` = concurrent users, `-r` = spawn rate/s, `--report-file` = HTML report. Curated run reports live in `reports/`.
 
@@ -58,6 +58,6 @@ Compare against the stack without the dataplane:
 ```bash
 scripts/cf-integration.sh down                # free shared ports
 scripts/cf-integration.sh controlplane-locust
-```text
+```
 
 `CONTROLPLANE_LOCUST_CLASSES=all` adds admin/UI/mutating surfaces. `LOCUST_USERS`, `LOCUST_SPAWN_RATE`, and `LOCUST_RUN_TIME` apply here too.

@@ -3,9 +3,9 @@
 ## Full Docker Stack
 
 ```bash
-make docker-prod    # build dataplane:latest from docker/Dockerfile
+make docker-prod    # build contextforge-data-plane:latest from docker/Dockerfile
 make compose-up    # start nginx, control-plane, redis, postgres, dataplane, fast_time_server
-```text
+```
 
 Wait for `register_fast_time` to finish, then allow ~60s config propagation:
 
@@ -31,7 +31,7 @@ scripts/cf-integration.sh up        # checkout control-plane, pull dataplane ima
 scripts/cf-integration.sh probe     # smoke: 401 check → initialize → tools/list → tools/call
 scripts/cf-integration.sh test-all  # all lanes: live-mcp, live-rbac, live-protocol
 scripts/cf-integration.sh down
-```text
+```
 
 Admin UI (control-plane): `http://localhost:8080/admin` — `admin@example.com` / `changeme`
 
@@ -66,7 +66,7 @@ cargo run -p contextforge-data-plane \
   --token-verification-private-key assets/jwt.key \
   --upstream-connection-mode plain-text-or-tls \
   --number-of-cpus 4
-```text
+```
 
 The client-facing route is `http://127.0.0.1:8001/contextforge-rs/servers/{virtual_host_id}/mcp`.
 
@@ -107,7 +107,7 @@ curl --silent --show-error --request POST \
       }
     }
   }'
-```text
+```
 
 ### Verify with mcp-inspector
 
@@ -132,7 +132,7 @@ curl --silent --show-error \
   --header 'mcp-protocol-version: 2026-07-28' \
   --header 'mcp-method: server/discover' \
   --data '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0.1.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}'
-```text
+```
 
 ### Troubleshooting
 

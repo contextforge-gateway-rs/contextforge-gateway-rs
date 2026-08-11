@@ -114,7 +114,7 @@ Architecture context lives in the wiki. Key pages:
 Regenerate both schemas after any struct change to `UserConfig`, `VirtualHost`, `BackendMCPGateway`, or the `User` key type:
 ```bash
 cargo run -p contextforge-data-plane-apis
-```text
+```
 
 ## System topology
 

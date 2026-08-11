@@ -19,6 +19,7 @@
 - [Configuration Reference](config.md)
 - [Deployment](deployment.md)
 - [Performance](performance.md)
+- [Testing](testing.md)
 
 # Contributing
 

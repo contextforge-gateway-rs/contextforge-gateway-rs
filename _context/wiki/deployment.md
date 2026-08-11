@@ -55,7 +55,7 @@ Backend MCP sessions are **local process state** — see [routing.md](routing.md
 
 ```text
 worst-case staleness = publisher interval + user-config cache expiry
-```text
+```
 
 Both default to ~60s. For functional tests, shorten the publisher interval and disable the cache. For throughput benchmarks, keep both at 60s.
 

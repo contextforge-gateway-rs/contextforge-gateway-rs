@@ -88,19 +88,77 @@ Two schemas are generated — both must be regenerated and committed when `UserC
 
 ```bash
 cargo run -p contextforge-data-plane-apis
-```text
+```
 
 ## Plugin Config (Redis key: `ContextForgeGatewayRuntimePluginConfig`)
 
-```
+```text
 RuntimePluginConfigDocument
   version: 1
   cpex: CpexConfig
-```text
+```
 
 Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke` only.  
 Rejected: routing-based selection, plugin dirs, global policies, other hook types.  
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
+
+### Tool Call Hook Behavior
+
+For `call_tool`, the pre hook runs after backend routing has selected the backend and stripped the public prefix. The hook sees the backend name, routed tool name, and arguments. It can leave arguments unchanged, replace arguments, or deny the call.
+
+After the upstream backend returns, the post hook can leave the result unchanged, rewrite the result payload, or deny the response. Hook state is carried across the upstream call so pre and post hooks can share CPEX context for the same logical tool call.
+
+Plugin execution must not poison shared gateway state. A plugin denial becomes an MCP error. Soft plugin errors are logged. Unsupported plugin configuration fails validation before the runtime is accepted.
+
+### Demo Plugin Workflow
+
+The optional `test-plugins` feature compiles demo factories from the `cpex-plugins-rs` repository. Redis configuration activates factories already present in the binary; it never loads new Rust code into a running process.
+
+Start lightweight dependencies:
+
+```bash
+docker compose -f docker/docker-compose-local.yaml up -d redis gateway-one gateway-two
+```
+
+Register payload-marker configuration before starting the data plane:
+
+```bash
+docker compose -f docker/docker-compose-local.yaml exec -T redis \
+  redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
+    "version": 1,
+    "cpex": {
+      "plugins": [
+        {
+          "name": "payload-marker",
+          "kind": "contextforge/payload-marker",
+          "hooks": ["cmf.tool_post_invoke"]
+        }
+      ]
+    }
+  }'
+```
+
+Build and run with demo factories and runtime execution enabled:
+
+```bash
+cargo run -p contextforge-data-plane \
+  --features 'contextforge-data-plane-lib/with_tools,test-plugins' \
+  --bin contextforge-data-plane -- \
+  --address 127.0.0.1:8001 \
+  --redis-address 127.0.0.1 \
+  --redis-port 6379 \
+  --redis-mode plain-text \
+  --token-verification-public-key assets/jwt.key.pub \
+  --token-verification-private-key assets/jwt.key \
+  --upstream-connection-mode plain-text-or-tls \
+  --runtime-plugins-enabled true
+```
+
+Startup should log successful CPEX initialization. The payload marker appends `[cpex:payload-marker]` to successful tool results. The hook path is also covered by:
+
+```bash
+cargo nextest run --locked -p contextforge-data-plane-lib --test gateway_plugins
+```
 
 ## Startup Validation (fails fast)
 
@@ -232,7 +290,7 @@ cargo run --release --bin contextforge-data-plane -- \
   --otlp-endpoint  http://127.0.0.1:3100/api/public/otel/v1/traces \
   --otlp-metrics-endpoint http://127.0.0.1:4318/v1/metrics \
   --otlp-service-name contextforge-data-plane
-```text
+```
 
 ## Prometheus Starter Queries
 
