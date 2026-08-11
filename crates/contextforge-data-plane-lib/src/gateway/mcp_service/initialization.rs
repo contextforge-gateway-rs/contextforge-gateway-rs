@@ -17,7 +17,7 @@ use crate::gateway::{
     mcp_call_validator::InitializeCallValidator,
     session_store::{UserSession, UserSessionStore},
 };
-use crate::layers::mcp_header_limits::is_mcp_computed_header_name;
+use crate::mcp_standard_headers;
 
 pub(super) async fn initialize<T>(
     mcp_service: &McpService<T>,
@@ -272,7 +272,7 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
         "accept",
         "last-event-id",
     ];
-    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p)) || is_mcp_computed_header_name(name)
+    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p)) || mcp_standard_headers::is_computed(name)
 }
 
 #[cfg(test)]
