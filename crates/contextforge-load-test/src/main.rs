@@ -88,7 +88,7 @@ async fn counter_call(user: &mut GooseUser) -> TransactionResult {
     let session = user.get_session_data_unchecked::<Session>().clone();
 
     if session.mcp_session_id.is_none() {
-        user.log_debug("counter_call: No Session id ", None, None, None)?;
+        user.log_debug("counter call has no session", None, None, None)?;
         return Err(Box::new(TransactionError::Custom("no session id".to_owned())));
     }
 
@@ -103,7 +103,7 @@ async fn counter_call(user: &mut GooseUser) -> TransactionResult {
                 let payload = r.text().await?;
                 if status == http::StatusCode::OK {
                     if !payload.contains("\"isError\":false") && !payload.contains(&format!("\"text\":\"{}\"", i + 1)) {
-                        let _ = user.log_debug("Counter has a problem ", None, None, Some(&payload));
+                        let _ = user.log_debug("counter response validation failed", None, None, None);
                         return Err(Box::new(TransactionError::Custom("counting problem".to_owned())));
                     }
                 } else {
@@ -144,7 +144,7 @@ async fn initialize_session(user: &mut GooseUser) -> TransactionResult {
     let session = user.get_session_data_unchecked::<Session>();
     let mut session = session.clone();
     if session.mcp_session_id.is_some() {
-        _ = user.log_debug("intialize has session id ", None, None, None);
+        _ = user.log_debug("initialize called with an existing session", None, None, None);
         return Err(Box::new(TransactionError::Custom("initialize has session id  ".to_owned())));
     }
     let init_request = {

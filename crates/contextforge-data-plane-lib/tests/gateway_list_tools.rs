@@ -37,9 +37,9 @@ async fn plaintext_lists_prefixed_backend_tools() -> Result<()> {
 
     handle.abort();
     if maybe_passed.is_ok() {
-        info!("Test passed");
+        info!(component = "Test", operation = "list_tools", outcome = "success", "test completed");
     } else {
-        info!("Test NOT passed {maybe_passed:?}");
+        info!(component = "Test", operation = "list_tools", outcome = "error", error = ?maybe_passed, "test completed");
         panic!()
     }
 
@@ -87,9 +87,9 @@ async fn tls_lists_prefixed_backend_tools() -> Result<()> {
 
     handle.abort();
     if maybe_passed.is_ok() {
-        info!("Test passed");
+        info!(component = "Test", operation = "list_tools", outcome = "success", "test completed");
     } else {
-        info!("Test NOT passed {maybe_passed:?}");
+        info!(component = "Test", operation = "list_tools", outcome = "error", error = ?maybe_passed, "test completed");
         panic!()
     }
 
@@ -101,23 +101,29 @@ async fn assert_list_tools(
     client: reqwest::Client,
     expected_tool_names: Vec<String>,
 ) -> Result<()> {
-    info!("Seding request to {gateway_url}");
+    info!(component = "Test", operation = "list_tools", gateway_url, "sending gateway request");
 
     let running_service = connect_client(gateway_url, client).await?;
 
     let list_tools = running_service.list_tools(None).await;
     let Ok(list_tools) = list_tools else {
         let msg = format!("List tools returned error  {list_tools:?}");
-        warn!(msg);
+        warn!(component = "Test", operation = "list_tools", error = %msg, "gateway request failed");
         return Err(msg.into());
     };
 
     let mut names: Vec<String> = list_tools.tools.iter().map(|t| t.name.to_string()).collect();
     names.sort();
 
-    info!("Tool names {names:#?}");
+    info!(component = "Test", operation = "list_tools", tool_names = ?names, "tool names received");
     if expected_tool_names != names {
-        warn!("Actual {names:#?} Expected {expected_tool_names:#?}");
+        warn!(
+            component = "Test",
+            operation = "list_tools",
+            actual = ?names,
+            expected = ?expected_tool_names,
+            "tool names did not match"
+        );
         return Err("Expected tool names don't match actual".into());
     }
 

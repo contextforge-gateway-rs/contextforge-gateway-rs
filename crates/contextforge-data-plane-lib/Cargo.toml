@@ -14,18 +14,17 @@ repository.workspace = true
 [dependencies]
 contextforge-data-plane-apis.workspace = true
 contextforge-data-plane-cpex.workspace = true
+contextforge-data-plane-observability.workspace = true
 rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-tracing-opentelemetry.workspace = true
-opentelemetry.workspace = true
 tokio.workspace = true
 tokio-util = "0.7"
 axum.workspace = true
 axum-otel-metrics = "0.14"
-tower-http = { version = "0.7.0", features = ["full"] }
-tower = "0.5.3"
+tower-http = { workspace = true, features = ["full"] }
+tower.workspace = true
 http.workspace = true
 futures = { version = "0.3", features = ["std", "alloc"] }
 jsonwebtoken.workspace = true
@@ -36,7 +35,6 @@ thiserror.workspace = true
 rmp-serde.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true
-uuid.workspace = true
 lru_time_cache = "0.11.11"
 hyper-util = "0.1.20"
 hyper = "1.4.0"
@@ -54,11 +52,11 @@ with_tools = []
 
 
 [dev-dependencies]
-opentelemetry_sdk.workspace = true
 cpex.workspace = true
 openport.workspace = true
 cpex-secrets-detection.workspace = true
 test-log = "0.2.20"
+uuid.workspace = true
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 
 [lints]

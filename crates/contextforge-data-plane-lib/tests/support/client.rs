@@ -61,11 +61,11 @@ where
         match handler.clone().serve(transport).await {
             Ok(running_service) => return Ok(running_service),
             Err(error) if Instant::now() < deadline => {
-                warn!("No Service {error:?}");
+                warn!(component = "Test", operation = "connect_client", error = ?error, "gateway service unavailable");
                 tokio::time::sleep(TEST_POLL_INTERVAL).await;
             },
             Err(error) => {
-                warn!("No Service {error:?}");
+                warn!(component = "Test", operation = "connect_client", error = ?error, "gateway service unavailable");
                 return Err("Couldn't get a service".into());
             },
         }

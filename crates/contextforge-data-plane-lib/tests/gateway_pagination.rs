@@ -71,7 +71,7 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
 
     tokio::spawn(async move {
         let res = gateway.run_gateway().await;
-        warn!("Gateway exited {res:?}");
+        warn!(component = "Test", operation = "run_gateway", result = ?res, "gateway exited");
     });
 
     gateway_url

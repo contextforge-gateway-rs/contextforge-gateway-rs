@@ -66,6 +66,7 @@ pub async fn claims_layer(
     };
 
     let claims: ContextForgeClaims = claims.claims;
+    contextforge_data_plane_observability::record_authenticated_user(&claims.sub);
     parts.extensions.insert(claims.clone());
     let request = Request::from_parts(parts, body);
     next.run(request).await

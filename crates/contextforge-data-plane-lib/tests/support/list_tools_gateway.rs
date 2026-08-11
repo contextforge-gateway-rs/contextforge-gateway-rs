@@ -94,7 +94,7 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
 
     let gateway = async move {
         let res = gateway.run_gateway().await;
-        warn!("Gateway exited with result {res:?}");
+        warn!(component = "Test", operation = "run_gateway", result = ?res, "gateway exited");
         Ok(())
     }
     .boxed();
@@ -173,7 +173,7 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
 
     let gateway = async move {
         let res = gateway.run_gateway().await;
-        warn!("Gateway exited with result {res:?}");
+        warn!(component = "Test", operation = "run_gateway", result = ?res, "gateway exited");
         Ok(())
     }
     .boxed();

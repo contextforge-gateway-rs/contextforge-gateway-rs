@@ -1,7 +1,6 @@
 use std::fmt;
 
 use chrono::{SecondsFormat, Utc};
-use contextforge_data_plane_lib::Config;
 use serde_json::{Map, Value};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::{
@@ -12,7 +11,9 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-pub(super) const DEFAULT_SERVICE_NAME: &str = "contextforge-data-plane";
+use crate::LoggingConfig;
+
+pub(crate) const DEFAULT_SERVICE_NAME: &str = "contextforge-data-plane";
 const UNCLASSIFIED_ERROR_CODE: &str = "CFDP-UNCLASSIFIED";
 const SPAN_FIELDS: &[&str] =
     &["transaction_id", "correlation_id", "trace_id", "span_id", "user_id", "component", "operation"];
@@ -30,7 +31,7 @@ fn has_meaningful_value(value: Option<&Value>) -> bool {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct LoggingMetadata {
+pub(crate) struct LoggingMetadata {
     service_name: String,
     version: String,
     environment: String,
@@ -38,40 +39,40 @@ pub(super) struct LoggingMetadata {
 }
 
 impl LoggingMetadata {
-    pub(super) fn from_config(configuration: &Config) -> Self {
+    pub(crate) fn from_config(configuration: &LoggingConfig) -> Self {
         Self {
-            service_name: configured_value(configuration.otlp_service_name.as_deref(), DEFAULT_SERVICE_NAME),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
+            service_name: configured_value(configuration.service_name.as_deref(), DEFAULT_SERVICE_NAME),
+            version: configured_value(Some(&configuration.version), "unknown"),
             environment: configured_value(configuration.environment.as_deref(), "unknown"),
             cluster_id: configured_value(configuration.cluster_id.as_deref(), "unknown"),
         }
     }
 
-    pub(super) fn service_name(&self) -> &str {
+    pub(crate) fn service_name(&self) -> &str {
         &self.service_name
     }
 
-    pub(super) fn version(&self) -> &str {
+    pub(crate) fn version(&self) -> &str {
         &self.version
     }
 
-    pub(super) fn environment(&self) -> &str {
+    pub(crate) fn environment(&self) -> &str {
         &self.environment
     }
 
-    pub(super) fn cluster_id(&self) -> &str {
+    pub(crate) fn cluster_id(&self) -> &str {
         &self.cluster_id
     }
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct StructuredJsonFormatter {
+pub(crate) struct StructuredJsonFormatter {
     inner: tracing_subscriber::fmt::format::Format<Json>,
     metadata: LoggingMetadata,
 }
 
 impl StructuredJsonFormatter {
-    pub(super) fn new(metadata: LoggingMetadata) -> Self {
+    pub(crate) fn new(metadata: LoggingMetadata) -> Self {
         Self {
             inner: tracing_subscriber::fmt::format()
                 .json()
@@ -178,7 +179,8 @@ mod tests {
     use serde_json::Value;
     use tracing_subscriber::{Registry, fmt::MakeWriter, layer::SubscriberExt};
 
-    use super::{DEFAULT_SERVICE_NAME, LoggingMetadata, StructuredJsonFormatter, UNCLASSIFIED_ERROR_CODE};
+    use super::{LoggingMetadata, StructuredJsonFormatter, UNCLASSIFIED_ERROR_CODE};
+    use crate::LoggingConfig;
 
     #[derive(Clone, Default)]
     struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
@@ -229,9 +231,10 @@ mod tests {
 
     #[test]
     fn metadata_uses_safe_defaults() {
-        let metadata = LoggingMetadata::from_config(&contextforge_data_plane_lib::Config::default());
+        let metadata = LoggingMetadata::from_config(&LoggingConfig::default());
 
-        assert_eq!(metadata.service_name(), DEFAULT_SERVICE_NAME);
+        assert_eq!(metadata.service_name(), "contextforge-data-plane");
+        assert_eq!(metadata.version(), "unknown");
         assert_eq!(metadata.environment(), "unknown");
         assert_eq!(metadata.cluster_id(), "unknown");
     }
@@ -244,7 +247,8 @@ mod tests {
                 transaction_id = "txn-1",
                 correlation_id = "corr-1",
                 trace_id = "00000000000000000000000000000001",
-                span_id = "0000000000000001"
+                span_id = "0000000000000001",
+                user_id = "sha256:001122334455"
             );
             let _entered = span.enter();
             tracing::info!(component = "Routing", operation = "test_logging", "structured event");
@@ -259,7 +263,7 @@ mod tests {
         assert_eq!(event["correlation_id"], "corr-1");
         assert_eq!(event["trace_id"], "00000000000000000000000000000001");
         assert_eq!(event["span_id"], "0000000000000001");
-        assert_eq!(event["user_id"], Value::Null);
+        assert_eq!(event["user_id"], "sha256:001122334455");
         assert_eq!(event["log_level"], "INFO");
         assert_eq!(event["error_code"], Value::Null);
         assert_eq!(event["message"], "structured event");

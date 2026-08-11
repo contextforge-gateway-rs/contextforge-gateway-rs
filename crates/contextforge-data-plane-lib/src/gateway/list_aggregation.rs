@@ -4,6 +4,7 @@ use std::{
 };
 
 use contextforge_data_plane_apis::user_store::VirtualHost;
+use contextforge_data_plane_observability::PerformanceTimer;
 use rmcp::{
     ErrorData,
     model::{
@@ -83,7 +84,12 @@ where
         let call = &call;
         async move {
             let response = match service_holder.running_service {
-                Some(service) => Some(call(service_holder.name.clone(), service).await),
+                Some(service) => {
+                    let mut timer = PerformanceTimer::external_call("Routing", op);
+                    let response = call(service_holder.name.clone(), service).await;
+                    timer.record_result(&response);
+                    Some(response)
+                },
                 None => None,
             };
             (service_holder.name, response)

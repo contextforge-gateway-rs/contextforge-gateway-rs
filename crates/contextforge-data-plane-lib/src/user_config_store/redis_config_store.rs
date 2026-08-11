@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use contextforge_data_plane_apis::{User, user_store::UserConfig};
+use contextforge_data_plane_observability::PerformanceTimer;
 use lru_time_cache::LruCache;
 use redis::{
     AsyncCommands, RedisError,
@@ -47,26 +48,26 @@ pub struct RedisUserConfigStore {
 
 impl RedisUserConfigStore {
     pub async fn new(redis_client: &RedisClient, cache_expiry: Duration) -> crate::Result<Self> {
+        let mut timer = PerformanceTimer::database("UserConfig", "connect");
+        let connection = redis_client
+            .get_connection_manager_with_config(ConnectionManagerConfig::default().set_number_of_retries(REDIS_RETRIES))
+            .await;
+        timer.record_result(&connection);
         Ok(Self {
-            connection: redis_client
-                .get_connection_manager_with_config(
-                    ConnectionManagerConfig::default().set_number_of_retries(REDIS_RETRIES),
-                )
-                .await
-                .map_err(|error| {
-                    tracing::error!(
-                        component = "UserConfig",
-                        operation = "connect",
-                        dependency = "redis",
-                        error_code = "CFDP-USER-CONFIG-CONNECT",
-                        root_cause = %error,
-                        impact_scope = "service-startup",
-                        retryable = true,
-                        error = %error,
-                        "user config store connection failed"
-                    );
-                    ConfigStoreError::InvalidConnection
-                })?,
+            connection: connection.map_err(|error| {
+                tracing::error!(
+                    component = "UserConfig",
+                    operation = "connect",
+                    dependency = "redis",
+                    error_code = "CFDP-USER-CONFIG-CONNECT",
+                    root_cause = %error,
+                    impact_scope = "service-startup",
+                    retryable = true,
+                    error = %error,
+                    "user config store connection failed"
+                );
+                ConfigStoreError::InvalidConnection
+            })?,
             cache: (!cache_expiry.is_zero()).then(|| {
                 Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(cache_expiry, LRU_CACHE_ENTRIES)))
             }),
@@ -124,8 +125,10 @@ impl UserConfigStore for RedisUserConfigStore {
         };
 
         let mut connection = self.connection.clone();
+        let mut timer = PerformanceTimer::database("UserConfig", "read");
         let maybe_user_config: Result<Option<Vec<u8>>, RedisError> =
             cmd("GET").arg(key).take().query_async(&mut connection).await;
+        timer.record_result(&maybe_user_config);
 
         let user_config = match maybe_user_config {
             Ok(Some(user_config)) => {
@@ -217,8 +220,11 @@ impl UserConfigStore for RedisUserConfigStore {
         };
 
         let mut connection = self.connection.clone();
+        let mut timer = PerformanceTimer::database("UserConfig", "write");
+        let result = connection.set::<&[u8], &[u8], String>(&key, &encoded).await;
+        timer.record_result(&result);
 
-        match connection.set::<&[u8], &[u8], String>(&key, &encoded).await {
+        match result {
             Ok(_) => {
                 let bytes = encoded.len();
                 let virtual_hosts = config.virtual_hosts.len();

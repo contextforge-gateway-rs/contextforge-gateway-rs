@@ -13,6 +13,7 @@ repository.workspace = true
 [dependencies]
 contextforge-data-plane-cpex.workspace = true
 contextforge-data-plane-lib = { path = "../contextforge-data-plane-lib" }
+contextforge-data-plane-observability.workspace = true
 # These demo plugins remain in their independently hosted legacy repository.
 cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
 cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
@@ -20,20 +21,11 @@ cpex-tool-namespace = { git = "https://github.com/contextforge-gateway-rs/cpex-p
 cpex-secrets-detection = { workspace = true, optional = true }
 clap.workspace = true
 tracing.workspace = true
-tracing-appender = "0.2.3"
-tracing-opentelemetry.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio.workspace = true
-opentelemetry.workspace = true
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "http-proto", "reqwest-blocking-client", "metrics"] }
-opentelemetry_sdk.workspace = true
-tonic = "0.14"
 num_cpus = "1.17.0"
 rmcp.workspace = true
 tikv-jemallocator = "0.7.0"
 rustls.workspace = true
-chrono.workspace = true
-serde_json.workspace = true
 
 [features]
 plugins = ["dep:cpex-secrets-detection"]

@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use contextforge_data_plane_observability::{LogRotation, OtlpProtocol};
 use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
@@ -113,30 +114,6 @@ pub enum RedisConnectionMode {
     #[default]
     Tls,
     Mtls,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-#[derive(Default)]
-pub enum LogRotation {
-    Minutely,
-    #[default]
-    Hourly,
-    Daily,
-    Never,
-}
-
-/// Wire protocol used to export OpenTelemetry data to the collector / backend.
-///
-/// `Grpc` targets the standard OTLP/gRPC port (e.g. `4317`) used by
-/// collectors such as the OpenTelemetry Collector and Tempo.
-/// `HttpProtobuf` targets OTLP over HTTP/1.1 with a protobuf payload
-/// (e.g. `4318/v1/traces`) and is the only protocol supported by Langfuse's
-/// OTel ingestion endpoint (`/api/public/otel/v1/traces`).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default)]
-pub enum OtlpProtocol {
-    #[default]
-    Grpc,
-    HttpProtobuf,
 }
 
 #[derive(Debug, Clone, Parser, Default)]

@@ -1,4 +1,3 @@
-mod logging;
 mod runtime;
 #[cfg(feature = "test-plugins")]
 mod test_plugins;
@@ -8,6 +7,7 @@ use std::{process::ExitCode, sync::Arc};
 use clap::Parser;
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, RedisClient, RedisConfig, UserConfigStoreType};
+use contextforge_data_plane_observability::{LoggingConfig, emit_bootstrap_failure, init_observability};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rustls::crypto;
 use tikv_jemallocator::Jemalloc;
@@ -20,10 +20,11 @@ fn main() -> ExitCode {
     _ = provider.install_default();
 
     let config = Config::parse();
-    let _guard = match logging::init_tracing_logging(&config) {
+    let logging_config = logging_config(&config);
+    let _guard = match init_observability(&logging_config) {
         Ok(guard) => guard,
         Err(error) => {
-            logging::emit_bootstrap_failure(&config, error.as_ref());
+            emit_bootstrap_failure(&logging_config, error.as_ref());
             return ExitCode::FAILURE;
         },
     };
@@ -44,6 +45,23 @@ fn main() -> ExitCode {
             );
             ExitCode::FAILURE
         },
+    }
+}
+
+fn logging_config(config: &Config) -> LoggingConfig {
+    LoggingConfig {
+        service_name: config.otlp_service_name.clone(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        environment: config.environment.clone(),
+        cluster_id: config.cluster_id.clone(),
+        log_name: config.log_name.clone(),
+        log_rotation: config.log_rotation.clone().unwrap_or_default(),
+        enable_open_telemetry: config.enable_open_telemetry.unwrap_or(false),
+        enable_otel_metrics: config.enable_otel_metrics.unwrap_or(false),
+        otlp_endpoint: config.otlp_endpoint.clone(),
+        otlp_metrics_endpoint: config.otlp_metrics_endpoint.clone(),
+        otlp_protocol: config.otlp_protocol.clone().unwrap_or_default(),
+        otlp_headers: config.otlp_headers.clone(),
     }
 }
 

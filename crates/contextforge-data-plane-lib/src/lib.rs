@@ -14,7 +14,6 @@ mod common;
 mod const_values;
 mod gateway;
 mod layers;
-mod telemetry;
 mod transports;
 
 #[cfg(feature = "with_tools")]
@@ -31,7 +30,8 @@ use typed_builder::TypedBuilder;
 pub use user_config_store::RedisUserConfigStore;
 pub use user_config_store::{ConfigStoreError, UserConfigStore};
 
-pub use crate::common::{Config, LogRotation, OtlpProtocol};
+pub use crate::common::Config;
+pub use contextforge_data_plane_observability::{LogRotation, OtlpProtocol};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -158,10 +158,10 @@ impl Gateway {
             .nest("/contextforge-rs", app)
             .layer(
                 TraceLayer::new_for_http()
-                    .make_span_with(telemetry::ExtractingMakeSpan)
-                    .on_response(telemetry::LogOnResponse),
+                    .make_span_with(contextforge_data_plane_observability::ExtractingMakeSpan)
+                    .on_response(contextforge_data_plane_observability::LogOnResponse),
             )
-            .layer(middleware::from_fn(telemetry::correlation_layer))
+            .layer(middleware::from_fn(contextforge_data_plane_observability::correlation_layer))
             .layer(HttpMetricsLayerBuilder::new().build());
 
         let mut handlers = vec![];

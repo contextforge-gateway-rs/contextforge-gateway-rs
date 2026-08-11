@@ -297,9 +297,13 @@ impl ServerHandler for Counter {
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, McpError> {
         if let Some(http_request_part) = context.extensions.get::<axum::http::request::Parts>() {
-            let initialize_headers = &http_request_part.headers;
-            let initialize_uri = &http_request_part.uri;
-            tracing::info!(?initialize_headers, %initialize_uri, "initialize from http server");
+            tracing::info!(
+                component = "TestBackend",
+                operation = "initialize",
+                header_count = http_request_part.headers.len(),
+                path = http_request_part.uri.path(),
+                "backend initialization received"
+            );
         }
         Ok(self.get_info())
     }

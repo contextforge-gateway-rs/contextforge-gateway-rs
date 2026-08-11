@@ -1,3 +1,4 @@
+use contextforge_data_plane_observability::PerformanceTimer;
 use rmcp::{
     ErrorData, RoleServer,
     model::{GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
@@ -86,10 +87,10 @@ where
 
     let mut routed_request = request;
     routed_request.name = prompt_name;
-    let response = service
-        .get_prompt(routed_request)
-        .await
-        .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
+    let mut timer = PerformanceTimer::external_call("Routing", "get_prompt");
+    let response = service.get_prompt(routed_request).await;
+    timer.record_result(&response);
+    let response = response.map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
     info!(
         component = "Routing",
         operation = "get_prompt",

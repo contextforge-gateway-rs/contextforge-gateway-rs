@@ -4,6 +4,7 @@ members = [
     "crates/contextforge-data-plane-apis",
     "crates/contextforge-data-plane-cpex",
     "crates/contextforge-data-plane-lib",
+    "crates/contextforge-data-plane-observability",
     "crates/contextforge-load-test",
     "crates/plugins/cpex-secrets-detection",
 ]
@@ -24,6 +25,7 @@ repository = "https://github.com/contextforge-org/contextforge-data-plane"
 # Keep dependencies here only when at least two workspace members inherit them.
 contextforge-data-plane-cpex = { path = "./crates/contextforge-data-plane-cpex" }
 contextforge-data-plane-apis = { path = "./crates/contextforge-data-plane-apis"}
+contextforge-data-plane-observability = { path = "./crates/contextforge-data-plane-observability" }
 rmcp = { version = "3.1.1", features = [
     "server",
     "client",
@@ -37,10 +39,9 @@ serde = {version= "1.0"}
 serde_json = "1.0"
 chrono = "0.4.44"
 tracing = "0.1"
-tracing-opentelemetry = "0.33.0"
-opentelemetry = "0.32"
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = "0.5.3"
+tower-http = "0.7.0"
 http = "1.4.0"
 redis = { version = "1.2.1", features = [
     "default",

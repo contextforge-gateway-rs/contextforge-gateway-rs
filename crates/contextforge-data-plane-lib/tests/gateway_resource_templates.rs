@@ -78,14 +78,14 @@ async fn assert_list_resource_templates(
     expected_template_names: Vec<String>,
     expected_template_uris: Vec<String>,
 ) -> Result<()> {
-    info!("Sending request to {gateway_url}");
+    info!(component = "Test", operation = "list_resource_templates", gateway_url, "sending gateway request");
 
     let running_service = connect_client(gateway_url, client).await?;
 
     let list_templates = running_service.list_resource_templates(None).await;
     let Ok(list_templates) = list_templates else {
         let msg = format!("List resource templates returned error {list_templates:?}");
-        warn!(msg);
+        warn!(component = "Test", operation = "list_resource_templates", error = %msg, "gateway request failed");
         return Err(msg.into());
     };
 
@@ -93,7 +93,13 @@ async fn assert_list_resource_templates(
     names.sort();
 
     if expected_template_names != names {
-        warn!("Actual {names:#?} Expected {expected_template_names:#?}");
+        warn!(
+            component = "Test",
+            operation = "list_resource_templates",
+            actual = ?names,
+            expected = ?expected_template_names,
+            "resource template names did not match"
+        );
         return Err("Expected resource template names don't match actual".into());
     }
 
@@ -101,7 +107,13 @@ async fn assert_list_resource_templates(
     uris.sort();
 
     if expected_template_uris != uris {
-        warn!("Actual {uris:#?} Expected {expected_template_uris:#?}");
+        warn!(
+            component = "Test",
+            operation = "list_resource_templates",
+            actual = ?uris,
+            expected = ?expected_template_uris,
+            "resource template URIs did not match"
+        );
         return Err("Expected resource template uris don't match actual".into());
     }
 

@@ -73,14 +73,14 @@ async fn assert_list_prompts(
     client: reqwest::Client,
     expected_prompt_names: Vec<String>,
 ) -> Result<()> {
-    info!("Sending request to {gateway_url}");
+    info!(component = "Test", operation = "list_prompts", gateway_url, "sending gateway request");
 
     let running_service = connect_client(gateway_url, client).await?;
 
     let list_prompts = running_service.list_prompts(None).await;
     let Ok(list_prompts) = list_prompts else {
         let msg = format!("List prompts returned error {list_prompts:?}");
-        warn!(msg);
+        warn!(component = "Test", operation = "list_prompts", error = %msg, "gateway request failed");
         return Err(msg.into());
     };
 
@@ -88,7 +88,13 @@ async fn assert_list_prompts(
     names.sort();
 
     if expected_prompt_names != names {
-        warn!("Actual {names:#?} Expected {expected_prompt_names:#?}");
+        warn!(
+            component = "Test",
+            operation = "list_prompts",
+            actual = ?names,
+            expected = ?expected_prompt_names,
+            "prompt names did not match"
+        );
         return Err("Expected prompt names don't match actual".into());
     }
 

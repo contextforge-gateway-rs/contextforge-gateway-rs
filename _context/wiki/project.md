@@ -77,7 +77,8 @@ Architecture context lives in the wiki. Key pages:
 | Crate | Purpose |
 | --- | --- |
 | `contextforge-data-plane-lib` | All dataplane behavior: routing, middleware, sessions, transports. Almost everything goes here. |
-| `contextforge-data-plane` (binary) | Process shell only: CLI flags, logging, runtime shape. No dataplane logic. |
+| `contextforge-data-plane` (binary) | Process shell only: CLI flags, observability initialization, runtime shape. No dataplane logic. |
+| `contextforge-data-plane-observability` | Structured JSON formatting, correlation and W3C trace propagation, OTLP exporters, pseudonymous user attribution, and performance timers. |
 | `contextforge-data-plane-apis` | Shared config shapes (`UserConfig`, `User`, plugin config). Regenerate JSON schemas after any change: `cargo run -p contextforge-data-plane-apis`. |
 | `contextforge-data-plane-cpex` | Plugin integration (CPEX hook factories). |
 | `contextforge-load-test` | Performance harness: end-to-end MCP traffic driver. |

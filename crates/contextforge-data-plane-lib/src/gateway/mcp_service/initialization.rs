@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::user_store::BackendMCPGateway;
+use contextforge_data_plane_observability::PerformanceTimer;
 use http::request::Parts;
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServiceExt,
@@ -90,12 +91,15 @@ where
 
                 // Propagate request correlation and W3C trace context to the
                 // backend so logs and spans remain linked across services.
-                crate::telemetry::inject_current_context(&mut headers);
+                contextforge_data_plane_observability::inject_current_context(&mut headers);
 
                 let config =
                     StreamableHttpClientTransportConfig::with_uri(backend_url.to_string()).custom_headers(headers);
                 let transport = StreamableHttpClientTransport::with_client(client, config);
-                match backend_client.serve(transport).await {
+                let mut timer = PerformanceTimer::external_call("Routing", "initialize_backend");
+                let result = backend_client.serve(transport).await;
+                timer.record_result(&result);
+                match result {
                     Ok(running_service) => {
                         info!(
                             component = "Routing",

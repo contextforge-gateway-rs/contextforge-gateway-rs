@@ -1,3 +1,4 @@
+use contextforge_data_plane_observability::PerformanceTimer;
 use rmcp::{
     ErrorData, RoleServer,
     model::{
@@ -89,10 +90,10 @@ where
 
     let mut routed_request = request;
     routed_request.uri = resource_uri;
-    let response = service
-        .read_resource(routed_request)
-        .await
-        .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
+    let mut timer = PerformanceTimer::external_call("Routing", "read_resource");
+    let response = service.read_resource(routed_request).await;
+    timer.record_result(&response);
+    let response = response.map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
     info!(
         component = "Routing",
         operation = "read_resource",
@@ -180,7 +181,10 @@ where
     routed_request.uri = resource_uri.clone();
     service.service().track_resource_subscription(&resource_uri, cx.peer.clone()).await;
 
-    if let Err(error) = service.subscribe(routed_request).await {
+    let mut timer = PerformanceTimer::external_call("Routing", "subscribe");
+    let result = service.subscribe(routed_request).await;
+    timer.record_result(&result);
+    if let Err(error) = result {
         service.service().stop_tracking_resource_subscription(&resource_uri).await;
         return Err(backend_forward_error("subscribe", &service_name, &error));
     }
@@ -216,10 +220,10 @@ where
 
     let mut routed_request = request;
     routed_request.uri = resource_uri.clone();
-    service
-        .unsubscribe(routed_request)
-        .await
-        .map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
+    let mut timer = PerformanceTimer::external_call("Routing", "unsubscribe");
+    let result = service.unsubscribe(routed_request).await;
+    timer.record_result(&result);
+    result.map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
     service.service().stop_tracking_resource_subscription(&resource_uri).await;
     info!(
         component = "Routing",

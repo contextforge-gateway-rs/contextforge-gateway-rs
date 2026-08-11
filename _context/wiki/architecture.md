@@ -44,11 +44,14 @@ upstream response
 
 ```mermaid
 flowchart TD
-    bin["binary\nCLI · logging · runtime"]
+    bin["binary\nCLI · observability init · runtime"]
     lib["lib\nrouting · middleware\nsessions · transports"]
+    obs["observability\nJSON logs · correlation\ntracing · performance"]
     apis["apis\nUserConfig · VirtualHost\nBackendMCPGateway"]
     cpex["cpex\nCPEX hook factories"]
     bin --> lib
+    bin --> obs
+    lib --> obs
     lib --> apis
     lib --> cpex
 ```
@@ -84,6 +87,11 @@ Order is invariant: auth/config before backend selection; request plugins before
 | `transports/` | Downstream TCP and TLS listener setup |
 | `tools.rs` | Local bootstrap helpers (`with_tools` feature only) |
 
+Cross-cutting observability lives in the sibling `contextforge-data-plane-observability`
+crate. The binary explicitly installs its subscriber and exporters at startup;
+the library uses its request middleware, context propagation, user pseudonym,
+and latency timers without owning global initialization.
+
 ## State Ownership
 
 | State | Owner | Lifetime |
@@ -93,6 +101,8 @@ Order is invariant: auth/config before backend selection; request plugins before
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
 | Transaction and correlation IDs | Request extension + task-local scope | One HTTP request; returned in response headers and snapshotted into backend transport during initialize |
+| Trace and span IDs | Request context + request span | One HTTP request; parsed or generated even when OTLP export is disabled and propagated to backend initialization |
+| Pseudonymous user ID | Request span | One authenticated request; first 12 hex characters of a SHA-256 digest, never the raw JWT subject |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |
 | Backend RMCP services | `BackendTransports` map | Local process, per principal/backend/session |
 | Local user session mapping | `LocalUserSessionStore` | Local LRU, 50k entries, 1 hour |
@@ -145,7 +155,7 @@ Startup sequence (`main.rs` → `Gateway::run_gateway`):
 ```text
 install rustls crypto provider
   -> Config::parse()
-  -> logging::init_tracing_logging(&config)
+  -> observability::init_observability(&logging_config)
   -> Runtime::from(&config)          ← sets executor shape
   -> optional CpexRuntimeRegistry
   -> Gateway::builder()

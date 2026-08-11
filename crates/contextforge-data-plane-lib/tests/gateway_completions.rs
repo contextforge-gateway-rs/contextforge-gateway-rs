@@ -63,7 +63,7 @@ async fn plaintext_complete_for_unrouted_reference_errors() -> Result<()> {
 }
 
 async fn assert_prompt_completion(gateway_url: String, client: reqwest::Client) -> Result<()> {
-    info!("Sending request to {gateway_url}");
+    info!(component = "Test", operation = "complete", gateway_url, "sending gateway request");
     let running_service = connect_client(gateway_url, client).await?;
 
     // Spec-compliant clients only issue completion/complete when the server advertises the

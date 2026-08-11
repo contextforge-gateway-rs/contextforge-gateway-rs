@@ -1,0 +1,38 @@
+[package]
+name = "contextforge-data-plane-observability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum.workspace = true
+chrono.workspace = true
+clap.workspace = true
+http.workspace = true
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
+serde_json.workspace = true
+sha2 = "0.10.9"
+tokio.workspace = true
+tonic = "0.14"
+tower-http = { workspace = true, features = ["trace"] }
+tracing.workspace = true
+tracing-appender = "0.2.3"
+tracing-opentelemetry = "0.33.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "http-proto", "reqwest-blocking-client", "metrics"] }
+uuid.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

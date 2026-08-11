@@ -1,4 +1,5 @@
 use contextforge_data_plane_cpex::ToolPreCallResult;
+use contextforge_data_plane_observability::PerformanceTimer;
 use rmcp::{
     ErrorData, RoleServer,
     model::{CallToolRequestParams, CallToolResponse, ErrorCode, ListToolsResult, PaginatedRequestParams},
@@ -103,7 +104,8 @@ where
     pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
     let progress_token = cx.meta.get_progress_token();
-    let handle = backend_service
+    let mut timer = PerformanceTimer::external_call("Routing", "call_tool");
+    let handle_result = backend_service
         .service()
         .start_tool_call(
             backend_service.peer(),
@@ -113,10 +115,14 @@ where
             cx.peer.clone(),
             post_state.clone(),
         )
-        .await
-        .map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
+        .await;
+    if handle_result.is_err() {
+        timer.failed();
+    }
+    let handle = handle_result.map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
     let backend_progress_token = handle.progress_token.clone();
     let response = call_backend_tool(handle, cx.ct.clone()).await;
+    timer.record_result(&response);
     backend_service.service().stop_tracking_tool_call(&backend_progress_token).await;
 
     let response = response.map_err(|error| backend_forward_error("call_tool", &service_name, &error))?;
