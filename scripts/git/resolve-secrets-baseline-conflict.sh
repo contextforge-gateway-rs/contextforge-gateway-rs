@@ -12,6 +12,8 @@
 # On conflict the driver discards both sides and regenerates the baseline
 # from the working tree, preserving existing audit decisions (is_secret).
 # This avoids JSON merge conflicts while keeping human audits intact.
+# The driver fails closed: if the regenerated baseline contains findings
+# without an is_secret audit decision the merge is rejected.
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -97,5 +99,27 @@ with open(sys.argv[3], "w") as f:
 PYEOF
 
 rm -f "$CURRENT.new"
+
+# Fail closed: reject unaudited findings introduced by the merge.
+UNAUDITED=$(python3 - "$CURRENT" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    baseline = json.load(f)
+count = sum(
+    1
+    for findings in baseline.get("results", {}).values()
+    for f in findings
+    if "is_secret" not in f
+)
+print(count)
+PYEOF
+)
+
+if [ "$UNAUDITED" -gt 0 ]; then
+    echo "❌ $BASENAME has $UNAUDITED unaudited finding(s) after merge. Audit them with:" >&2
+    echo "   detect-secrets audit $BASENAME" >&2
+    exit 1
+fi
+
 echo "✅ $BASENAME regenerated and audit decisions preserved."
 exit 0

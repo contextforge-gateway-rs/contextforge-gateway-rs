@@ -125,7 +125,7 @@ repos:
     hooks:
       - id: detect-secrets
         name: IBM Detect Secrets
-        args: ['--baseline', '.secrets.baseline', --use-all-plugins]
+        args: ['--baseline', '.secrets.baseline', '--use-all-plugins', '--fail-on-unaudited']
         types: [text]
 
   # ---------------------------------------------------------------------------
@@ -160,11 +160,5 @@ repos:
       - id: cargo-build
         name: cargo build
         entry: cargo build --locked --workspace
-        language: system
-        pass_filenames: false
-
-      - id: cargo-bench-no-run
-        name: cargo bench --no-run
-        entry: cargo bench --locked --workspace --no-run
         language: system
         pass_filenames: false

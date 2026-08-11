@@ -1,6 +1,11 @@
 SERVICES ?= nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
 ARGS     ?=
 
+IMAGE_NAME := contextforge-data-plane:latest
+
+SERVICES ?= nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
+ARGS     ?=
+
 # IBM detect-secrets hardened fork — pinned to the same commit used in mcp-context-forge.
 DETECT_SECRETS_SPEC ?= git+https://github.com/ibm/detect-secrets.git@076672a9a01abdfc7ecee2e7d14f08cdccb73976
 
@@ -11,7 +16,7 @@ DETECT_SECRETS_EXCLUDE := '(?x)(Cargo\.lock$$|\.lock$$)|^\.secrets\.baseline$$'
         docker-prod compose-up compose-down docs-serve \
         fmt fmt-check lint deny \
         pre-commit install-pre-commit-hooks configure-git \
-        secrets-scan secrets-scan-all secrets-audit secrets-baseline
+        secrets-scan secrets-scan-all secrets-audit secrets-baseline secrets-update
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -21,11 +26,11 @@ help: ## Show this help
 # ---------------------------------------------------------------------------
 
 docker-prod: ## Build production Docker image (contextforge-data-plane:latest) from docker/Dockerfile
-	docker build -t contextforge-data-plane:latest -f docker/Dockerfile .
+	docker build -t $(IMAGE_NAME) -f docker/Dockerfile .
 
 compose-up: ## Launch stack: nginx, control plane, redis, postgres, pgbouncer, dataplane, fast_time_server
-	@docker image inspect contextforge-data-plane:latest >/dev/null 2>&1 || { \
-		echo "Image contextforge-data-plane:latest not found. Run 'make docker-prod' first."; \
+	@docker image inspect $(IMAGE_NAME) >/dev/null 2>&1 || { \
+		echo "Image $(IMAGE_NAME) not found. Run 'make docker-prod' first."; \
 		exit 1; \
 	}
 	docker compose -f docker/docker-compose.yml up -d $(SERVICES) $(ARGS)
@@ -72,9 +77,10 @@ pre-commit: ## Run all pre-commit hooks against every file
 		echo "  uv tool install pre-commit"; \
 		exit 1; \
 	fi
-	@mkdir -p .cache/pre-commit-home .cache/tmp
+	@mkdir -p .cache/pre-commit-home .cache/tmp .cache/cargo
 	PRE_COMMIT_HOME='$(CURDIR)/.cache/pre-commit-home' \
 	TMPDIR='$(CURDIR)/.cache/tmp' \
+	CARGO_HOME='$(CURDIR)/.cache/cargo' \
 	pre-commit run --config .pre-commit-config.yaml --all-files --show-diff-on-failure
 
 # ---------------------------------------------------------------------------
@@ -145,3 +151,13 @@ configure-git: install-pre-commit-hooks ## Configure git hooks + merge driver fo
 	git config merge.secrets-baseline.driver \
 		"$$common_dir/git-drivers/resolve-secrets-baseline-conflict.sh %O %A %B %P"
 	@echo "✅ Git merge driver configured for .secrets.baseline"
+
+secrets-update: ## Re-scan and update .secrets.baseline in place
+	@if command -v detect-secrets >/dev/null 2>&1; then \
+		detect-secrets scan --update .secrets.baseline --use-all-plugins \
+			--exclude-files $(DETECT_SECRETS_EXCLUDE); \
+	else \
+		uv tool run --from '$(DETECT_SECRETS_SPEC)' detect-secrets scan \
+			--update .secrets.baseline --use-all-plugins \
+			--exclude-files $(DETECT_SECRETS_EXCLUDE); \
+	fi
