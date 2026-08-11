@@ -1,23 +1,19 @@
 # AGENTS.md
 
-## Start with the wiki
+## Wiki usage
 
-At the start of each task, check `_context/wiki/index.md` to decide
-whether wiki context is needed before acting. Don't read the wiki in
-full. Use the index and follow links only when they are relevant to
-the task.
+- Start each task at `_context/wiki/index.md`; read only relevant pages.
+- Write for agents: terse, factual, compact, and optimized for retrieval.
+  Preserve exact contracts, invariants, commands, failures, and current limits;
+  omit filler, repetition, promotional prose, and generic explanations.
+- Update existing pages instead of duplicating knowledge; remove stale guidance.
+- Update the matching wiki page with every hot-path behavior change.
+- For other durable knowledge, offer a wiki update and wait for approval.
 
-## Update the wiki
+When adding a page, update both navigation files:
 
-After completing a task, offer to update the wiki if the task yielded durable knowledge that could benefit future work, then wait for user approval. This includes new processes, architecture decisions, or insights that go beyond the immediate task.
-
-When adding a new wiki page, also update:
 - `_context/wiki/index.md` — add a row to the pages table
-- `_context/wiki/SUMMARY.md` — add the page under the appropriate section so it appears in the published book
-
----
-
-Guidance for agents working on `contextforge-data-plane`.
+- `_context/wiki/SUMMARY.md` — add the page under the appropriate section
 
 This repo is the Rust dataplane part of ContextForge. It must stay compatible
 with the external ContextForge control plane in
@@ -50,8 +46,6 @@ control-plane, UI, IAM, or metrics-storage app.
   logic, split logic, and tests.
 - This project is still early development with no external users; prefer the
   right architecture over preserving unstable APIs or compatibility surfaces.
-- When behavior on the hot path changes, update the matching wiki page in the
-  same change.
 
 ## Logging
 
