@@ -156,8 +156,8 @@ RuntimePluginConfigDocument
   cpex: CpexConfig
 ```
 
-Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke` only.  
-Rejected: routing-based selection, plugin dirs, global policies, other hook types.  
+Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke` only.
+Rejected: routing-based selection, plugin dirs, global policies, other hook types.
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
 
 ### Tool Call Hook Behavior
