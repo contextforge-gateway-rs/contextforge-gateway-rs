@@ -41,7 +41,7 @@ suite `0.2.0-alpha.11` with `--requirements 2026-07-28`. Its small live path is
 official runner → nginx → published `latest` dataplane → official fixture,
 with the published `latest` control plane registering and publishing the
 fixture through Redis. The control plane uses ephemeral SQLite, so PostgreSQL
-is unnecessary. Workflow helpers live in `.github/conformance/`.
+is unnecessary. The harness lives in `tests/conformance/`.
 
 Because this conformance CLI cannot set a bearer header, nginx adds an
 ephemeral control-plane token when one is absent; there is no auth proxy or

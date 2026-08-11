@@ -54,26 +54,26 @@ jobs:
 
       - name: Pull the latest ContextForge images
         run: >-
-          docker compose -f .github/conformance/docker-compose.yml
+          docker compose -f tests/conformance/docker-compose.yml
           pull redis control-plane data-plane nginx
 
       - name: Start the fixture and control plane
-        run: .github/conformance/start-fixture-and-control-plane.sh
+        run: tests/conformance/start-fixture-and-control-plane.sh
 
       - name: Register the official fixture through the control plane
-        run: .github/conformance/register-fixture.sh
+        run: tests/conformance/register-fixture.sh
 
       - name: Start dataplane and nginx
-        run: .github/conformance/start-dataplane-and-nginx.sh
+        run: tests/conformance/start-dataplane-and-nginx.sh
 
       - name: Run MCP 2026-07-28 requirements
         id: runner
-        run: .github/conformance/run-conformance.sh
+        run: tests/conformance/run-conformance.sh
 
       - name: Collect stack logs
         if: always()
         run: >-
-          docker compose -f .github/conformance/docker-compose.yml
+          docker compose -f tests/conformance/docker-compose.yml
           logs --no-color > conformance-logs/stack.log 2>&1 || true
 
       - name: Upload conformance results
@@ -89,7 +89,7 @@ jobs:
 
       - name: Stop the live stack
         if: always()
-        run: .github/conformance/stop-live-stack.sh
+        run: tests/conformance/stop-live-stack.sh
 
       - name: Enforce conformance baseline
         if: always()
