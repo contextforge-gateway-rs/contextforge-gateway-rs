@@ -1,0 +1,4 @@
+# Tell git to use the secrets-baseline merge driver for .secrets.baseline
+# so merge conflicts produce a regenerated JSON instead of conflict markers.
+# Register the driver with: make configure-git
+.secrets.baseline merge=secrets-baseline
