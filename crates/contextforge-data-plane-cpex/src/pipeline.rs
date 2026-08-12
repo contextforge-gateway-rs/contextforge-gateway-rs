@@ -75,6 +75,8 @@ pub(crate) fn effective_post_result(original: CallToolResult, result: &PipelineR
 pub(crate) fn effective_post_prompt_result(
     original: GetPromptResult,
     result: &PipelineResult,
+    prompt_name: &str,
+    prompt_request_id: &str,
 ) -> Result<GetPromptResult, ErrorData> {
     let Some(payload) = modified_message_payload(result) else {
         return Ok(original);
@@ -84,9 +86,9 @@ pub(crate) fn effective_post_prompt_result(
         return Err(ErrorData { code: ErrorCode::INVALID_REQUEST, message: message.into(), data: None });
     }
 
-    prompt_result_response(original, payload).ok_or_else(|| ErrorData {
+    prompt_result_response(original, payload, prompt_name, prompt_request_id).ok_or_else(|| ErrorData {
         code: ErrorCode::INTERNAL_ERROR,
-        message: "Plugin changed the prompt message count".into(),
+        message: "Plugin returned a prompt result the gateway cannot apply".into(),
         data: None,
     })
 }

@@ -283,7 +283,7 @@ impl GatewayPluginRuntime {
             return Err(plugin_denied_error("prompt", post_result));
         }
 
-        effective_post_prompt_result(response, &post_result)
+        effective_post_prompt_result(response, &post_result, prompt_name, &state.prompt_request_id)
     }
 
     pub(crate) async fn after_tool_call(

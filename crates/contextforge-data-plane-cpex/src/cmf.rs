@@ -193,8 +193,13 @@ pub(crate) fn prompt_result_rejection(payload: &MessagePayload) -> Option<String
 pub(crate) fn prompt_result_response(
     mut original: GetPromptResult,
     payload: &MessagePayload,
+    prompt_name: &str,
+    prompt_request_id: &str,
 ) -> Option<GetPromptResult> {
     let result = prompt_result(payload)?;
+    if result.prompt_name != prompt_name || result.prompt_request_id != prompt_request_id || result.content.is_some() {
+        return None;
+    }
     if result.messages.len() != original.messages.len() {
         return None;
     }
@@ -281,6 +286,12 @@ fn cmf_content_part(block: &ContentBlock, prompt_request_id: &str) -> Option<Con
     Some(part)
 }
 
+// MCP inlines image and audio bytes as base64, so a CMF source CMF can express but MCP cannot —
+// a URL reference — has to be refused rather than written into a field that means something else.
+fn inline_media_data<'a>(source_type: &str, data: &'a str) -> Option<&'a str> {
+    (source_type == "base64").then_some(data)
+}
+
 fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
     let role = match message.role {
         Role::Assistant => McpRole::Assistant,
@@ -292,10 +303,10 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
     let content = match part {
         ContentPart::Text { text } => ContentBlock::text(text.clone()),
         ContentPart::Image { content } => {
-            ContentBlock::image(content.data.clone(), content.media_type.clone().unwrap_or_default())
+            ContentBlock::image(inline_media_data(&content.source_type, &content.data)?, content.media_type.clone()?)
         },
         ContentPart::Audio { content } => {
-            ContentBlock::audio(content.data.clone(), content.media_type.clone().unwrap_or_default())
+            ContentBlock::audio(inline_media_data(&content.source_type, &content.data)?, content.media_type.clone()?)
         },
         ContentPart::Resource { content } => ContentBlock::resource(ResourceContents::TextResourceContents {
             uri: content.uri.clone(),
@@ -304,7 +315,10 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
             meta: None,
         }),
         ContentPart::ResourceRef { content } => {
-            ContentBlock::ResourceLink(McpResource::new(content.uri.clone(), content.name.clone().unwrap_or_default()))
+            if content.range_start.is_some() || content.range_end.is_some() || content.selector.is_some() {
+                return None;
+            }
+            ContentBlock::ResourceLink(McpResource::new(content.uri.clone(), content.name.clone()?))
         },
         _ => return None,
     };
@@ -343,7 +357,7 @@ mod tests {
         let extra = edited_messages(&mut payload).first().cloned().expect("one message");
         edited_messages(&mut payload).push(extra);
 
-        assert!(prompt_result_response(original, &payload).is_none());
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
     }
 
     #[test]
@@ -353,7 +367,7 @@ mod tests {
         let duplicate = payload.message.content[0].clone();
         payload.message.content.push(duplicate);
 
-        assert!(prompt_result_response(original, &payload).is_none());
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
     }
 
     #[test]
@@ -385,12 +399,96 @@ mod tests {
     }
 
     #[test]
+    fn prompt_result_response_rejects_envelope_content_edit() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        prompt_result_mut(&mut payload).content = Some("[REDACTED]".to_owned());
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_renamed_prompt() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        prompt_result_mut(&mut payload).prompt_name = "other".to_owned();
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_recorrelated_result() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        prompt_result_mut(&mut payload).prompt_request_id = "prompt-2".to_owned();
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_url_sourced_image() {
+        let original =
+            GetPromptResult::new(vec![PromptMessage::new(McpRole::User, ContentBlock::image("aW1hZ2U=", "image/png"))]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Image { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected an image part");
+        };
+        "url".clone_into(&mut content.source_type);
+        content.data = "https://example.invalid/image.png".to_owned();
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_image_without_media_type() {
+        let original =
+            GetPromptResult::new(vec![PromptMessage::new(McpRole::User, ContentBlock::image("aW1hZ2U=", "image/png"))]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Image { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected an image part");
+        };
+        content.media_type = None;
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_resource_link_without_name() {
+        let original = GetPromptResult::new(vec![PromptMessage::new(
+            McpRole::User,
+            ContentBlock::ResourceLink(McpResource::new("file:///app.env", "app-env")),
+        )]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::ResourceRef { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected a resource reference part");
+        };
+        content.name = None;
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_resource_link_range_edit() {
+        let original = GetPromptResult::new(vec![PromptMessage::new(
+            McpRole::User,
+            ContentBlock::ResourceLink(McpResource::new("file:///app.env", "app-env")),
+        )]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::ResourceRef { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected a resource reference part");
+        };
+        content.range_start = Some(10);
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
     fn prompt_result_response_rejects_removed_message() {
         let original = text_prompt();
         let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         edited_messages(&mut payload).clear();
 
-        assert!(prompt_result_response(original, &payload).is_none());
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
     }
 
     #[test]
@@ -399,7 +497,7 @@ mod tests {
         let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         edited_messages(&mut payload)[0].role = Role::System;
 
-        assert!(prompt_result_response(original, &payload).is_none());
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
     }
 
     #[test]
@@ -407,7 +505,8 @@ mod tests {
         let original = text_prompt();
         let payload = prompt_result_payload(&original, "review", "prompt-1");
 
-        let result = prompt_result_response(original.clone(), &payload).expect("unmodified payload applies");
+        let result = prompt_result_response(original.clone(), &payload, "review", "prompt-1")
+            .expect("unmodified payload applies");
 
         assert_eq!(
             serde_json::to_value(&original).expect("original serializes"),
@@ -429,7 +528,7 @@ mod tests {
         assert_eq!(Some("token=secret"), content.content.as_deref());
         content.content = Some("token=[REDACTED]".to_owned());
 
-        let result = prompt_result_response(original, &payload).expect("resource edit applies");
+        let result = prompt_result_response(original, &payload, "review", "prompt-1").expect("resource edit applies");
 
         let ContentBlock::Resource(resource) = &result.messages[0].content else {
             panic!("expected an embedded resource");
