@@ -253,8 +253,9 @@ listed in [Working Preferences](preferences.md#logging-tracing). Requests
 preserve or generate `x-contextforge-transaction-id` and
 `x-contextforge-correlation-id` and return both headers to the caller.
 Correlation IDs are UUIDs; transaction IDs accept caller values up to 128
-characters. Valid W3C `traceparent` IDs are preserved and missing or invalid
-trace/span IDs are generated even when OTLP export is disabled. During
+characters. A valid W3C `traceparent` preserves its trace ID and flags while
+the dataplane creates a child span ID; missing or invalid context generates a
+new trace and span ID even when OTLP export is disabled. During
 `initialize`, both ContextForge IDs and standard W3C `traceparent` context are snapshotted
 into the backend transport. As with other downstream headers, backend
 propagation is session-scoped until transports become per-request.

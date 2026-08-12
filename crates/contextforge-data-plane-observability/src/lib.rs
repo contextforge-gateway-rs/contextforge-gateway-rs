@@ -159,11 +159,17 @@ pub fn init_observability(configuration: &LoggingConfig) -> Result<Guard, Error>
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         let meter_provider = init_meter_provider(configuration, &service_name)?;
 
-        registry.with(console_layer).with(file_layer).with(telemetry.with_filter(tracing_filter)).init();
+        registry.with(console_layer).with(file_layer).with(telemetry.with_filter(tracing_filter)).try_init()?;
+        if let Some(provider) = &meter_provider {
+            global::set_meter_provider(provider.clone());
+        }
         Ok(Guard { appender: guard, meter_provider, tracer_provider: Some(tracer_provider) })
     } else {
         let meter_provider = init_meter_provider(configuration, metadata.service_name())?;
-        registry.with(console_layer).with(file_layer).init();
+        registry.with(console_layer).with(file_layer).try_init()?;
+        if let Some(provider) = &meter_provider {
+            global::set_meter_provider(provider.clone());
+        }
         Ok(Guard { appender: guard, meter_provider, tracer_provider: None })
     }
 }
@@ -276,15 +282,14 @@ fn init_meter_provider(configuration: &LoggingConfig, service_name: &str) -> Res
         )
         .build();
 
-    global::set_meter_provider(provider.clone());
     Ok(Some(provider))
 }
 
 fn headers_to_metadata(headers: &HashMap<String, String>) -> Result<MetadataMap, Error> {
     let mut map = MetadataMap::new();
     for (key, value) in headers {
-        let key = MetadataKey::from_bytes(key.as_bytes())
-            .map_err(|error| format!("invalid gRPC metadata key {key:?}: {error}"))?;
+        let key =
+            MetadataKey::from_bytes(key.as_bytes()).map_err(|error| format!("invalid gRPC metadata key: {error}"))?;
         let value =
             MetadataValue::try_from(value.as_str()).map_err(|error| format!("invalid gRPC metadata value: {error}"))?;
         map.insert(key, value);
@@ -295,11 +300,15 @@ fn headers_to_metadata(headers: &HashMap<String, String>) -> Result<MetadataMap,
 fn parse_otlp_headers(raw: Option<&str>) -> Result<HashMap<String, String>, Error> {
     let mut headers = HashMap::new();
     let Some(raw) = raw else { return Ok(headers) };
-    for entry in raw.split(',').map(str::trim).filter(|entry| !entry.is_empty()) {
+    for (index, entry) in raw.split(',').map(str::trim).filter(|entry| !entry.is_empty()).enumerate() {
         match entry.split_once('=') {
-            None => return Err(format!("malformed OTLP header entry (missing '=' separator): {entry:?}").into()),
+            None => {
+                return Err(
+                    format!("malformed OTLP header entry {}: missing '=' separator", index.saturating_add(1)).into()
+                );
+            },
             Some((key, _)) if key.trim().is_empty() => {
-                return Err(format!("malformed OTLP header entry (empty key): {entry:?}").into());
+                return Err(format!("malformed OTLP header entry {}: empty key", index.saturating_add(1)).into());
             },
             Some((key, value)) => {
                 headers.insert(key.trim().to_owned(), value.trim().to_owned());
@@ -324,5 +333,15 @@ mod tests {
     fn rejects_malformed_export_headers() {
         assert!(parse_otlp_headers(Some("no-equals")).is_err());
         assert!(parse_otlp_headers(Some("=missing-key")).is_err());
+    }
+
+    #[test]
+    fn malformed_export_headers_do_not_echo_values() {
+        let error = parse_otlp_headers(Some("Authorization=valid,sensitive-value"))
+            .expect_err("second header should be rejected")
+            .to_string();
+
+        assert!(!error.contains("sensitive-value"));
+        assert!(error.contains("entry 2"));
     }
 }

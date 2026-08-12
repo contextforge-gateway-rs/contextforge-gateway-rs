@@ -93,11 +93,11 @@ impl StructuredJsonFormatter {
 
     fn inherit_span_fields(object: &mut Map<String, Value>) {
         let span_list = object.get("spans").and_then(Value::as_array).cloned().unwrap_or_default();
-        for span in span_list.iter().filter_map(Value::as_object) {
-            Self::merge_span_fields(object, span);
-        }
         if let Some(span) = object.get("span").and_then(Value::as_object).cloned() {
             Self::merge_span_fields(object, &span);
+        }
+        for span in span_list.iter().rev().filter_map(Value::as_object) {
+            Self::merge_span_fields(object, span);
         }
         object.remove("span");
         object.remove("spans");
@@ -282,6 +282,26 @@ mod tests {
         assert_eq!(event["retryable"], false);
         assert!(event.get("http_status").is_some());
         assert!(event.get("stack_trace").is_some());
+    }
+
+    #[test]
+    fn nearest_span_fields_override_ancestors() {
+        let event = event_from(|| {
+            let request = tracing::info_span!(
+                "request",
+                transaction_id = "txn-1",
+                component = "HttpServer",
+                operation = "http_request"
+            );
+            let _request = request.enter();
+            let database = tracing::info_span!("database", component = "UserConfig", operation = "read");
+            let _database = database.enter();
+            tracing::info!("nested event");
+        });
+
+        assert_eq!(event["transaction_id"], "txn-1");
+        assert_eq!(event["component"], "UserConfig");
+        assert_eq!(event["operation"], "read");
     }
 
     #[test]

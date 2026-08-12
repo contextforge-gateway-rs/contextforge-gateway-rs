@@ -101,7 +101,7 @@ and latency timers without owning global initialization.
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
 | Transaction and correlation IDs | Request extension + task-local scope | One HTTP request; returned in response headers and snapshotted into backend transport during initialize |
-| Trace and span IDs | Request context + request span | One HTTP request; parsed or generated even when OTLP export is disabled and propagated to backend initialization |
+| Trace and span IDs | Request context + request span | One HTTP request; incoming trace ID and flags are preserved with a new child span ID, or a complete context is generated, even when OTLP export is disabled; propagated to backend initialization |
 | Pseudonymous user ID | Request span | One authenticated request; first 12 hex characters of a SHA-256 digest, never the raw JWT subject |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |
 | Backend RMCP services | `BackendTransports` map | Local process, per principal/backend/session |

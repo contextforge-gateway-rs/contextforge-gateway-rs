@@ -567,6 +567,7 @@ dependencies = [
  "rmcp",
  "rmp-serde",
  "rustls",
+ "serde_json",
  "tikv-jemallocator",
  "tokio",
  "tracing",

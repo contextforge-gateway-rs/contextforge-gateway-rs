@@ -28,17 +28,25 @@ struct TraceFields {
 
 impl TraceFields {
     fn from_headers(headers: &http::HeaderMap) -> Self {
-        headers
+        let parent = headers
             .get(http::header::HeaderName::from_static("traceparent"))
             .and_then(|value| value.to_str().ok())
-            .and_then(parse_traceparent)
-            .unwrap_or_else(Self::generated)
+            .and_then(parse_traceparent);
+        parent.map_or_else(Self::generated, |parent| Self {
+            trace_id: parent.trace_id,
+            span_id: Self::generated_span_id(),
+            trace_flags: parent.trace_flags,
+        })
     }
 
     fn generated() -> Self {
         let trace_id = Uuid::new_v4().simple().to_string();
-        let span_id = Uuid::new_v4().simple().to_string()[..16].to_owned();
+        let span_id = Self::generated_span_id();
         Self { trace_id, span_id, trace_flags: "01".to_owned() }
+    }
+
+    fn generated_span_id() -> String {
+        Uuid::new_v4().simple().to_string()[..16].to_owned()
     }
 
     fn traceparent(&self) -> String {
@@ -403,6 +411,21 @@ mod tests {
         assert!(parse_traceparent("00-00000000000000000000000000000000-b7ad6b7169203331-01").is_none());
         assert!(parse_traceparent("00-0af7651916cd43dd8448eb211c80319c-0000000000000000-01").is_none());
         assert!(parse_traceparent("malformed").is_none());
+    }
+
+    #[test]
+    fn inbound_trace_context_creates_a_child_span_without_an_exporter() {
+        let parent_span_id = "b7ad6b7169203331"; // pragma: allowlist secret
+        let trace_id = "0af7651916cd43dd8448eb211c80319c"; // pragma: allowlist secret
+        let mut headers = http::HeaderMap::new();
+        headers
+            .insert("traceparent", http::HeaderValue::from_str(&format!("00-{trace_id}-{parent_span_id}-01")).unwrap());
+
+        let trace = TraceFields::from_headers(&headers);
+
+        assert_eq!(trace.trace_id, trace_id);
+        assert_ne!(trace.span_id, parent_span_id);
+        assert_eq!(trace.trace_flags, "01");
     }
 
     #[test]
