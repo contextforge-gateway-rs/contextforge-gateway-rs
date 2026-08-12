@@ -141,12 +141,21 @@ pub(crate) fn prompt_request_payload(
     }
 }
 
-pub(crate) fn prompt_request_arguments(payload: &MessagePayload) -> Option<Map<String, Value>> {
-    payload
-        .message
-        .get_prompt_requests()
-        .first()
-        .map(|request| request.arguments.clone().into_iter().collect::<Map<String, Value>>())
+pub(crate) fn prompt_request_arguments(
+    payload: &MessagePayload,
+    prompt_name: &str,
+    backend_name: &str,
+    prompt_request_id: &str,
+) -> Option<Map<String, Value>> {
+    let requests = payload.message.get_prompt_requests();
+    let [request] = requests.as_slice() else { return None };
+    if request.name != prompt_name
+        || request.prompt_request_id != prompt_request_id
+        || request.server_id.as_deref() != Some(backend_name)
+    {
+        return None;
+    }
+    Some(request.arguments.clone().into_iter().collect::<Map<String, Value>>())
 }
 
 pub(crate) fn prompt_result_payload(
@@ -197,7 +206,11 @@ pub(crate) fn prompt_result_response(
     prompt_request_id: &str,
 ) -> Option<GetPromptResult> {
     let result = prompt_result(payload)?;
-    if result.prompt_name != prompt_name || result.prompt_request_id != prompt_request_id || result.content.is_some() {
+    if result.prompt_name != prompt_name
+        || result.prompt_request_id != prompt_request_id
+        || result.content.is_some()
+        || result.error_message.is_some()
+    {
         return None;
     }
     if result.messages.len() != original.messages.len() {
@@ -205,11 +218,18 @@ pub(crate) fn prompt_result_response(
     }
 
     for (message, edited) in original.messages.iter_mut().zip(&result.messages) {
-        let projected = cmf_prompt_message(message, &result.prompt_request_id);
+        let projected = cmf_prompt_message(message, prompt_request_id);
         if serde_json::to_value(&projected).ok()? == serde_json::to_value(edited).ok()? {
             continue;
         }
-        *message = mcp_prompt_message(edited)?;
+
+        let rebuilt = mcp_prompt_message(edited)?;
+        if serde_json::to_value(cmf_prompt_message(&rebuilt, prompt_request_id)).ok()?
+            != serde_json::to_value(edited).ok()?
+        {
+            return None;
+        }
+        *message = rebuilt;
     }
 
     Some(original)
@@ -315,9 +335,6 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
             meta: None,
         }),
         ContentPart::ResourceRef { content } => {
-            if content.range_start.is_some() || content.range_end.is_some() || content.selector.is_some() {
-                return None;
-            }
             ContentBlock::ResourceLink(McpResource::new(content.uri.clone(), content.name.clone()?))
         },
         _ => return None,
@@ -398,6 +415,67 @@ mod tests {
         assert_eq!(None, prompt_result_rejection(&payload));
     }
 
+    fn review_payload() -> MessagePayload {
+        let request = GetPromptRequestParams::new("review")
+            .with_arguments(Map::from_iter([("topic".to_owned(), Value::from("weather"))]));
+        prompt_request_payload(&request, "review", "backend-a", "prompt-1")
+    }
+
+    fn prompt_request_mut(payload: &mut MessagePayload) -> &mut PromptRequest {
+        payload
+            .message
+            .content
+            .iter_mut()
+            .find_map(|part| match part {
+                ContentPart::PromptRequest { content } => Some(content),
+                _ => None,
+            })
+            .expect("payload carries a prompt request")
+    }
+
+    #[test]
+    fn prompt_request_arguments_accepts_an_argument_edit() {
+        let mut payload = review_payload();
+        prompt_request_mut(&mut payload).arguments.insert("topic".to_owned(), Value::from("rain"));
+
+        let arguments = prompt_request_arguments(&payload, "review", "backend-a", "prompt-1");
+
+        assert_eq!(Some(&Value::from("rain")), arguments.as_ref().and_then(|args| args.get("topic")));
+    }
+
+    #[test]
+    fn prompt_request_arguments_rejects_a_renamed_prompt() {
+        let mut payload = review_payload();
+        "other".clone_into(&mut prompt_request_mut(&mut payload).name);
+
+        assert!(prompt_request_arguments(&payload, "review", "backend-a", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_request_arguments_rejects_a_rerouted_backend() {
+        let mut payload = review_payload();
+        prompt_request_mut(&mut payload).server_id = Some("backend-b".to_owned());
+
+        assert!(prompt_request_arguments(&payload, "review", "backend-a", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_request_arguments_rejects_a_recorrelated_request() {
+        let mut payload = review_payload();
+        "prompt-2".clone_into(&mut prompt_request_mut(&mut payload).prompt_request_id);
+
+        assert!(prompt_request_arguments(&payload, "review", "backend-a", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_request_arguments_rejects_extra_prompt_requests() {
+        let mut payload = review_payload();
+        let duplicate = payload.message.content[0].clone();
+        payload.message.content.push(duplicate);
+
+        assert!(prompt_request_arguments(&payload, "review", "backend-a", "prompt-1").is_none());
+    }
+
     #[test]
     fn prompt_result_response_rejects_envelope_content_edit() {
         let original = text_prompt();
@@ -423,6 +501,170 @@ mod tests {
         prompt_result_mut(&mut payload).prompt_request_id = "prompt-2".to_owned();
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_error_message_without_error_flag() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        prompt_result_mut(&mut payload).error_message = Some("blocked".to_owned());
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    fn resource_prompt() -> GetPromptResult {
+        GetPromptResult::new(vec![PromptMessage::new(
+            McpRole::User,
+            ContentBlock::resource(ResourceContents::text("token=secret", "file:///app.env")),
+        )])
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_resource_type_edit() {
+        let original = resource_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected a resource part");
+        };
+        content.resource_type = ResourceType::Database;
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_dropped_resource_metadata() {
+        let original = resource_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected a resource part");
+        };
+        content.description = Some("annotated by policy".to_owned());
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    fn media_prompt(content: ContentBlock) -> GetPromptResult {
+        GetPromptResult::new(vec![PromptMessage::new(McpRole::User, content)])
+    }
+
+    #[test]
+    fn prompt_result_response_round_trips_an_image_edit() {
+        let original = media_prompt(ContentBlock::image("aW1hZ2U=", "image/png"));
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Image { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected an image part");
+        };
+        content.data = "cmVkYWN0ZWQ=".to_owned();
+
+        let result = prompt_result_response(original, &payload, "review", "prompt-1").expect("image edit applies");
+
+        let ContentBlock::Image(image) = &result.messages[0].content else { panic!("expected an image") };
+        assert_eq!("cmVkYWN0ZWQ=", image.data);
+        assert_eq!("image/png", image.mime_type);
+    }
+
+    #[test]
+    fn prompt_result_response_round_trips_an_audio_edit() {
+        let original = media_prompt(ContentBlock::audio("YXVkaW8=", "audio/mp3"));
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Audio { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("audio reaches the plugin as a CMF audio part");
+        };
+        content.data = "cmVkYWN0ZWQ=".to_owned();
+
+        let result = prompt_result_response(original, &payload, "review", "prompt-1").expect("audio edit applies");
+
+        let ContentBlock::Audio(audio) = &result.messages[0].content else { panic!("expected audio") };
+        assert_eq!("cmVkYWN0ZWQ=", audio.data);
+        assert_eq!("audio/mp3", audio.mime_type);
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_url_sourced_audio() {
+        let original = media_prompt(ContentBlock::audio("YXVkaW8=", "audio/mp3"));
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Audio { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected an audio part");
+        };
+        "url".clone_into(&mut content.source_type);
+        content.data = "https://example.invalid/clip.mp3".to_owned();
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_audio_without_media_type() {
+        let original = media_prompt(ContentBlock::audio("YXVkaW8=", "audio/mp3"));
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Audio { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected an audio part");
+        };
+        content.media_type = None;
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_round_trips_a_resource_link_edit() {
+        let original = media_prompt(ContentBlock::ResourceLink(McpResource::new("file:///app.env", "app-env")));
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::ResourceRef { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected a resource reference part");
+        };
+        content.name = Some("redacted-env".to_owned());
+
+        let result = prompt_result_response(original, &payload, "review", "prompt-1").expect("link edit applies");
+
+        let ContentBlock::ResourceLink(link) = &result.messages[0].content else { panic!("expected a link") };
+        assert_eq!("redacted-env", link.name);
+        assert_eq!("file:///app.env", link.uri);
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_resource_with_removed_text() {
+        let original = resource_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("expected a resource part");
+        };
+        content.content = None;
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_multiple_content_parts() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        edited_messages(&mut payload)[0].content.push(ContentPart::Text { text: "extra".to_owned() });
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_a_cmf_only_content_part() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        edited_messages(&mut payload)[0].content = vec![ContentPart::Thinking { text: "reasoning".to_owned() }];
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_result_response_rejects_a_payload_without_a_prompt_result() {
+        let original = text_prompt();
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        payload.message.content.clear();
+
+        assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
+    }
+
+    #[test]
+    fn prompt_request_arguments_rejects_a_payload_without_a_prompt_request() {
+        let mut payload = review_payload();
+        payload.message.content.clear();
+
+        assert!(prompt_request_arguments(&payload, "review", "backend-a", "prompt-1").is_none());
     }
 
     #[test]

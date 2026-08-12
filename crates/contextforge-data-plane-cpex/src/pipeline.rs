@@ -45,15 +45,19 @@ pub(crate) fn effective_pre_args(
 pub(crate) fn effective_pre_prompt_args(
     original_args: Option<&serde_json::Map<String, serde_json::Value>>,
     pre_result: &PipelineResult,
+    prompt_name: &str,
+    backend_name: &str,
+    prompt_request_id: &str,
 ) -> Result<PromptArgumentsUpdate, ErrorData> {
     let Some(modified_payload) = modified_message_payload(pre_result) else {
         return Ok(PromptArgumentsUpdate::Unchanged);
     };
 
-    let Some(arguments) = prompt_request_arguments(modified_payload) else {
+    let Some(arguments) = prompt_request_arguments(modified_payload, prompt_name, backend_name, prompt_request_id)
+    else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
-            message: "Plugin modified prompt payload without a prompt request".into(),
+            message: "Plugin returned a prompt request the gateway cannot apply".into(),
             data: None,
         });
     };

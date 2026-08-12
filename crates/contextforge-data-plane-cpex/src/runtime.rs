@@ -258,7 +258,13 @@ impl GatewayPluginRuntime {
             return Err(plugin_denied_error("prompt", pre_result));
         }
 
-        let arguments = effective_pre_prompt_args(request.arguments.as_ref(), &pre_result)?;
+        let arguments = effective_pre_prompt_args(
+            request.arguments.as_ref(),
+            &pre_result,
+            prompt_name,
+            backend_name,
+            &prompt_request_id,
+        )?;
         let state =
             self.hooks.prompt.post.then(|| new_prompt_call_state(pre_result.context_table.clone(), prompt_request_id));
         Ok(PromptPreFetchResult { arguments, state })
