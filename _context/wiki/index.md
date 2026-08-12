@@ -13,6 +13,7 @@ then follow only the links that are relevant.
 | [preferences.md](preferences.md) | Working standards, code style, logging rules, branch naming, AI interaction preferences |
 | [architecture.md](architecture.md) | Middleware stack order, pipeline shape, module boundaries, state ownership, executor shapes |
 | [routing.md](routing.md) | Backend prefix contract, list/routed ops, federated pagination, session state, capability merge |
+| [mcp-capability-allocation.md](mcp-capability-allocation.md) | Ownership, initial scope, and recommended allocation of MCP protocol surfaces |
 | [failure-modes.md](failure-modes.md) | HTTP/MCP/routing/backend/plugin failure table — exact HTTP codes and JSON-RPC errors |
 | [config.md](config.md) | Key CLI flags, JWT claims, UserConfig shape, plugin config, telemetry debugging, startup validation, local observability stack |
 | [deployment.md](deployment.md) | Deployment checklist, health endpoint caveat, nginx routing, TLS choices, session affinity, Redis availability, image pinning |
