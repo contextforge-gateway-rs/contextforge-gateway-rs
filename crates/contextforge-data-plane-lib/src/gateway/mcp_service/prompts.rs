@@ -1,16 +1,17 @@
 use contextforge_data_plane_cpex::PromptPreFetchResult;
 use rmcp::{
     ErrorData, RoleServer,
-    model::{GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
+    model::{ErrorCode, GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
     service::RequestContext,
 };
 use tracing::info;
 
 use super::McpService;
 use crate::gateway::{
-    identifier_routing::{backend_forward_error, route_identifier_to_backend},
+    identifier_routing::{backend_forward_error, route_identifier},
     list_aggregation::{decode_gateway_cursor, fan_out_list, merge_prompts},
     mcp_call_validator::AuthorizedCallValidator,
+    mcp_service::initialization::connect_backend_for_request,
     session_manager::SessionManager,
 };
 
@@ -18,8 +19,7 @@ pub(super) async fn list_prompts(
     mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
-) -> Result<ListPromptsResult, ErrorData>
-{
+) -> Result<ListPromptsResult, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("list_prompts", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let namespace_identifiers = virtual_host.backends.len() > 1;
@@ -66,31 +66,45 @@ pub(super) async fn get_prompt(
     mcp_service: &McpService,
     request: GetPromptRequestParams,
     cx: RequestContext<RoleServer>,
-) -> Result<GetPromptResponse, ErrorData>
-{
+) -> Result<GetPromptResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
-    let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
-    let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
+    let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
+    let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
 
-    let (service_name, service, prompt_name) = route_identifier_to_backend(
-        &session_manager,
-        "get_prompt",
-        &request.name,
-        "Routing problem... invalid prompt name",
-    )
-    .await?;
+    let Some((backend_name, prompt_name)) = route_identifier(&request.name, &backend_names) else {
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... prompt not found".into(),
+            data: None,
+        });
+    };
+    let backend_name = backend_name.to_owned();
+    let prompt_name = prompt_name.to_owned();
+
+    let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
+        code: ErrorCode::INVALID_PARAMS,
+        message: "Routing problem... prompt not found".into(),
+        data: None,
+    })?;
+
+    let service_name = backend_name.clone();
+    let backend_service =
+        connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
 
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name).await?
     } else {
         PromptPreFetchResult::unchanged()
     };
+
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &prompt_name);
-    let response = service
+
+    let response = backend_service
         .get_prompt(routed_request)
         .await
         .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
+
     info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
     let response = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.after_get_prompt(&prompt_name, response, pre_result.state).await?

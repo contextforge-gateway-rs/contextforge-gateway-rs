@@ -9,7 +9,10 @@ use super::{
 
 /// Preserves identifiers for a single backend. For multiple backends, splits a
 /// `{backend}-{identifier}` namespace so duplicate identifiers remain routable.
-fn route_identifier<'a, N: AsRef<str>>(identifier: &'a str, backend_names: &'a [N]) -> Option<(&'a str, &'a str)> {
+pub(super) fn route_identifier<'a, N: AsRef<str>>(
+    identifier: &'a str,
+    backend_names: &'a [N],
+) -> Option<(&'a str, &'a str)> {
     if let [backend] = backend_names {
         return Some((backend.as_ref(), identifier));
     }
