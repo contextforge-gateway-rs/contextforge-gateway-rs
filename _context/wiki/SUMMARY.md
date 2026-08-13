@@ -11,9 +11,12 @@
 
 - [Architecture](architecture.md)
 - [MCP Routing Semantics](routing.md)
-- [MCP Capability Allocation](mcp-capability-allocation.md)
 - [Security Model](security.md)
 - [Failure Modes](failure-modes.md)
+
+# Upcoming
+
+- [Phase 3 Final Architecture](mcp-capability-allocation.md)
 
 # Operations
 
