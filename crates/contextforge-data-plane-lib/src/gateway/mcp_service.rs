@@ -8,10 +8,10 @@ use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, GetPromptRequestParams,
-        GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
-        PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, SubscribeRequestParams,
-        UnsubscribeRequestParams,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResponse, InitializeRequestParams, InitializeResult, ListPromptsResult,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ReadResourceRequestParams, ReadResourceResponse, SubscribeRequestParams, UnsubscribeRequestParams,
     },
     service::RequestContext,
 };
@@ -40,6 +40,14 @@ where
 {
     async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
         Ok(())
+    }
+
+    async fn initialize(
+        &self,
+        _request: InitializeRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        Err(ErrorData { code: ErrorCode::METHOD_NOT_FOUND, message: "Initialize not supported".into(), data: None })
     }
 
     async fn list_tools(
