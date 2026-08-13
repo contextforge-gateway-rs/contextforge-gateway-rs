@@ -8,26 +8,85 @@
 
 Plus at least: `--address` or `--tls-address`, `--token-verification-public-key` or `--token-verification-secret`.
 
-## Key CLI Flags (env var: `CONTEXTFORGE_DATA_PLANE_*`)
+## Complete CLI and Environment Reference
 
-| Flag | Env suffix | Default | Note |
+The binary parses both CLI flags and environment variables with `clap`; a CLI
+flag wins when both forms are supplied. Use the binary for the always-current
+generated reference:
+
+```bash
+cargo run -p contextforge-data-plane --bin contextforge-data-plane -- --help
+```
+
+Most environment variables use the `CONTEXTFORGE_DATA_PLANE_` prefix. The MCP
+Origin and Host settings retain the explicitly configured
+`CONTEXTFORGE_GATEWAY_RS_` names shown below.
+
+### Listeners and JWT
+
+| Flag | Environment variable | Default / requirement | Purpose |
 | --- | --- | --- | --- |
-| `--address` | `ADDRESS` | — | Plain HTTP listener |
-| `--tls-address` | `TLS_ADDRESS` | — | Requires cert + key |
-| `--server-certificate` | `TLS_SERVER_CERTIFICATE` | — | With `--tls-address` |
-| `--server-private-key` | `TLS_SERVER_PRIVATE_KEY` | — | With `--tls-address` |
-| `--token-verification-public-key` | `TOKEN_VERIFICATION_PUBLIC_KEY` | — | RSA (RS256/384/512) |
-| `--token-verification-secret` | `TOKEN_SECRET` | — | HMAC (HS256/384/512) |
-| `--redis-address` | `REDIS_HOSTNAME` | **required** | |
-| `--redis-port` | `REDIS_PORT` | **required** | |
-| `--redis-mode` | `REDIS_CONNECTION_MODE` | **required** | `plain-text` \| `tls` \| `mtls` |
-| `--user-config-cache-expiry-seconds` | `USER_CONFIG_CACHE_EXPIRY_SECONDS` | `60` | `0` = no cache |
-| `--upstream-connection-mode` | `UPSTREAM_CONNECTION_MODE` | HTTPS-only | `plain-text-or-tls` for local HTTP backends |
-| `--number-of-cpus` | `NUMBER_OF_CPUS` | host CPU count | Tokio worker threads |
-| `--single-runtime` | `SINGLE_RUNTIME` | `true` | `false` = multi-runtime (no session affinity) |
-| `--runtime-plugins-enabled` | `RUNTIME_PLUGINS_ENABLED` | `false` | Enables CPEX hooks |
-| `--enable-open-telemetry` | `ENABLE_OPEN_TELEMETRY` | `false` | OTLP traces |
-| `--enable-otel-metrics` | `ENABLE_OTEL_METRICS` | `false` | OTLP metrics |
+| `--address <host:port>` | `CONTEXTFORGE_DATA_PLANE_ADDRESS` | Optional | Plain HTTP listener. |
+| `--tls-address <host:port>` | `CONTEXTFORGE_DATA_PLANE_TLS_ADDRESS` | Optional | TLS listener; requires server certificate and key. |
+| `--server-certificate <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_SERVER_CERTIFICATE` | With `--tls-address` | PEM certificate chain for downstream TLS. |
+| `--server-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_SERVER_PRIVATE_KEY` | With `--tls-address` | PEM private key for downstream TLS. |
+| `--token-verification-public-key <path>` | `CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PUBLIC_KEY` | For RSA tokens | Verifies `RS256`, `RS384`, and `RS512` tokens. |
+| `--token-verification-secret <secret>` | `CONTEXTFORGE_DATA_PLANE_TOKEN_SECRET` | For HMAC tokens | Verifies `HS256`, `HS384`, and `HS512` tokens. |
+| `--token-verification-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PRIVATE_KEY` | Required when built with `with_tools` | Signs tokens for the optional local bootstrap helper. |
+
+### MCP request validation
+
+| Flag | Environment variable | Default | Purpose |
+| --- | --- | --- | --- |
+| `--mcp-allowed-origins <origin,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS` | None | Browser Origin allowlist. Without it, requests lacking `Origin` pass and every request carrying `Origin` receives HTTP `403`. |
+| `--mcp-allowed-hosts <authority,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | None | Optional request-authority allowlist. When configured, missing, malformed, or unlisted authorities receive HTTP `403`. |
+
+Values are comma-separated. Origin entries must be fully qualified serialized
+origins such as `https://app.example.com`; Host entries are authorities such as
+`gateway.example.com` or `gateway.example.com:8443`. See [Security](security.md#mcp-origin-and-host-validation).
+
+### Redis
+
+| Flag | Environment variable | Default / requirement | Purpose |
+| --- | --- | --- | --- |
+| `--redis-address <host>` | `CONTEXTFORGE_DATA_PLANE_REDIS_HOSTNAME` | Required | Redis host name or IP. |
+| `--redis-port <port>` | `CONTEXTFORGE_DATA_PLANE_REDIS_PORT` | Required | Redis port. |
+| `--redis-mode <mode>` | `CONTEXTFORGE_DATA_PLANE_REDIS_CONNECTION_MODE` | Required | `plain-text`, `tls`, or `mtls`. |
+| `--redis-tls-trust-bundle <path>` | `CONTEXTFORGE_DATA_PLANE_REDIS_TLS_REDIS_TRUST_BUNDLE` | TLS and mTLS | PEM trust bundle. |
+| `--redis-tls-client-certificate <path>` | `CONTEXTFORGE_DATA_PLANE_REDIS_TLS_REDIS_CLIENT_CERTIFICATE` | mTLS | PEM client certificate. |
+| `--redis-tls-client-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_REDIS_TLS_REDIS_CLIENT_PRIVATE_KEY` | mTLS | PEM client private key. |
+| `--user-config-cache-expiry-seconds <n>` | `CONTEXTFORGE_DATA_PLANE_USER_CONFIG_CACHE_EXPIRY_SECONDS` | `60` | In-process cache expiry; `0` reads Redis on every request. |
+
+### Upstream connections
+
+| Flag | Environment variable | Default / requirement | Purpose |
+| --- | --- | --- | --- |
+| `--upstream-connection-mode <mode>` | `CONTEXTFORGE_DATA_PLANE_UPSTREAM_CONNECTION_MODE` | `tls-only` | Permits HTTPS only, HTTP and HTTPS, or an mTLS mode. |
+| `--upstream-trust-bundle <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_UPSTREAM_TRUST_BUNDLE` | Optional | Additional PEM trust bundle for HTTPS backends. |
+| `--upstream-certificate <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_UPSTREAM_CERTIFICATE` | mTLS modes | PEM client certificate. |
+| `--upstream-private-key <path>` | `CONTEXTFORGE_DATA_PLANE_TLS_UPSTREAM_PRIVATE_KEY` | mTLS modes | PEM client private key. |
+
+### Runtime and plugins
+
+| Flag | Environment variable | Default | Purpose |
+| --- | --- | --- | --- |
+| `--number-of-cpus <n>` | `CONTEXTFORGE_DATA_PLANE_NUMBER_OF_CPUS` | Host CPU count | Tokio worker/runtime thread count. |
+| `--single-runtime <bool>` | `CONTEXTFORGE_DATA_PLANE_SINGLE_RUNTIME` | `true` | `false` creates per-CPU runtimes without session affinity. |
+| `--runtime-plugins-enabled <bool>` | `CONTEXTFORGE_DATA_PLANE_RUNTIME_PLUGINS_ENABLED` | `false` | Enables compiled-in CPEX hooks and Redis plugin config loading. |
+
+### Telemetry and logging
+
+| Flag | Environment variable | Default | Purpose |
+| --- | --- | --- | --- |
+| `--enable-open-telemetry <bool>` | `CONTEXTFORGE_DATA_PLANE_ENABLE_OPEN_TELEMETRY` | `false` | Enables OTLP trace export. |
+| `--enable-otel-metrics <bool>` | `CONTEXTFORGE_DATA_PLANE_ENABLE_OTEL_METRICS` | `false` | Enables OTLP HTTP-server metric export. |
+| `--otlp-protocol <protocol>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` or `http-protobuf`. |
+| `--otlp-endpoint <uri>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_ENDPOINT` | Protocol-specific | Trace endpoint; defaults to `http://127.0.0.1:4317` for gRPC or `http://127.0.0.1:4318/v1/traces` for HTTP. |
+| `--otlp-metrics-endpoint <uri>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Protocol-specific | Metrics endpoint; defaults to `http://127.0.0.1:4317` for gRPC or `http://127.0.0.1:4318/v1/metrics` for HTTP. |
+| `--otlp-headers <headers>` | `CONTEXTFORGE_DATA_PLANE_OTEL_EXPORTER_OTLP_HEADERS` | None | Comma-separated `key=value` exporter headers. |
+| `--otlp-service-name <name>` | `CONTEXTFORGE_DATA_PLANE_OTEL_SERVICE_NAME` | `CONTEXTFORGE-DATA-PLANE` | OpenTelemetry `service.name`. |
+| `--log-name <name>` | `CONTEXTFORGE_DATA_PLANE_LOG_NAME` | `contextforge-data-plane.log` | File log name in the current directory. |
+| `--log-rotation <mode>` | `CONTEXTFORGE_DATA_PLANE_LOG_ROTATION` | `hourly` | `minutely`, `hourly`, `daily`, or `never`. |
 
 ## JWT Claims (validated by `claims_layer`)
 
@@ -54,7 +113,6 @@ VirtualHost
 BackendMCPGateway
   name: String
   url: Url
-  transport: STREAMABLEHTTP | SSE | STDIO         ← only STREAMABLEHTTP used today
   passthrough_headers: Vec<String>                ← snapshotted at initialize; session-scoped
   add_headers: HashMap<String, String>            ← injected after passthrough
   remove_headers: Vec<String>                     ← stripped after add
@@ -98,8 +156,8 @@ RuntimePluginConfigDocument
   cpex: CpexConfig
 ```
 
-Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke` only.  
-Rejected: routing-based selection, plugin dirs, global policies, other hook types.  
+Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke` only.
+Rejected: routing-based selection, plugin dirs, global policies, other hook types.
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
 
 ### Tool Call Hook Behavior

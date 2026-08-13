@@ -10,15 +10,30 @@
 | Backend MCP servers | Trusted per configured URL. The gateway forwards caller traffic to them and merges their responses. | `UserConfig` backend URLs plus the upstream connection mode. |
 | Plugins | Fully trusted code. Hooks run in-process and can read and mutate tool payloads. | Compiled-in factories only; Redis config activates registered factories, it cannot load new code. |
 
-## Identity And Authorization
+## Authentication And Authorization
 
-Authentication is bearer-JWT only:
+| Plane | Current responsibility |
+| --- | --- |
+| Control plane | Owns login/SSO, users, teams, IAM, API-token issuance and revocation, and legacy routes. `dataplane_publisher.py` writes visibility-filtered `UserConfig` snapshots to Redis by user email. |
+| Data plane | Has no IAM or user database. It verifies modern MCP bearer JWTs locally, loads `UserConfig` by `sub`, and requires the requested virtual host to exist. No runtime control-plane call occurs. |
 
-- Accepted algorithms: `RS256/RS384/RS512` (public key configured) or `HS256/HS384/HS512` (shared secret configured). Anything else is rejected.
-- `iss` must be `mcpgateway`, `aud` must be `mcpgateway-api`, and `exp` is validated.
-- **No revocation list.** A leaked token is valid until it expires. Rotate the key and restart to invalidate all outstanding tokens.
-- Authorization is config existence. The `sub` claim selects the caller's `UserConfig`; the path selects one virtual host inside it. A caller can never reach a backend not in their own config. Unknown virtual hosts return `404` before MCP handling.
-- `jti`, `token_use`, `iat`, `teams`, `user`, and `scopes` are carried but not yet enforced. Fine-grained permissions are future policy work.
+Request path: control-plane API token (`sub` = email) → Origin/Host check →
+`claims_layer` → Redis config lookup → virtual-host check → MCP routing.
+Browser/login session tokens are management-plane credentials, not the
+dataplane contract.
+
+- JWT validation accepts `RS256/384/512` or `HS256/384/512` and requires a valid
+  signature, `iss=mcpgateway`, `aud=mcpgateway-api`, and `exp`. `jti` and `user`
+  are required fields; `token_use`, `iat`, `teams`, and `scopes` are optional.
+- Failures: bad/missing JWT → `401`; no user config → `400`; unavailable virtual
+  host → `404`.
+- Authorization is currently coarse: valid JWT plus published virtual host.
+  JWT scopes/teams and object allowlists are not enforced; publishing a backend
+  exposes all objects returned by it.
+- Dataplane requests do not consult the control-plane token blocklist. Revoked
+  tokens pass JWT validation until `exp` or signing-key rotation/restart.
+  Removing a subject's config eventually blocks all its tokens after publisher
+  and cache expiry.
 
 ## What Compromise Means
 
@@ -37,7 +52,20 @@ Authentication is bearer-JWT only:
 | Upstream | HTTPS-only by default; plain HTTP must be opted into with `--upstream-connection-mode`. mTLS client identity is supported per process. |
 | Redis | Plain, TLS, or mTLS via `--redis-mode`. Use TLS or mTLS anywhere Redis crosses a trust zone — Redis is the config trust boundary. |
 
-CORS is currently wide open (any origin, method, and header). The API is bearer-token based and cookie-free, so CSRF does not apply, but expect this to tighten as policy work lands.
+## MCP Origin and Host Validation
+
+`mcp_origin_layer` enforces MCP `2026-07-28` DNS-rebinding protection before
+authentication. Failures return HTTP `403`.
+
+| Environment variable | Default | Contract |
+| --- | --- | --- |
+| `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | Host check disabled | When set, request authority from `Host` (URI fallback) must match. A portless entry matches any port; an explicit port matches exactly. |
+| `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS` | Only requests without `Origin` pass | A present Origin must be a strict serialized origin in the allowlist. |
+
+Host is checked first. Missing Origin is accepted. `null`, malformed, unlisted,
+or path/query/fragment/userinfo-bearing origins are rejected. Default ports are
+normalized (`https://a` equals `https://a:443`). There is no same-origin
+fallback; configure both allowlists for public deployments.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

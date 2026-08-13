@@ -9,6 +9,7 @@ TCP/TLS listener
   -> HttpMetricsLayer
   -> TraceLayer
   -> /contextforge-rs nested router
+  -> mcp_origin_layer          → validates Host then Origin       (403 when disallowed)
   -> CORS layer
   -> virtual_host_id_layer       → inserts VirtualHostId           (400 on path mismatch)
   -> claims_layer                → inserts ContextForgeClaims      (401 on bad/missing JWT)
@@ -18,13 +19,18 @@ TCP/TLS listener
   -> /servers/{virtual_host_name}/mcp RMCP service
 ```
 
+`mcp_origin_layer` implements the MCP `2026-07-28` DNS-rebinding guard. It
+checks the optional Host allowlist first, then rejects any present Origin that
+is malformed or not allowlisted; requests without Origin continue. See
+[Security](security.md#mcp-origin-and-host-validation).
+
 MCP handlers read typed extensions — they never parse headers, paths, or Redis keys directly.
 
 ## Pipeline Shape
 
 ```text
 downstream request
-  -> virtual host extraction → JWT validation → session extraction
+  -> Host/Origin validation → virtual host extraction → JWT validation → session extraction
   -> user config lookup → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)
@@ -159,7 +165,7 @@ backend response
   -> session_id_layer response side  ← on DELETE success: remove session + backend transports
   -> claims_layer response side
   -> virtual_host_id_layer response side
-  -> CORS, TraceLayer, HttpMetricsLayer
+  -> CORS, mcp_origin_layer, TraceLayer, HttpMetricsLayer
   -> downstream response
 ```
 
