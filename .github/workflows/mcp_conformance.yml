@@ -2,6 +2,8 @@ name: MCP Conformance
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
 
@@ -18,7 +20,7 @@ env:
   MCP_CONFORMANCE_SPEC_VERSION: 2026-07-28
   MCP_CONFORMANCE_SERVER_ID: 3f33286667d34b65a31c3bafd30e4c21
   CF_CONTROLPLANE_IMAGE: ghcr.io/ibm/mcp-context-forge:latest
-  CF_DATAPLANE_IMAGE: ghcr.io/contextforge-org/contextforge-data-plane:latest
+  CF_DATAPLANE_IMAGE: contextforge-data-plane:conformance
 
 jobs:
   conformance:
@@ -29,6 +31,11 @@ jobs:
     steps:
       - name: Check out data plane
         uses: actions/checkout@v6.0.2
+
+      - name: Build data plane from the checked-out source
+        run: >-
+          docker build . --file docker/Dockerfile
+          --tag "${CF_DATAPLANE_IMAGE}"
 
       - name: Check out the alpha.11 conformance fixture
         uses: actions/checkout@v6.0.2
@@ -51,12 +58,12 @@ jobs:
           test "$(node -p "require('./package.json').version")" = "${MCP_CONFORMANCE_VERSION}"
           npm ci --ignore-scripts
 
-      - name: Pull the latest ContextForge images
+      - name: Pull external stack images
         env:
           MCP_CONFORMANCE_TOKEN: pull-only
         run: >-
           docker compose -f tests/conformance/docker-compose.yml
-          pull redis control-plane data-plane nginx
+          pull redis control-plane nginx
 
       - name: Start the fixture and control plane
         env:
