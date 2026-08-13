@@ -14,16 +14,13 @@ use crate::gateway::{
     list_aggregation::{decode_gateway_cursor, fan_out_list, merge_resource_templates, merge_resources},
     mcp_call_validator::AuthorizedCallValidator,
     session_manager::SessionManager,
-    session_store::UserSessionStore,
 };
 
-pub(super) async fn list_resources<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_resources(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
 ) -> Result<ListResourcesResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("list_resources", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
@@ -67,13 +64,11 @@ where
     Ok(result)
 }
 
-pub(super) async fn read_resource<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn read_resource(
+    mcp_service: &McpService,
     request: ReadResourceRequestParams,
     cx: RequestContext<RoleServer>,
 ) -> Result<ReadResourceResponse, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
@@ -97,13 +92,11 @@ where
     Ok(response.into())
 }
 
-pub(super) async fn list_resource_templates<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_resource_templates(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
 ) -> Result<ListResourceTemplatesResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("list_resource_templates", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
@@ -150,13 +143,11 @@ where
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
-pub(super) async fn subscribe<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn subscribe(
+    mcp_service: &McpService,
     request: SubscribeRequestParams,
     cx: RequestContext<RoleServer>,
 ) -> Result<(), ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("subscribe", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
@@ -183,13 +174,11 @@ where
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
-pub(super) async fn unsubscribe<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn unsubscribe(
+    mcp_service: &McpService,
     request: UnsubscribeRequestParams,
     cx: RequestContext<RoleServer>,
 ) -> Result<(), ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("unsubscribe", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;

@@ -11,17 +11,15 @@ use rmcp::{
 use tracing::warn;
 
 use super::McpService;
-use crate::gateway::{backend_client::GatewayBackendClient, session_store::UserSessionStore};
+use crate::gateway::{backend_client::GatewayBackendClient};
 
-pub(super) async fn connect_backend_for_request<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn connect_backend_for_request(
+    mcp_service: &McpService,
     backend_name: &str,
     backend: &BackendMCPGateway,
     namespace_identifiers: bool,
     cx: &RequestContext<RoleServer>,
 ) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mut headers = HashMap::new();
     let downstream_headers = cx.extensions.get::<Parts>().map(|parts| &parts.headers);

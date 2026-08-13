@@ -12,16 +12,13 @@ use crate::gateway::{
     list_aggregation::{decode_gateway_cursor, fan_out_list, merge_prompts},
     mcp_call_validator::AuthorizedCallValidator,
     session_manager::SessionManager,
-    session_store::UserSessionStore,
 };
 
-pub(super) async fn list_prompts<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_prompts(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
 ) -> Result<ListPromptsResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("list_prompts", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
@@ -65,13 +62,11 @@ where
     Ok(result)
 }
 
-pub(super) async fn get_prompt<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn get_prompt(
+    mcp_service: &McpService,
     request: GetPromptRequestParams,
     cx: RequestContext<RoleServer>,
 ) -> Result<GetPromptResponse, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;

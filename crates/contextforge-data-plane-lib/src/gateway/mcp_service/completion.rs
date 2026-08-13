@@ -10,16 +10,13 @@ use crate::gateway::{
     identifier_routing::{backend_forward_error, route_identifier_to_backend},
     mcp_call_validator::AuthorizedCallValidator,
     session_manager::SessionManager,
-    session_store::UserSessionStore,
 };
 
-pub(super) async fn complete<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn complete(
+    mcp_service: &McpService,
     request: CompleteRequestParams,
     cx: RequestContext<RoleServer>,
 ) -> Result<CompleteResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("complete", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;

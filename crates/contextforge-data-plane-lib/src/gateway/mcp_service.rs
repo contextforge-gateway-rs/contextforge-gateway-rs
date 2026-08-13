@@ -17,26 +17,20 @@ use rmcp::{
 };
 use typed_builder::TypedBuilder;
 
-use super::{backend_transports::BackendTransports, session_store::UserSessionStore};
+use super::{backend_transports::BackendTransports};
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
-pub struct McpService<T>
-where
-    T: UserSessionStore,
+pub struct McpService
 {
     #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
     http_client: reqwest::Client,
-    #[allow(dead_code)] // 2026-07-28 protocol transition
-    user_session_store: T,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
 }
 
-impl<T> ServerHandler for McpService<T>
-where
-    T: UserSessionStore + Send + Sync + 'static,
+impl ServerHandler for McpService
 {
     async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
         Ok(())
