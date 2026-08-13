@@ -30,7 +30,7 @@ Protocol tests and fixtures should target MCP `2026-07-28`, use `server/discover
 | `gateway_list_tools.rs` | List fanout, prefixing, and merged output. |
 | `gateway_prompts.rs` | Prompt listing and prefixed `get_prompt` routing. |
 | `gateway_resource_templates.rs` | Template fanout with prefixed names and URI templates, plus `read_resource` round-trips. |
-| `gateway_plugins.rs` | CPEX pre/post tool hooks around `call_tool` and stream events. |
+| `gateway_plugins.rs` | CPEX pre/post tool hooks around `call_tool` and stream events, and prompt hooks around `get_prompt`. |
 
 These run in `cargo nextest run` with no Docker dependencies.
 

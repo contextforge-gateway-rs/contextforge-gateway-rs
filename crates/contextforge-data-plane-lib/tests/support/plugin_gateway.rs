@@ -15,9 +15,9 @@ use http::{HeaderMap, HeaderValue};
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation,
-        InitializeRequestParams, InitializeResult, NumberOrString, ProgressNotificationParam, ProgressToken,
-        ServerCapabilities,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, GetPromptRequestParams,
+        GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, NumberOrString,
+        ProgressNotificationParam, ProgressToken, PromptMessage, ResourceContents, Role, ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -30,6 +30,9 @@ use serde_json::{Map, Value};
 use tokio::sync::Mutex as TokioMutex;
 
 use super::{MemoryUserConfigStore, token};
+
+pub(crate) const BACKEND_PROMPT_RESOURCE: &str = "token=secret";
+pub(crate) const BACKEND_PROMPT_IMAGE: &str = "aW1hZ2UtYnl0ZXM=";
 
 static GATEWAY_PORT_LOCK: OnceLock<Arc<TokioMutex<()>>> = OnceLock::new();
 const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -45,7 +48,9 @@ pub(crate) struct BackendObservation {
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
+    pub(crate) events: Arc<StdMutex<Vec<&'static str>>>,
 }
 
 #[derive(Clone)]
@@ -59,8 +64,41 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
             .with_server_info(Implementation::new("test-backend", "0.1.0")))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        self.state
+            .prompts
+            .lock()
+            .expect("backend prompts lock poisoned")
+            .push(BackendObservation { tool_name: request.name.clone(), args: request.arguments.clone() });
+        self.state.events.lock().expect("backend events lock poisoned").push("backend");
+
+        let topic = request
+            .arguments
+            .as_ref()
+            .and_then(|arguments| arguments.get("topic"))
+            .and_then(Value::as_str)
+            .unwrap_or("nothing");
+        if request.name == "review_bundle" {
+            return Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(Role::User, format!("review of {topic}")),
+                PromptMessage::new(
+                    Role::User,
+                    ContentBlock::resource(ResourceContents::text(BACKEND_PROMPT_RESOURCE, "file:///app.env")),
+                ),
+                PromptMessage::new(Role::Assistant, ContentBlock::image(BACKEND_PROMPT_IMAGE, "image/png")),
+            ])
+            .into());
+        }
+
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(Role::User, format!("review of {topic}"))]).into())
     }
 
     async fn call_tool(
@@ -222,6 +260,15 @@ pub(crate) async fn start_gateway(
     start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, false).await
 }
 
+pub(crate) async fn start_gateway_with_events(
+    user: &str,
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+    events: Arc<StdMutex<Vec<&'static str>>>,
+) -> RunningGateway {
+    start_gateway_with_state(user, true, plugin_runtime, false, BackendState { events, ..BackendState::default() })
+        .await
+}
+
 pub(crate) async fn start_gateway_with_json_backend_responses(
     user: &str,
     runtime_plugins_enabled: bool,
@@ -236,6 +283,23 @@ async fn start_gateway_with_runtime(
     plugin_runtime: Arc<CpexRuntimeRegistry>,
     json_backend_responses: bool,
 ) -> RunningGateway {
+    start_gateway_with_state(
+        user,
+        runtime_plugins_enabled,
+        plugin_runtime,
+        json_backend_responses,
+        BackendState::default(),
+    )
+    .await
+}
+
+async fn start_gateway_with_state(
+    user: &str,
+    runtime_plugins_enabled: bool,
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+    json_backend_responses: bool,
+    backend_state: BackendState,
+) -> RunningGateway {
     let port_lock = Arc::clone(GATEWAY_PORT_LOCK.get_or_init(|| Arc::new(TokioMutex::new(()))));
     let port_guard = port_lock.lock().await;
     let gateway_port = openport::pick_random_unused_port().expect("gateway port");
@@ -243,7 +307,6 @@ async fn start_gateway_with_runtime(
     let backend_port = backend_listener.local_addr().expect("backend address").port();
     let backend_name = format!("backend-{backend_port}");
     let virtual_host_id = "vh-cpex-test";
-    let backend_state = BackendState::default();
 
     let backend_service = StreamableHttpService::new(
         {

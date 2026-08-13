@@ -1,3 +1,4 @@
+use contextforge_data_plane_cpex::PromptPreFetchResult;
 use rmcp::{
     ErrorData, RoleServer,
     model::{GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
@@ -84,12 +85,22 @@ where
     )
     .await?;
 
+    let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name).await?
+    } else {
+        PromptPreFetchResult::unchanged()
+    };
     let mut routed_request = request;
-    routed_request.name = prompt_name;
+    pre_result.arguments.apply_to_request(&mut routed_request, &prompt_name);
     let response = service
         .get_prompt(routed_request)
         .await
         .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
     info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
+    let response = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        plugin_runtime.after_get_prompt(&prompt_name, response, pre_result.state).await?
+    } else {
+        response
+    };
     Ok(response.into())
 }

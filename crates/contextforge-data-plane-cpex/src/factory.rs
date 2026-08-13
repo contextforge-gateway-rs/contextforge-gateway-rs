@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use cpex::cpex_core::{
     cmf::CmfHook,
@@ -10,13 +10,12 @@ use cpex::cpex_core::{
 };
 
 pub struct CmfPluginFactory<P> {
-    build: fn(PluginConfig) -> P,
-    _plugin: PhantomData<P>,
+    build: Box<dyn Fn(PluginConfig) -> P + Send + Sync>,
 }
 
 impl<P> CmfPluginFactory<P> {
-    pub fn new(build: fn(PluginConfig) -> P) -> Self {
-        Self { build, _plugin: PhantomData }
+    pub fn new(build: impl Fn(PluginConfig) -> P + Send + Sync + 'static) -> Self {
+        Self { build: Box::new(build) }
     }
 }
 
@@ -50,6 +49,8 @@ fn cmf_hook_name(hook: &str) -> Option<&'static str> {
     match hook {
         cmf_hook_names::TOOL_PRE_INVOKE => Some(cmf_hook_names::TOOL_PRE_INVOKE),
         cmf_hook_names::TOOL_POST_INVOKE => Some(cmf_hook_names::TOOL_POST_INVOKE),
+        cmf_hook_names::PROMPT_PRE_FETCH => Some(cmf_hook_names::PROMPT_PRE_FETCH),
+        cmf_hook_names::PROMPT_POST_FETCH => Some(cmf_hook_names::PROMPT_POST_FETCH),
         _ => None,
     }
 }

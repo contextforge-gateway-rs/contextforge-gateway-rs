@@ -9,17 +9,20 @@ use cpex::cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
     model::{
-        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ErrorCode, Implementation,
-        InitializeRequestParams, ProgressNotificationParam, Request, ServerResult,
+        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ContentBlock, ErrorCode,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, ProgressNotificationParam,
+        Request, ResourceContents, Role as McpRole, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
 use serde_json::{Map, Value, json};
 
 use support::{
-    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID,
-    TestPlugin, error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway,
-    start_gateway_with_json_backend_responses, sum_request, text, token,
+    BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE,
+    PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT,
+    REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID, TestPlugin, error_code,
+    error_parts, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin,
+    start_gateway, start_gateway_with_events, start_gateway_with_json_backend_responses, sum_request, text, token,
 };
 
 type Recorded<T> = Arc<StdMutex<Vec<T>>>;
@@ -677,4 +680,196 @@ async fn pre_hook_invalid_arguments_return_invalid_params() {
 
     assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Prompt hooks
+// ---------------------------------------------------------------------------
+
+fn review_request(topic: &str) -> GetPromptRequestParams {
+    GetPromptRequestParams::new("review")
+        .with_arguments(serde_json::Map::from_iter([("topic".to_owned(), json!(topic))]))
+}
+
+fn prompt_text(result: &GetPromptResult) -> String {
+    result
+        .messages
+        .iter()
+        .filter_map(|message| match &message.content {
+            ContentBlock::Text(text) => Some(text.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_pre_hook_rewrites_arguments_reaching_the_backend() {
+    let plugin = Arc::new(PromptTestPlugin::new("prompt-pre", vec![cmf_hook_names::PROMPT_PRE_FETCH]));
+    let observations = plugin.observations();
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!(format!("review of {REWRITTEN_PROMPT_TOPIC}"), prompt_text(&result));
+
+    let prompt_calls = gateway.backend_state.prompts.lock().expect("backend prompts lock poisoned");
+    assert_eq!("review", prompt_calls[0].tool_name);
+    assert_eq!(
+        Some(&Value::from(REWRITTEN_PROMPT_TOPIC)),
+        prompt_calls[0].args.as_ref().and_then(|args| args.get("topic"))
+    );
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(1, observations.pre_calls);
+    assert_eq!(Some("review"), observations.pre_name.as_deref());
+    assert_eq!(Some(gateway.backend_name.as_str()), observations.pre_server_id.as_deref());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_rewrites_rendered_text_before_client_response() {
+    let plugin = Arc::new(PromptTestPlugin::new("prompt-post", vec![cmf_hook_names::PROMPT_POST_FETCH]));
+    let observations = plugin.observations();
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!(REWRITTEN_PROMPT_TEXT, prompt_text(&result));
+
+    let prompt_calls = gateway.backend_state.prompts.lock().expect("backend prompts lock poisoned");
+    assert_eq!(Some(&Value::from("weather")), prompt_calls[0].args.as_ref().and_then(|args| args.get("topic")));
+    drop(prompt_calls);
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(0, observations.pre_calls, "no pre hook is configured");
+    assert_eq!(1, observations.post_calls);
+    assert_eq!(Some("review"), observations.post_prompt_name.as_deref());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_removing_rendered_text_fails_closed() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new("prompt-post-drop", vec![cmf_hook_names::PROMPT_POST_FETCH])
+            .with_behavior(PromptBehavior::DropText),
+    );
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let error = service.get_prompt(review_request("weather")).await.expect_err("dropped text fails the call");
+    assert_eq!(ErrorCode::INTERNAL_ERROR, error_code(error));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_rewrites_multimodal_prompt_content() {
+    let plugin = Arc::new(PromptTestPlugin::new("prompt-multimodal", vec![cmf_hook_names::PROMPT_POST_FETCH]));
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let request = GetPromptRequestParams::new("review_bundle")
+        .with_arguments(Map::from_iter([("topic".to_owned(), json!("weather"))]));
+    let result = service.get_prompt(request).await.expect("prompt is returned");
+
+    assert_eq!(3, result.messages.len());
+    assert_eq!(REWRITTEN_PROMPT_TEXT, prompt_text(&result));
+
+    let ContentBlock::Resource(resource) = &result.messages[1].content else {
+        panic!("expected the embedded resource to survive as a resource");
+    };
+    let ResourceContents::TextResourceContents { text, uri, .. } = &resource.resource else {
+        panic!("expected text resource contents");
+    };
+    assert_eq!(REWRITTEN_PROMPT_RESOURCE, text, "the plugin's resource edit must reach the client");
+    assert_ne!(BACKEND_PROMPT_RESOURCE, text);
+    assert_eq!("file:///app.env", uri, "identity the plugin did not touch is preserved");
+
+    let ContentBlock::Image(image) = &result.messages[2].content else {
+        panic!("expected the image to survive as an image");
+    };
+    assert_eq!(BACKEND_PROMPT_IMAGE, image.data, "untouched content passes through unchanged");
+    assert_eq!(McpRole::Assistant, result.messages[2].role, "roles survive the round trip");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_denial_returns_plugin_error_code() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new("prompt-post-deny", vec![cmf_hook_names::PROMPT_POST_FETCH])
+            .with_behavior(PromptBehavior::Deny),
+    );
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let error = service.get_prompt(review_request("weather")).await.expect_err("denied prompt fails the call");
+    let (code, message) = error_parts(error);
+    assert_eq!(ErrorCode(PROMPT_POST_DENY_ERROR_CODE), code);
+    assert!(
+        message.contains("prompt"),
+        "a denied prompt must not be reported to the client as a denied tool call: {message}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_post_hook_error_flag_fails_the_call() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new("prompt-post-error", vec![cmf_hook_names::PROMPT_POST_FETCH])
+            .with_behavior(PromptBehavior::MarkError),
+    );
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let error = service.get_prompt(review_request("weather")).await.expect_err("flagged prompt fails the call");
+    let (code, message) = error_parts(error);
+    assert_eq!(ErrorCode::INVALID_REQUEST, code);
+    assert_eq!(PROMPT_ERROR_MESSAGE, message);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_hooks_run_either_side_of_the_backend_call() {
+    let events: Arc<StdMutex<Vec<&'static str>>> = Arc::new(StdMutex::new(Vec::new()));
+    let plugin = Arc::new(
+        PromptTestPlugin::new(
+            "prompt-ordering",
+            vec![cmf_hook_names::PROMPT_PRE_FETCH, cmf_hook_names::PROMPT_POST_FETCH],
+        )
+        .with_events(Arc::clone(&events)),
+    );
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway_with_events(TEST_USER_ID, runtime, Arc::clone(&events)).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!(vec!["pre", "backend", "post"], *events.lock().expect("events lock poisoned"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prompt_pre_and_post_hooks_share_gateway_call_context() {
+    let plugin = Arc::new(
+        PromptTestPlugin::new(
+            "prompt-context",
+            vec![cmf_hook_names::PROMPT_PRE_FETCH, cmf_hook_names::PROMPT_POST_FETCH],
+        )
+        .with_behavior(PromptBehavior::ContextRoundtrip),
+    );
+    let observations = plugin.observations();
+    let runtime = runtime_with_prompt_plugin(plugin).await;
+
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.get_prompt(review_request("weather")).await.expect("prompt is returned");
+
+    assert_eq!("review of weather", prompt_text(&result));
+
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(1, observations.pre_calls);
+    assert_eq!(1, observations.post_calls);
 }

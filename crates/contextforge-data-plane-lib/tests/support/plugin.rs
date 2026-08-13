@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use cpex::cpex_core::{
-    cmf::{CmfHook, ContentPart, Message, MessagePayload, Role},
+    cmf::{CmfHook, ContentPart, Message, MessagePayload, PromptResult as CmfPromptResult, Role},
     context::PluginContext,
     error::{PluginError, PluginViolation},
     factory::{PluginFactory, PluginInstance},
@@ -310,6 +310,198 @@ impl TestPluginFactory {
             observations: Arc::clone(&plugin.observations),
             pre_behavior: plugin.pre_behavior,
             post_behavior: plugin.post_behavior,
+        }
+    }
+}
+
+pub(crate) const REWRITTEN_PROMPT_TOPIC: &str = "rewritten-topic";
+pub(crate) const REWRITTEN_PROMPT_TEXT: &str = "review of [REDACTED]";
+pub(crate) const REWRITTEN_PROMPT_RESOURCE: &str = "config with [REDACTED]";
+pub(crate) const PROMPT_POST_DENY_ERROR_CODE: i32 = -32004;
+pub(crate) const PROMPT_ERROR_MESSAGE: &str = "prompt blocked by policy";
+
+fn prompt_result_mut(payload: &mut MessagePayload) -> Option<&mut CmfPromptResult> {
+    payload.message.content.iter_mut().find_map(|part| match part {
+        ContentPart::PromptResult { content } => Some(content),
+        _ => None,
+    })
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum PromptBehavior {
+    #[default]
+    Rewrite,
+    DropText,
+    ContextRoundtrip,
+    Deny,
+    MarkError,
+}
+
+pub(crate) struct PromptTestPlugin {
+    pub(crate) config: PluginConfig,
+    pub(crate) observations: Arc<Mutex<PromptObservations>>,
+    pub(crate) behavior: PromptBehavior,
+    pub(crate) events: Option<Arc<Mutex<Vec<&'static str>>>>,
+}
+
+#[derive(Default)]
+pub(crate) struct PromptObservations {
+    pub(crate) pre_calls: usize,
+    pub(crate) pre_name: Option<String>,
+    pub(crate) pre_server_id: Option<String>,
+    pub(crate) post_calls: usize,
+    pub(crate) post_prompt_name: Option<String>,
+}
+
+impl PromptTestPlugin {
+    pub(crate) fn new(name: &str, hooks: Vec<&'static str>) -> Self {
+        Self {
+            config: PluginConfig {
+                name: name.to_owned(),
+                kind: "prompt-test".to_owned(),
+                hooks: hooks.into_iter().map(str::to_owned).collect(),
+                ..Default::default()
+            },
+            observations: Arc::new(Mutex::new(PromptObservations::default())),
+            behavior: PromptBehavior::default(),
+            events: None,
+        }
+    }
+
+    pub(crate) fn with_events(mut self, events: Arc<Mutex<Vec<&'static str>>>) -> Self {
+        self.events = Some(events);
+        self
+    }
+
+    pub(crate) fn rebuild(&self, config: PluginConfig) -> Self {
+        Self {
+            config,
+            observations: Arc::clone(&self.observations),
+            behavior: self.behavior,
+            events: self.events.clone(),
+        }
+    }
+
+    fn record(&self, event: &'static str) {
+        if let Some(events) = &self.events {
+            events.lock().expect("events lock poisoned").push(event);
+        }
+    }
+
+    pub(crate) fn with_behavior(mut self, behavior: PromptBehavior) -> Self {
+        self.behavior = behavior;
+        self
+    }
+
+    pub(crate) fn observations(&self) -> Arc<Mutex<PromptObservations>> {
+        Arc::clone(&self.observations)
+    }
+
+    fn handle_pre(&self, payload: &MessagePayload, ctx: &mut PluginContext) -> PluginResult<MessagePayload> {
+        self.record("pre");
+        let mut observations = self.observations.lock().expect("observations lock poisoned");
+        observations.pre_calls += 1;
+        if let Some(request) = payload.message.get_prompt_requests().first() {
+            observations.pre_name = Some(request.name.clone());
+            observations.pre_server_id.clone_from(&request.server_id);
+        }
+        drop(observations);
+
+        match self.behavior {
+            PromptBehavior::ContextRoundtrip => {
+                ctx.set_global("prompt_pre_seen", json!(true));
+                PluginResult::allow()
+            },
+            PromptBehavior::Rewrite | PromptBehavior::DropText | PromptBehavior::Deny | PromptBehavior::MarkError => {
+                let mut modified = payload.clone();
+                if let Some(ContentPart::PromptRequest { content }) =
+                    modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::PromptRequest { .. }))
+                {
+                    content.arguments = HashMap::from([("topic".to_owned(), json!(REWRITTEN_PROMPT_TOPIC))]);
+                }
+                PluginResult::modify_payload(modified)
+            },
+        }
+    }
+
+    fn handle_post(&self, payload: &MessagePayload, ctx: &mut PluginContext) -> PluginResult<MessagePayload> {
+        self.record("post");
+        let mut observations = self.observations.lock().expect("observations lock poisoned");
+        observations.post_calls += 1;
+        if let Some(result) = payload.message.get_prompt_results().first() {
+            observations.post_prompt_name = Some(result.prompt_name.clone());
+        }
+        drop(observations);
+
+        match self.behavior {
+            PromptBehavior::Rewrite => {
+                let mut modified = payload.clone();
+                if let Some(result) = prompt_result_mut(&mut modified) {
+                    for message in &mut result.messages {
+                        for part in &mut message.content {
+                            match part {
+                                ContentPart::Text { text } => REWRITTEN_PROMPT_TEXT.clone_into(text),
+                                ContentPart::Resource { content } => {
+                                    content.content = Some(REWRITTEN_PROMPT_RESOURCE.to_owned());
+                                },
+                                _ => {},
+                            }
+                        }
+                    }
+                }
+                PluginResult::modify_payload(modified)
+            },
+            PromptBehavior::DropText => {
+                let mut modified = payload.clone();
+                if let Some(result) = prompt_result_mut(&mut modified) {
+                    result.messages.clear();
+                }
+                PluginResult::modify_payload(modified)
+            },
+            PromptBehavior::MarkError => {
+                let mut modified = payload.clone();
+                if let Some(result) = prompt_result_mut(&mut modified) {
+                    result.is_error = true;
+                    result.error_message = Some(PROMPT_ERROR_MESSAGE.to_owned());
+                }
+                PluginResult::modify_payload(modified)
+            },
+            PromptBehavior::Deny => PluginResult::deny(
+                PluginViolation::new("prompt_post_denied", "prompt post denied")
+                    .with_proto_error_code(i64::from(PROMPT_POST_DENY_ERROR_CODE)),
+            ),
+            PromptBehavior::ContextRoundtrip => {
+                if ctx.get_global("prompt_pre_seen") == Some(&json!(true)) {
+                    PluginResult::allow()
+                } else {
+                    PluginResult::deny(
+                        PluginViolation::new("missing_prompt_context", "prompt pre context missing")
+                            .with_proto_error_code(i64::from(MISSING_CONTEXT_ERROR_CODE)),
+                    )
+                }
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl Plugin for PromptTestPlugin {
+    fn config(&self) -> &PluginConfig {
+        &self.config
+    }
+}
+
+impl HookHandler<CmfHook> for PromptTestPlugin {
+    async fn handle(
+        &self,
+        payload: &MessagePayload,
+        _extensions: &Extensions,
+        ctx: &mut PluginContext,
+    ) -> PluginResult<MessagePayload> {
+        if payload.message.get_prompt_results().is_empty() {
+            self.handle_pre(payload, ctx)
+        } else {
+            self.handle_post(payload, ctx)
         }
     }
 }

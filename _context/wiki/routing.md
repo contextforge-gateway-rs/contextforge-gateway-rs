@@ -128,7 +128,7 @@ If RMCP rejects the delete, local state is untouched.
 | `call_tool` | Targeted | Resolves alias → single/multi-backend fallback. Runs pre/post plugin hooks. Forwards downstream cancellation to backend. Tracks backend progress tokens: RMCP assigns a new token per backend request; the gateway maps each backend token to the downstream token. Request enqueue and mapping publication are serialized against progress lookup so an immediate backend notification cannot overtake registration. When the notification matches an in-flight token, the gateway restores the downstream token and forwards it to the client. |
 | `read_resource` | Targeted | Single-backend: URI unchanged. Multi-backend: strips prefix. |
 | `subscribe` / `unsubscribe` | Targeted | Same resource-URI routing; forwards/stops resource-update notifications. |
-| `get_prompt` | Targeted | Single-backend: name unchanged. Multi-backend: strips prefix. |
+| `get_prompt` | Targeted | Single-backend: name unchanged. Multi-backend: strips prefix. Runs pre/post prompt hooks around the backend call: the pre hook may rewrite arguments or deny, the post hook may rewrite or reject the rendered messages. |
 | `complete` | Targeted | Routes on prompt name or resource URI inside `ref`. |
 | `ping` | Local | Returns success; no backend fanout. |
 | `DELETE` | Session | RMCP handles first; on success `session_id_layer` removes local session + backend transports. |

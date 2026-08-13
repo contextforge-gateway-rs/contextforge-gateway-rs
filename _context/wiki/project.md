@@ -25,7 +25,7 @@ flowchart LR
         direction TB
         MW["Middleware stack\nvirtual host · JWT · session · user config"]
         RT["MCP Routing\nfan-out · prefix namespace\nlist merge · capability merge"]
-        PL["Plugin hooks\ncmf.tool_pre_invoke\ncmf.tool_post_invoke"]
+        PL["Plugin hooks\ncmf.tool_pre_invoke\ncmf.tool_post_invoke\ncmf.prompt_pre_fetch\ncmf.prompt_post_fetch"]
         MW --> RT --> PL
     end
 
