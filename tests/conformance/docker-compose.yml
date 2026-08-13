@@ -28,12 +28,12 @@ services:
       JWT_ALGORITHM: RS256
       JWT_PUBLIC_KEY_PATH: /keys/jwt.key.pub
       JWT_PRIVATE_KEY_PATH: /keys/jwt.key
-      AUTH_ENCRYPTION_SECRET: contextforge-conformance-encryption-secret-at-least-32-bytes
+      AUTH_ENCRYPTION_SECRET: contextforge-conformance-encryption-secret-at-least-32-bytes # pragma: allowlist secret
       AUTH_REQUIRED: "true"
       BASIC_AUTH_USER: admin
-      BASIC_AUTH_PASSWORD: conformance-admin-password
+      BASIC_AUTH_PASSWORD: conformance-admin-password # pragma: allowlist secret
       PLATFORM_ADMIN_EMAIL: admin@example.com
-      PLATFORM_ADMIN_PASSWORD: conformance-admin-password
+      PLATFORM_ADMIN_PASSWORD: conformance-admin-password # pragma: allowlist secret
       MCPGATEWAY_SKIP_MIGRATIONS: "false"
       MCPGATEWAY_UI_ENABLED: "false"
       MCPGATEWAY_ADMIN_API_ENABLED: "true"
@@ -72,7 +72,7 @@ services:
       CONTEXTFORGE_DATA_PLANE_REDIS_CONNECTION_MODE: plain-text
       CONTEXTFORGE_DATA_PLANE_UPSTREAM_CONNECTION_MODE: plain-text-or-tls
       CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PUBLIC_KEY: /keys/jwt.key.pub
-      CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PRIVATE_KEY: /keys/jwt.key
+      CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PRIVATE_KEY: /keys/jwt.key # pragma: allowlist secret
       CONTEXTFORGE_DATA_PLANE_USER_CONFIG_CACHE_EXPIRY_SECONDS: "0"
       CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS: >-
         127.0.0.1:${MCP_CONFORMANCE_PORT:-8080},localhost:${MCP_CONFORMANCE_PORT:-8080}
