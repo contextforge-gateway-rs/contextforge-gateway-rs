@@ -33,9 +33,7 @@ jobs:
         uses: actions/checkout@v6.0.2
 
       - name: Build data plane from the checked-out source
-        run: >-
-          docker build . --file docker/Dockerfile
-          --tag "${CF_DATAPLANE_IMAGE}"
+        run: make conformance-image
 
       - name: Check out the alpha.11 conformance fixture
         uses: actions/checkout@v6.0.2

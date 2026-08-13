@@ -61,7 +61,6 @@ services:
 
   data-plane:
     image: ${CF_DATAPLANE_IMAGE:-ghcr.io/contextforge-org/contextforge-data-plane:latest}
-    platform: linux/amd64
     networks: [contextforge]
     extra_hosts:
       - host.docker.internal:host-gateway

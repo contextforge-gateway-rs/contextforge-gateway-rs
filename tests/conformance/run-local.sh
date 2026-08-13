@@ -11,7 +11,7 @@ export MCP_CONFORMANCE_SPEC_VERSION="${MCP_CONFORMANCE_SPEC_VERSION:-2026-07-28}
 export MCP_CONFORMANCE_SERVER_ID="${MCP_CONFORMANCE_SERVER_ID:-3f33286667d34b65a31c3bafd30e4c21}"
 export MCP_CONFORMANCE_SUITE_DIR="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
 export CF_CONTROLPLANE_IMAGE="${CF_CONTROLPLANE_IMAGE:-ghcr.io/ibm/mcp-context-forge:latest}"
-export CF_DATAPLANE_IMAGE="${CF_DATAPLANE_IMAGE:-ghcr.io/contextforge-org/contextforge-data-plane:latest}"
+export CF_DATAPLANE_IMAGE="${CF_DATAPLANE_IMAGE:-contextforge-data-plane:conformance}"
 
 for command in curl docker git jq node npm; do
   if ! command -v "${command}" > /dev/null 2>&1; then
@@ -71,7 +71,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 MCP_CONFORMANCE_TOKEN=pull-only \
-  docker compose -f "${compose_file}" pull redis control-plane data-plane nginx
+  docker compose -f "${compose_file}" pull redis control-plane nginx
 echo "Starting the fixture and control plane."
 MCP_CONFORMANCE_TOKEN=bootstrap-only \
   "${script_dir}/start-fixture-and-control-plane.sh"

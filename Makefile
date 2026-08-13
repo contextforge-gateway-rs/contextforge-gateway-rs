@@ -1,4 +1,5 @@
 IMAGE_NAME := contextforge-data-plane:latest
+CF_DATAPLANE_IMAGE ?= contextforge-data-plane:conformance
 SERVICES ?= nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
 ARGS     ?=
 
@@ -6,7 +7,7 @@ ARGS     ?=
 DETECT_SECRETS_SPEC ?= git+https://github.com/ibm/detect-secrets.git@076672a9a01abdfc7ecee2e7d14f08cdccb73976
 DETECT_SECRETS_EXCLUDE := '(?x)(Cargo\.lock$$|\.lock$$)|^\.secrets\.baseline$$'
 
-.PHONY: help docker-prod compose-up compose-down conformance docs-serve pre-commit secrets-scan-all configure-git
+.PHONY: help docker-prod compose-up compose-down conformance-image conformance docs-serve pre-commit secrets-scan-all configure-git
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -24,8 +25,11 @@ compose-up: ## Launch stack: nginx, control plane, redis, postgres, pgbouncer, d
 compose-down: ## Tear down the stack
 	docker compose -f docker/docker-compose.yml stop $(SERVICES) $(ARGS)
 
-conformance: ## Run official MCP 2026-07-28 conformance locally
-	tests/conformance/run-local.sh
+conformance-image: ## Build the current checkout for MCP conformance
+	docker build -t "$(CF_DATAPLANE_IMAGE)" -f docker/Dockerfile .
+
+conformance: conformance-image ## Build and run official MCP 2026-07-28 conformance locally
+	CF_DATAPLANE_IMAGE="$(CF_DATAPLANE_IMAGE)" tests/conformance/run-local.sh
 
 docs-serve: ## Serve the wiki book locally at http://127.0.0.1:3000
 	mdbook serve _context/wiki --hostname 127.0.0.1 --port 3000 --open
