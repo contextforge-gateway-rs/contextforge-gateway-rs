@@ -2,7 +2,7 @@ name: contextforge-conformance
 
 services:
   redis:
-    image: redis:latest
+    image: redis:8.8.1-alpine3.23
     command: [redis-server, --save, "", --appendonly, "no"]
     networks: [contextforge]
     healthcheck:
@@ -86,12 +86,12 @@ services:
         condition: service_healthy
 
   nginx:
-    image: nginx:latest
+    image: nginx:1.30.4-alpine3.24
     ports:
       - "127.0.0.1:${MCP_CONFORMANCE_PORT:-8080}:80"
     networks: [contextforge]
     environment:
-      MCP_CONFORMANCE_TOKEN: ${MCP_CONFORMANCE_TOKEN:-missing}
+      MCP_CONFORMANCE_TOKEN: ${MCP_CONFORMANCE_TOKEN:?}
       NGINX_ENVSUBST_TEMPLATE_DIR: /templates
       NGINX_ENVSUBST_TEMPLATE_SUFFIX: .template
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
@@ -100,6 +100,7 @@ services:
     depends_on:
       control-plane:
         condition: service_healthy
+      # Full readiness, routing, and auth are verified by start-dataplane-and-nginx.sh.
       data-plane:
         condition: service_started
     healthcheck:

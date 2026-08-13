@@ -2,7 +2,6 @@ name: MCP Conformance
 
 on:
   workflow_dispatch:
-  pull_request:
   push:
     branches: [main]
 
@@ -53,14 +52,20 @@ jobs:
           npm ci --ignore-scripts
 
       - name: Pull the latest ContextForge images
+        env:
+          MCP_CONFORMANCE_TOKEN: pull-only
         run: >-
           docker compose -f tests/conformance/docker-compose.yml
           pull redis control-plane data-plane nginx
 
       - name: Start the fixture and control plane
+        env:
+          MCP_CONFORMANCE_TOKEN: bootstrap-only
         run: tests/conformance/start-fixture-and-control-plane.sh
 
       - name: Register the official fixture through the control plane
+        env:
+          MCP_CONFORMANCE_TOKEN: bootstrap-only
         run: tests/conformance/register-fixture.sh
 
       - name: Start dataplane and nginx
@@ -70,8 +75,33 @@ jobs:
         id: runner
         run: tests/conformance/run-conformance.sh
 
+      - name: Print failed conformance checks
+        if: always()
+        run: |
+          if [ ! -d conformance-results ]; then
+            echo "No conformance results were produced."
+            exit 0
+          fi
+          find conformance-results -type f -name checks.json -print0 |
+            while IFS= read -r -d '' checks_file; do
+              jq --arg file "${checks_file}" \
+                '[.[] | select(.status == "FAILURE")] |
+                 if length > 0 then {file: $file, failures: .} else empty end' \
+                "${checks_file}"
+            done
+
+      - name: Print live stack logs
+        if: always()
+        env:
+          MCP_CONFORMANCE_TOKEN: diagnostics-only
+        run: >-
+          docker compose -f tests/conformance/docker-compose.yml
+          logs --no-color || true
+
       - name: Stop the live stack
         if: always()
+        env:
+          MCP_CONFORMANCE_TOKEN: cleanup-only
         run: tests/conformance/stop-live-stack.sh
 
       - name: Enforce conformance baseline
