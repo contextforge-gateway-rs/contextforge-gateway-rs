@@ -197,67 +197,6 @@ fn merge_and_build_capabilities(server_capabilities: Vec<(String, Option<ServerC
     merged
 }
 
-pub(super) async fn connect_backend_for_request<T>(
-    mcp_service: &McpService<T>,
-    backend_name: &str,
-    backend: &BackendMCPGateway,
-    namespace_identifiers: bool,
-    cx: &RequestContext<RoleServer>,
-) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
-    let mut headers = HashMap::new();
-    let downstream_headers = cx.extensions.get::<Parts>().map(|parts| &parts.headers);
-
-    if let Some(host) = backend.url.host_str()
-        && backend.url.scheme() == "https"
-    {
-        let authority = if let Some(port) = backend.url.port() { format!("{host}:{port}") } else { host.to_owned() };
-        if let Ok(value) = http::HeaderValue::from_str(&authority) {
-            headers.insert(http::header::HOST, value);
-        } else {
-            warn!("connect_backend_for_request - invalid backend host backend_name = {backend_name}");
-        }
-    }
-
-    apply_header_config(&mut headers, backend, downstream_headers);
-    crate::telemetry::inject_current_context(&mut headers);
-
-    let config = StreamableHttpClientTransportConfig::with_uri(backend.url.to_string()).custom_headers(headers);
-    let transport = StreamableHttpClientTransport::with_client(mcp_service.http_client.clone(), config);
-    let client_info = InitializeRequestParams::new(
-        ClientCapabilities::default(),
-        Implementation::new("contextforge-data-plane", env!("CARGO_PKG_VERSION")),
-    )
-    .with_protocol_version(ProtocolVersion::V_2026_07_28);
-
-    let backend_client = GatewayBackendClient::new(
-        backend_name.to_owned(),
-        namespace_identifiers,
-        client_info,
-        mcp_service.plugin_runtime.clone(),
-    );
-
-    serve_client_with_lifecycle_and_ct(
-        backend_client,
-        transport,
-        ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
-        cx.ct.clone(),
-    )
-    .await
-    .map_err(|error| {
-        warn!(
-            "connect_backend_for_request - backend connection failed backend_name = {backend_name} error = {error:?}"
-        );
-        ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Routing problem... backend unavailable".into(),
-            data: None,
-        }
-    })
-}
-
 /// Apply a backend's header config to the upstream header map.
 fn apply_header_config(
     headers: &mut HashMap<http::HeaderName, http::HeaderValue>,
