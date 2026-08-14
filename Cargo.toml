@@ -24,7 +24,7 @@ repository = "https://github.com/contextforge-org/contextforge-data-plane"
 # Keep dependencies here only when at least two workspace members inherit them.
 contextforge-data-plane-cpex = { path = "./crates/contextforge-data-plane-cpex" }
 contextforge-data-plane-apis = { path = "./crates/contextforge-data-plane-apis"}
-rmcp = { version = "3.1.1", features = [
+rmcp = { version = "3.1.2", features = [
     "server",
     "client",
     "auth",

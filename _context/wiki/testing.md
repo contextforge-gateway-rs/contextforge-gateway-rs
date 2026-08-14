@@ -34,6 +34,21 @@ Protocol tests and fixtures should target MCP `2026-07-28`, use `server/discover
 
 These run in `cargo nextest run` with no Docker dependencies.
 
+## MCP Conformance CI
+
+`.github/workflows/mcp_conformance.yml` runs the pinned official conformance
+suite `0.2.0-alpha.11` with `--requirements 2026-07-28`. Its small live path is
+official runner → nginx → published `latest` dataplane → official fixture,
+with the published `latest` control plane registering and publishing the
+fixture through Redis. The control plane uses ephemeral SQLite, so PostgreSQL
+is unnecessary. The harness lives in `tests/conformance/`.
+
+Because this conformance CLI cannot set a bearer header, nginx adds an
+ephemeral control-plane token when one is absent; there is no auth proxy or
+repository-owned JavaScript. A route probe prevents control-plane fallback.
+Counts appear directly in the Actions log, and `expected-failures.yml` guards
+the current baseline. The job does not retain a separate conformance artifact.
+
 ## Full-Stack Integration Harness
 
 [`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools) wires the external ContextForge control plane to this dataplane the way production intends: the stock upstream Compose stack, plus exactly two intentional differences — nginx routes only `/servers/{virtual_host_id}/mcp` to the dataplane (as `/contextforge-rs/servers/{virtual_host_id}/mcp`), and the control plane runs with `DATAPLANE_PUBLISHER=true` so virtual server configs reach the dataplane through Redis.

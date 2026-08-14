@@ -2,3 +2,6 @@ target/
 assets/
 resources/
 releases/
+.conformance-suite/
+conformance-logs/
+conformance-results/
