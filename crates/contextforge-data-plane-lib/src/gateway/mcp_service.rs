@@ -17,7 +17,9 @@ use rmcp::{
 };
 use typed_builder::TypedBuilder;
 
-use super::{backend_transports::BackendTransports, session_store::UserSessionStore};
+use crate::gateway::UserSessionStore;
+
+use super::backend_transports::BackendTransports;
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
