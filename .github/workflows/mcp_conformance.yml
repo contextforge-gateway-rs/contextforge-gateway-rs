@@ -80,7 +80,7 @@ jobs:
         id: runner
         run: tests/conformance/run-conformance.sh
 
-      - name: Print failed conformance checks
+      - name: Print conformance failures and warnings
         if: always()
         run: |
           if [ ! -d conformance-results ]; then
@@ -90,8 +90,8 @@ jobs:
           find conformance-results -type f -name checks.json -print0 |
             while IFS= read -r -d '' checks_file; do
               jq --arg file "${checks_file}" \
-                '[.[] | select(.status == "FAILURE")] |
-                 if length > 0 then {file: $file, failures: .} else empty end' \
+                '[.[] | select(.status == "FAILURE" or .status == "WARNING")] |
+                 if length > 0 then {file: $file, findings: .} else empty end' \
                 "${checks_file}"
             done
 
