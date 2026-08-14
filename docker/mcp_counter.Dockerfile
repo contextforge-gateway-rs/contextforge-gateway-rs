@@ -1,15 +1,15 @@
 FROM rust:1.96.1 AS builder
-WORKDIR /tmp/
+ARG RMCP_VERSION=rmcp-v3.1.1
+WORKDIR /tmp
 
 RUN <<EOF
 apt update
 apt install -y git ca-certificates protobuf-compiler
-git config --global http.sslVerify false
-git clone https://github.com/contextforge-gateway-rs/mcp-rust-sdk.git rust-sdk
+git clone --branch "${RMCP_VERSION}" --depth 1 https://github.com/modelcontextprotocol/rust-sdk.git rust-sdk
 EOF
 WORKDIR /tmp/rust-sdk
-RUN git checkout enabling_propagation_of_new_session_id_2
-WORKDIR /tmp/rust-sdk/examples/servers
+
+RUN sed -i 's/127\.0\.0\.1:8000/0.0.0.0:5555/' examples/servers/src/counter_streamhttp.rs
 
 RUN \
     --mount=type=cache,id=cargo,target=/usr/local/cargo/registry \
@@ -30,5 +30,5 @@ EOF
 WORKDIR /
 COPY --from=builder /tmp/rust-sdk/target/release/examples/servers_counter_streamhttp /servers_counter_streamhttp
 LABEL org.opencontainers.image.source=https://github.com/contextforge-org/contextforge-data-plane
-LABEL org.opencontainers.image.description="Mcp-conformance"
+LABEL org.opencontainers.image.description="RMCP 3.1.1 counter server with MCP 2026-07-28 support"
 ENTRYPOINT ["/servers_counter_streamhttp"]

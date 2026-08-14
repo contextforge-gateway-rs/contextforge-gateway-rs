@@ -52,7 +52,7 @@ mod tests {
     use crate::layers::virtual_host_id::{VirtualHostId, extract_virtual_host_id};
 
     #[test]
-    fn test_virutal_host_extractor() {
+    fn test_virtual_host_extractor() {
         assert_eq!(None, extract_virtual_host_id("/mcp/servers"));
         assert_eq!(None, extract_virtual_host_id("/servers"));
         assert_eq!(None, extract_virtual_host_id("/servers/12345_abcd-efgh/mcp/dkfjk"));
