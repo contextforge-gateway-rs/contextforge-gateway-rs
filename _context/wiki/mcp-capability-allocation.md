@@ -103,7 +103,7 @@ The control plane owns two distinct forms of state:
 | State | Contents | Owner and consumers |
 | --- | --- | --- |
 | Administrative source state | Virtual servers, upstream registrations, raw and normalized catalogs, exposure selections, policies, and liveness. | Written by the control plane to PostgreSQL; used by management workflows and reconciliation. |
-| Effective runtime configuration | Effective server identity and capabilities, visible tools/resources/prompts/completions, downstream paging material, backend resolution, and applicable runtime policy for a user, team, or other principal. | Compiled and published by the control plane; read by slow and fast dataplanes. |
+| Effective runtime configuration | Effective server identity and capabilities, visible tools/resources/prompts/completions, downstream paging material, backend resolution, required scopes/roles, and applicable runtime policy for a tenant or isolation domain, user, team, or other principal. | Compiled and published by the control plane; read by slow and fast dataplanes. |
 
 The control plane must exhaust upstream pagination while reconciling catalogs.
 The compiled snapshot must contain enough information for either dataplane to
@@ -111,15 +111,42 @@ produce downstream paging without contacting every upstream. Publication must
 be atomic or revisioned so a dataplane never combines partial catalog and
 policy state.
 
+## Target Authorization Invariants
+
+The effective-configuration model requires identity isolation as well as
+catalog precomputation. A cached snapshot is data, not an authorization grant.
+Every downstream request must independently establish and enforce its trusted
+authorization context.
+
+- The dataplane derives the authorization key only from verified JWT claims
+  and the validated server route. MCP params and client metadata must not
+  supply or override a principal, team, tenant, virtual server, backend, or
+  cache key.
+- Snapshot and cache partitions include the applicable trust or tenant
+  boundary, authenticated `sub`, effective team or other principal, virtual
+  server, and configuration revision. Entries must never be reused across
+  authorization contexts.
+- The control plane maps verified identity attributes to an effective
+  principal and compiles its visible objects and RBAC policy. The dataplane
+  enforces required token scopes or roles and the compiled policy on every
+  discovery, list, and targeted operation.
+- Missing, unmapped, ambiguous, expired, or unauthorized snapshots and objects
+  are denied by default. A targeted denial makes no upstream call, and errors
+  must not disclose another principal's catalog or backend mapping.
+- The exact tenant/team claim mapping and token-scope-to-RBAC rules are a
+  cross-repository contract that the control plane, publisher, schemas,
+  dataplane, and integration tests must define together. The current coarse
+  `sub`-only implementation is not the Phase 3 target.
+
 ## MCP Work Allocation
 
 | Work | Target owner and behavior |
 | --- | --- |
 | Virtual-server creation and upstream assignment | Control plane persists management state and connects to assigned upstreams. |
 | Upstream discovery, initialization where required, catalog pagination, capability aggregation, filtering, and liveness polling | Control plane only; this is the intentional fan-out boundary. |
-| Modern downstream `server/discover` and effective capabilities | Fast dataplane generates the response from effective configuration. Legacy initialization remains on the slow path. |
-| `tools/list`, `resources/list`, `prompts/list`, resource-template listing, and similar aggregate methods | Slow or fast dataplane generates the response from effective configuration with no live upstream fan-out. |
-| `tools/call`, `resources/read`, `prompts/get`, completion, and similar targeted methods | Dataplane resolves the effective entry and calls exactly one selected upstream. |
+| Modern downstream `server/discover` and effective capabilities | After per-request authorization, the fast dataplane generates the response from the principal-bound effective configuration. Legacy initialization remains on the slow path. |
+| `tools/list`, `resources/list`, `prompts/list`, resource-template listing, and similar aggregate methods | After method-scope and compiled-RBAC enforcement, the slow or fast dataplane generates the visible response from principal-bound effective configuration with no live upstream fan-out. |
+| `tools/call`, `resources/read`, `prompts/get`, completion, and similar targeted methods | Dataplane resolves the effective entry under the trusted authorization key, applies default-deny scope and object policy, and calls exactly one selected upstream only when authorized. |
 | Plugins for trusted aggregate responses | Prefer policy compiled by the control plane; avoid mandatory per-request plugin calls for a response already produced from trusted effective configuration. |
 | Plugins for targeted calls | May run on the fast path when request or response inspection is required. Exact hook allocation remains an implementation decision. |
 | Subscriptions, server notifications, and downstream list-change notifications | Deferred to Phase 4 because their state and delivery model do not fit the request/response simplification. |
@@ -179,7 +206,7 @@ sequenceDiagram
     UI->>CP: Update virtual server policy
     CP->>DB: Store selected tools and policy
 
-    CP->>CP: Compile effective principal snapshot
+    CP->>CP: Compile snapshot by tenant, principal and vhost
     CP->>Store: Atomically publish revision N
     Store-->>DP: Configuration revision available
     DP->>Store: Load revision N
@@ -187,6 +214,7 @@ sequenceDiagram
 
     Note over CP,MCP2: Control Plane handles upstream protocol and pagination
     Note over CP,DP: Effective configuration flows one way from CP to DP
+    Note over CP,DP: Snapshot carries compiled scopes, RBAC and visible objects
 ```
 
 ### 2. Discover the Server and List Tools
@@ -202,27 +230,43 @@ sequenceDiagram
 
     Client->>Ingress: server/discover
     Ingress->>DP: Forward modern MCP request
-    DP->>DP: Validate authentication and metadata
-    DP->>Cache: Get virtual server snapshot
+    DP->>DP: Verify JWT, metadata and server route
+    DP->>DP: Derive authorization key from trusted context
+    DP->>Cache: Get snapshot by authorization key
 
     alt Snapshot available
         Cache-->>DP: Snapshot revision N
     else Snapshot missing or expired
         Cache-->>DP: Cache miss
-        DP->>Store: Read compiled snapshot
-        Store-->>DP: Snapshot revision N
-        DP->>Cache: Store revision N
+        DP->>Store: Read by authorization key
+        Store-->>DP: Snapshot revision N or not found
+        opt Authorized snapshot returned
+            DP->>Cache: Store under authorization key
+        end
     end
 
-    DP-->>Client: Server identity and capabilities
+    DP->>DP: Enforce discovery scope and compiled RBAC
+    alt Snapshot mapped and authorized
+        DP-->>Client: Server identity and visible capabilities
+    else Missing, unmapped or denied
+        DP-->>Client: Authorization error without catalog details
+    end
+
     Client->>Ingress: tools/list
     Ingress->>DP: Forward modern MCP request
-    DP->>Cache: Read visible tools
-    Cache-->>DP: inc and sum
-    DP-->>Client: tools/list result
+    DP->>DP: Reverify and derive authorization key
+    DP->>DP: Enforce tools/list scope and compiled RBAC
+    alt Snapshot mapped and authorized
+        DP->>Cache: Read visible tools by authorization key
+        Cache-->>DP: inc and sum
+        DP-->>Client: tools/list result
+    else Missing, unmapped or denied
+        DP-->>Client: Authorization error without catalog details
+    end
 
     Note over DP,Store: The shared store distributes compiled state
     Note over DP: No live upstream call for discovery or aggregate lists
+    Note over Client,DP: Client-supplied identity or routing metadata is untrusted
 ```
 
 ### 3. Call a Tool
@@ -239,21 +283,28 @@ sequenceDiagram
 
     Client->>Ingress: tools/call name inc
     Ingress->>DP: Forward modern MCP request
-    DP->>DP: Validate authentication and metadata
-    DP->>Cache: Resolve exposed tool inc
-    Cache-->>DP: Backend MCP, upstream name inc, allowed
+    DP->>DP: Verify JWT, metadata and server route
+    DP->>DP: Derive authorization key from trusted context
+    DP->>Cache: Resolve inc under authorization key
+    Cache-->>DP: Backend mapping and policy or missing
+    DP->>DP: Enforce tools/call scope and compiled RBAC
 
-    DP->>CPEX: Run pre-call policy
-    CPEX-->>DP: Allow or modify request
-    DP->>MCP: tools/call name inc
-    MCP-->>DP: Tool result
-    DP->>CPEX: Run post-call policy
-    CPEX-->>DP: Allow or modify result
-    DP-->>Client: Return tool result directly
+    alt Tool mapped and authorized
+        DP->>CPEX: Run pre-call policy
+        CPEX-->>DP: Allow or modify request
+        DP->>MCP: tools/call name inc
+        MCP-->>DP: Tool result
+        DP->>CPEX: Run post-call policy
+        CPEX-->>DP: Allow or modify result
+        DP-->>Client: Return tool result directly
+    else Missing, unmapped or denied
+        DP-->>Client: Authorization error with no upstream call
+    end
 
     Note over DP,MCP: Exactly one upstream is called
     Note over DP,MCP: No durable upstream MCP session is required
     Note over DP: Control Plane, DB and Redis are not on this result path
+    Note over Client,DP: Client-supplied identity or backend selection is untrusted
 ```
 
 ### 4. Reconcile an Upstream Catalog Change

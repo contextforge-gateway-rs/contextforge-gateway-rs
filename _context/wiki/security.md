@@ -30,6 +30,10 @@ dataplane contract.
 - Authorization is currently coarse: valid JWT plus published virtual host.
   JWT scopes/teams and object allowlists are not enforced; publishing a backend
   exposes all objects returned by it.
+- This coarse current behavior does not meet the tentative Phase 3 target. The
+  target requires principal- and isolation-bound snapshots, per-request scope
+  and compiled-RBAC enforcement, and default denial for missing or unauthorized
+  entries. See [Target Authorization Invariants](mcp-capability-allocation.md#target-authorization-invariants).
 - Dataplane requests do not consult the control-plane token blocklist. Revoked
   tokens pass JWT validation until `exp` or signing-key rotation/restart.
   Removing a subject's config eventually blocks all its tokens after publisher
