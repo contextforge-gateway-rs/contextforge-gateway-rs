@@ -15,7 +15,7 @@ mkdir -p "${log_dir}" "${repo_root}/conformance-results"
 echo "$!" > "${log_dir}/reference-server.pid"
 
 docker compose -f "${script_dir}/docker-compose.yml" \
-  up -d --wait redis control-plane
+  up -d --wait redis fixture-proxy control-plane
 
 for _ in $(seq 1 120); do
   if curl --silent --output /dev/null http://127.0.0.1:3000/mcp; then

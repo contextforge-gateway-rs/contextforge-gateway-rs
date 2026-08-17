@@ -67,7 +67,7 @@ jobs:
           MCP_CONFORMANCE_TOKEN: pull-only
         run: >-
           docker compose -f tests/conformance/docker-compose.yml
-          pull redis control-plane nginx
+          pull redis fixture-proxy control-plane nginx
 
       - name: Start the fixture and control plane
         env:
@@ -108,6 +108,15 @@ jobs:
         run: >-
           docker compose -f tests/conformance/docker-compose.yml
           logs --no-color || true
+
+      - name: Print official fixture log
+        if: always()
+        run: |
+          if [ -f conformance-logs/reference-server.log ]; then
+            sed -n '1,240p' conformance-logs/reference-server.log
+          else
+            echo "No official fixture log was produced."
+          fi
 
       - name: Stop the live stack
         if: always()
