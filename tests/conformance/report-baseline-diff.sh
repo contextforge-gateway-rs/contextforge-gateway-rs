@@ -10,7 +10,7 @@ suite_dir="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
 spec_version="${MCP_CONFORMANCE_SPEC_VERSION:-2026-07-28}"
 requirements_file="${suite_dir}/requirements/${spec_version}.yaml"
 
-for command in awk cut grep jq rg sed sort wc; do
+for command in awk cut find grep jq sed sort wc; do
   if ! command -v "${command}" > /dev/null 2>&1; then
     echo "Required command not found: ${command}" >&2
     exit 1
@@ -105,7 +105,7 @@ while IFS= read -r -d '' checks_file; do
     [($scenario + ":" + .id), .status, (.errorMessage // "")] |
     @tsv
   ' "${checks_file}" >> "${actual_findings}"
-done < <(rg --files -uu -0 "${results_dir}")
+done < <(find "${results_dir}" -type f -name checks.json -print0)
 
 LC_ALL=C sort -u -o "${actual_findings}" "${actual_findings}"
 cut -f 1 "${actual_findings}" | LC_ALL=C sort -u > "${actual_keys}"
