@@ -1,18 +1,10 @@
 name: MCP Conformance
 
 on:
-  workflow_dispatch:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: mcp-conformance-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   MCP_CONFORMANCE_VERSION: 0.2.0-alpha.11
@@ -32,8 +24,22 @@ jobs:
       - name: Check out data plane
         uses: actions/checkout@v6.0.2
 
-      - name: Build data plane from the checked-out source
-        run: make conformance-image
+      - name: Download the conformance binary
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: contextforge-data-plane-conformance
+          path: target/conformance
+
+      - name: Make the conformance binary executable
+        run: chmod +x target/conformance/contextforge-data-plane
+
+      - name: Package the data plane conformance image
+        run: >-
+          docker buildx build --load
+          --target conformance-prebuilt
+          --build-context prebuilt=target/conformance
+          --tag "${CF_DATAPLANE_IMAGE}"
+          --file docker/Dockerfile .
 
       - name: Check out the alpha.11 conformance fixture
         uses: actions/checkout@v6.0.2
