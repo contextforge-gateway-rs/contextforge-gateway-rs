@@ -1,5 +1,10 @@
 # Deployment
 
+> This page describes **current deployment requirements**, including session
+> affinity. The tentative target removes live aggregate fan-out and durable
+> upstream-session dependence; see
+> [ContextForge 2.0 Target Architecture and Roadmap](mcp-capability-allocation.md).
+
 ## Checklist
 
 1. Front door routes only `/contextforge-rs` to the dataplane.

@@ -16,7 +16,7 @@
 
 # Upcoming
 
-- [Phase 3 Final Architecture](mcp-capability-allocation.md)
+- [ContextForge 2.0 Target Architecture](mcp-capability-allocation.md)
 
 # Operations
 

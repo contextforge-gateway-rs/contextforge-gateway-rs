@@ -1,5 +1,10 @@
 # MCP Routing Semantics
 
+> This page describes the **current transitional routing behavior**. Its live
+> upstream fan-out and durable-session assumptions are not the Phase 3 target.
+> See [ContextForge 2.0 Target Architecture and Roadmap](mcp-capability-allocation.md)
+> for the proposed ownership boundary and migration.
+
 ## Backend Prefix Contract
 
 Backend map keys become public identifiers only for **multi-backend virtual hosts without an explicit tool alias**:
