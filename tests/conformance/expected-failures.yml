@@ -1,19 +1,20 @@
 server:
   - server-stateless:sep-2575-server-declares-prompts-in-discover
   - server-stateless:sep-2575-discover-capabilities-match-handlers
-  - server-stateless:sep-2575-server-rejects-undeclared-capability
-  - server-stateless:sep-2575-missing-capability-http-400
   - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
-  - server-stateless:sep-2575-server-no-log-without-loglevel
   - completion-complete:completion-complete
   - tools-list:tools-list
-  - tools-call-simple-text:tools-call-simple-text
-  - tools-call-image:tools-call-image
-  - tools-call-audio:tools-call-audio
-  - tools-call-embedded-resource:tools-call-embedded-resource
-  - tools-call-mixed-content:tools-call-mixed-content
-  - tools-call-error:tools-call-error
-  - tools-call-with-progress:tools-call-with-progress
+  # The pinned alpha.11 JavaScript fixture omits resultType from its
+  # tools/call SSE responses. Remove these when its pinned SHA is updated.
+  - tools-call-simple-text:wire-schema-valid
+  - tools-call-image:wire-schema-valid
+  - tools-call-audio:wire-schema-valid
+  - tools-call-embedded-resource:wire-schema-valid
+  - tools-call-mixed-content:wire-schema-valid
+  - tools-call-error:wire-schema-valid
+  # Its stateless notification buffer also races the final progress update,
+  # so this scenario alternates between two and three received notifications.
+  - tools-call-with-progress
   - resources-list:resources-list
   - resources-read-text:resources-read-text
   - resources-read-binary:resources-read-binary
@@ -42,4 +43,5 @@ server:
   - input-required-result-result-type:sep-2322-result-type-included
   - input-required-result-tampered-state:sep-2322-reject-tampered-state
   - input-required-result-capability-check:sep-2322-respect-client-capabilities
-  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params
+  # Dataplane-owned: invalid inputResponses are accepted instead of rejected.
+  - input-required-result-validate-input:sep-2322-validate-input-responses
