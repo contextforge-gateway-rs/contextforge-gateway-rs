@@ -51,10 +51,11 @@ ephemeral control-plane token when one is absent; there is no auth proxy or
 repository-owned JavaScript. A route probe prevents control-plane fallback.
 Counts and the official fixture log appear directly in the Actions log, and
 `expected-failures.yml` guards the current baseline. The job does not retain a
-separate conformance artifact. Prefer check-level baseline entries so unrelated
-behavior still has to pass. The pinned fixture's progress scenario is tracked
-at scenario level because its asynchronous notification buffer races the final
-progress update; remove that exception with the fixture version update.
+separate conformance artifact. `upstream-fixture-failures.yml` records the
+pinned fixture's seven scored failures and one warning; its other 47 failures
+are extension or pending scenarios and are already unscored. CI prints the
+exact actual-versus-baseline diff, adds annotations for unexpected and stale
+entries, and writes the same comparison to the job summary.
 
 ## Full-Stack Integration Harness
 

@@ -86,20 +86,9 @@ jobs:
         id: runner
         run: tests/conformance/run-conformance.sh
 
-      - name: Print conformance failures and warnings
+      - name: Report conformance baseline diff
         if: always()
-        run: |
-          if [ ! -d conformance-results ]; then
-            echo "No conformance results were produced."
-            exit 0
-          fi
-          find conformance-results -type f -name checks.json -print0 |
-            while IFS= read -r -d '' checks_file; do
-              jq --arg file "${checks_file}" \
-                '[.[] | select(.status == "FAILURE" or .status == "WARNING")] |
-                 if length > 0 then {file: $file, findings: .} else empty end' \
-                "${checks_file}"
-            done
+        run: tests/conformance/report-baseline-diff.sh
 
       - name: Print live stack logs
         if: always()
@@ -128,4 +117,8 @@ jobs:
         if: always()
         env:
           RUNNER_STATUS: ${{ steps.runner.outputs.status }}
-        run: test "${RUNNER_STATUS}" = "0"
+        run: |
+          if [ "${RUNNER_STATUS}" != "0" ]; then
+            echo "::error title=Conformance baseline mismatch::Actual findings differ from the expected baseline. See the baseline diff step and job summary."
+            exit 1
+          fi
