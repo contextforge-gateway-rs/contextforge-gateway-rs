@@ -14,6 +14,10 @@
 - [Security Model](security.md)
 - [Failure Modes](failure-modes.md)
 
+# Upcoming
+
+- [ContextForge 2.0 Target Architecture](mcp-capability-allocation.md)
+
 # Operations
 
 - [Configuration Reference](config.md)

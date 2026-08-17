@@ -1,12 +1,16 @@
 # Project Overview
 
+> This page describes the **current implementation**. The tentative product
+> end state and Phase 1-4 migration are documented in
+> [ContextForge 2.0 Target Architecture and Roadmap](mcp-capability-allocation.md).
+
 ## What this project is
 
 `contextforge-data-plane` is a Rust-based MCP (Model Context Protocol) gateway — the **dataplane** component of ContextForge. It acts as a scalable, secure proxy layer that routes AI tool calls from MCP clients to one or more backend MCP servers.
 
 It is paired with the external ContextForge control plane at [`IBM/mcp-context-forge`](https://github.com/IBM/mcp-context-forge). The two components have a strict division of responsibility:
 
-| Layer | Owns |
+| Layer | Owns today |
 | --- | --- |
 | **This repo (dataplane)** | Request routing, auth enforcement, backend fan-out, session ownership |
 | **Control plane** | IAM, UI, metrics storage, legacy MCP client compatibility |
@@ -69,6 +73,7 @@ Architecture context lives in the wiki. Key pages:
 | --- | --- |
 | [architecture.md](architecture.md) | Crate layout, pipeline shape, state ownership, module boundaries |
 | [routing.md](routing.md) | Backend prefix namespace, routing contract, session state, method reference |
+| [mcp-capability-allocation.md](mcp-capability-allocation.md) | Tentative ContextForge 2.0 end state, responsibility allocation, and Phase 1-4 roadmap |
 | [config.md](config.md) | JWT validation, config keying, UserConfig shape, cache behavior |
 | [security.md](security.md) | Trust boundaries, invariants, and tradeoffs |
 
@@ -116,7 +121,7 @@ Regenerate both schemas after any struct change to `UserConfig`, `VirtualHost`, 
 cargo run -p contextforge-data-plane-apis
 ```
 
-## System topology
+## System topology (current)
 
 All external traffic enters through **nginx**, which fans out to either the dataplane or the control plane:
 

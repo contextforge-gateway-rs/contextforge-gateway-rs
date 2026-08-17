@@ -1,5 +1,10 @@
 # Architecture
 
+> This page describes the **current Rust implementation**, including temporary
+> backend fan-out and session behavior. The tentative configuration-driven end
+> state is in
+> [ContextForge 2.0 Target Architecture and Roadmap](mcp-capability-allocation.md).
+
 ## Middleware Stack Order
 
 Tower layers execute outside-in. A request reaches MCP handlers with these extensions already set:
