@@ -1,16 +1,17 @@
 use contextforge_data_plane_cpex::PromptPreFetchResult;
 use rmcp::{
     ErrorData, RoleServer,
-    model::{GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
+    model::{ErrorCode, GetPromptRequestParams, GetPromptResponse, ListPromptsResult, PaginatedRequestParams},
     service::RequestContext,
 };
 use tracing::info;
 
 use super::McpService;
 use crate::gateway::{
-    identifier_routing::{backend_forward_error, route_identifier_to_backend},
+    identifier_routing::{backend_forward_error, resolve_tool_route},
     list_aggregation::{decode_gateway_cursor, fan_out_list, merge_prompts},
     mcp_call_validator::AuthorizedCallValidator,
+    mcp_service::initialization::connect_backend_for_request,
     session_manager::SessionManager,
     session_store::UserSessionStore,
 };
@@ -74,16 +75,28 @@ where
     T: UserSessionStore + Send + Sync + 'static,
 {
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
-    let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
-    let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
+    let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
+    let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
+    let Some((backend_name, prompt_name)) = resolve_tool_route(virtual_host, &request.name, &backend_names) else {
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... promtp not found".into(),
+            data: None,
+        });
+    };
 
-    let (service_name, service, prompt_name) = route_identifier_to_backend(
-        &session_manager,
-        "get_prompt",
-        &request.name,
-        "Routing problem... invalid prompt name",
-    )
-    .await?;
+    let backend_name = backend_name.to_owned();
+    let prompt_name = prompt_name.to_owned();
+
+    let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
+        code: ErrorCode::INVALID_PARAMS,
+        message: "Routing problem... backend not found".into(),
+        data: None,
+    })?;
+
+    let service_name = backend_name.clone();
+    let backend_service =
+        connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
 
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name).await?
@@ -92,7 +105,7 @@ where
     };
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &prompt_name);
-    let response = service
+    let response = backend_service
         .get_prompt(routed_request)
         .await
         .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
