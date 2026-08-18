@@ -2,10 +2,9 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 reporter="${script_dir}/report-baseline-diff.sh"
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/contextforge-baseline-test.XXXXXX")"
-suite_dir="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
+suite_dir="${state_dir}/suite"
 results_dir="${state_dir}/results"
 baseline_file="${state_dir}/expected-failures.yml"
 upstream_file="${state_dir}/upstream-fixture-failures.yml"
@@ -16,25 +15,33 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [ ! -x "${suite_dir}/node_modules/.bin/tsx" ]; then
-  echo "Conformance suite dependencies are not installed: ${suite_dir}" >&2
-  exit 2
-fi
+mkdir -p "${suite_dir}/requirements" "${results_dir}"
 
-mkdir -p "${results_dir}"
+cat > "${suite_dir}/requirements/2026-07-28.yaml" <<'EOF'
+server:
+  - expected-check
+  - expected-whole
+  - regression
+  - xpass-check
+  - xpass-whole
+  - absent-check
+  - upstream
+  - duplicate
+  - normal-pass
+EOF
 
 cat > "${baseline_file}" <<'EOF'
 server:
-  - server-stateless:known
-  - completion-complete
-  - tools-call-simple-text:fixed
-  - tools-call-image
-  - tools-call-audio:not-emitted
+  - expected-check:known
+  - expected-whole
+  - xpass-check:fixed
+  - xpass-whole
+  - absent-check:not-emitted
 EOF
 
 cat > "${upstream_file}" <<'EOF'
 server:
-  - tools-call-embedded-resource:fixture-defect
+  - upstream:fixture-defect
 EOF
 
 write_checks() {
@@ -45,15 +52,15 @@ write_checks() {
   printf '%s\n' "${checks}" > "${result_dir}/checks.json"
 }
 
-write_checks server-stateless '[{"id":"known","status":"FAILURE"}]'
-write_checks completion-complete '[{"id":"any-failure","status":"WARNING"}]'
-write_checks tools-list '[{"id":"new-failure","status":"FAILURE"}]'
-write_checks tools-call-simple-text '[{"id":"fixed","status":"SUCCESS"}]'
-write_checks tools-call-image '[{"id":"all-good","status":"SUCCESS"}]'
-write_checks tools-call-audio '[{"id":"other","status":"SUCCESS"}]'
-write_checks tools-call-embedded-resource '[{"id":"fixture-defect","status":"FAILURE","errorMessage":"must not be reported as a dataplane failure"}]'
-write_checks tools-call-mixed-content '[{"id":"repeated","status":"FAILURE"},{"id":"repeated","status":"SUCCESS"}]'
-write_checks tools-call-error '[{"id":"good","status":"SUCCESS"},{"id":"not-applicable","status":"SKIPPED"}]'
+write_checks expected-check '[{"id":"known","status":"FAILURE"}]'
+write_checks expected-whole '[{"id":"any-failure","status":"WARNING"}]'
+write_checks regression '[{"id":"new-failure","status":"FAILURE"}]'
+write_checks xpass-check '[{"id":"fixed","status":"SUCCESS"}]'
+write_checks xpass-whole '[{"id":"all-good","status":"SUCCESS"}]'
+write_checks absent-check '[{"id":"other","status":"SUCCESS"}]'
+write_checks upstream '[{"id":"fixture-defect","status":"FAILURE","errorMessage":"must not be reported as a dataplane failure"}]'
+write_checks duplicate '[{"id":"repeated","status":"FAILURE"},{"id":"repeated","status":"SUCCESS"}]'
+write_checks normal-pass '[{"id":"good","status":"SUCCESS"},{"id":"not-applicable","status":"SKIPPED"}]'
 
 assert_contains() {
   haystack="$1"
@@ -92,23 +99,23 @@ if [ "${status}" -ne 1 ]; then
   exit 1
 fi
 
-assert_contains "${output}" 'XFAIL server-stateless:known'
-assert_contains "${output}" 'XFAIL completion-complete'
-assert_contains "${output}" 'UPSTREAM tools-call-embedded-resource:fixture-defect'
-assert_contains "${output}" 'FAIL tools-call-mixed-content:repeated (expected PASS, got FAILURE)'
-assert_contains "${output}" 'FAIL tools-list:new-failure (expected PASS, got FAILURE)'
-assert_contains "${output}" 'XPASS tools-call-simple-text:fixed (expected FAILURE, got PASS)'
-assert_contains "${output}" 'XPASS tools-call-image (expected FAILURE, got PASS)'
-assert_not_contains "${output}" 'XPASS tools-call-audio:not-emitted'
-assert_not_contains "${output}" '::error title=Expected conformance pass failed::tools-call-embedded-resource:fixture-defect'
+assert_contains "${output}" 'XFAIL expected-check:known'
+assert_contains "${output}" 'XFAIL expected-whole'
+assert_contains "${output}" 'UPSTREAM upstream:fixture-defect'
+assert_contains "${output}" 'FAIL duplicate:repeated (expected PASS, got FAILURE)'
+assert_contains "${output}" 'FAIL regression:new-failure (expected PASS, got FAILURE)'
+assert_contains "${output}" 'XPASS xpass-check:fixed (expected FAILURE, got PASS)'
+assert_contains "${output}" 'XPASS xpass-whole (expected FAILURE, got PASS)'
+assert_not_contains "${output}" 'XPASS absent-check:not-emitted'
+assert_not_contains "${output}" '::error title=Expected conformance pass failed::upstream:fixture-defect'
 
 summary="$(cat "${summary_file}")"
 assert_contains "${summary}" '| Pinned fixture findings ignored | 1 |'
-assert_not_contains "${summary}" 'tools-call-embedded-resource:fixture-defect'
+assert_not_contains "${summary}" 'upstream:fixture-defect'
 
 cat > "${state_dir}/unmatched-upstream.yml" <<'EOF'
 server:
-  - resources-list:fixture-defect
+  - never-seen:fixture-defect
 EOF
 set +e
 unmatched_upstream_output="$(
@@ -125,7 +132,7 @@ if [ "${unmatched_upstream_status}" -ne 1 ]; then
   echo "Expected unmatched-upstream status 1, got ${unmatched_upstream_status}" >&2
   exit 1
 fi
-assert_contains "${unmatched_upstream_output}" 'FAIL tools-call-embedded-resource:fixture-defect'
+assert_contains "${unmatched_upstream_output}" 'FAIL upstream:fixture-defect'
 
 echo 'server: []' > "${state_dir}/empty-baseline.yml"
 set +e
@@ -143,7 +150,7 @@ if [ "${empty_baseline_status}" -ne 1 ]; then
   echo "Expected empty-baseline status 1, got ${empty_baseline_status}" >&2
   exit 1
 fi
-assert_contains "${empty_baseline_output}" 'FAIL tools-list:new-failure'
+assert_contains "${empty_baseline_output}" 'FAIL regression:new-failure'
 
 bless_output="$(
   MCP_CONFORMANCE_COLOR=never \
@@ -156,10 +163,10 @@ cat > "${state_dir}/expected-after-bless.yml" <<'EOF'
 # Generated by `make conformance-bless` from scored dataplane findings.
 # Pinned fixture findings are excluded; see upstream-fixture-failures.yml.
 server:
-  - completion-complete:any-failure
-  - server-stateless:known
-  - tools-call-mixed-content:repeated
-  - tools-list:new-failure
+  - duplicate:repeated
+  - expected-check:known
+  - expected-whole:any-failure
+  - regression:new-failure
 EOF
 diff -u "${state_dir}/expected-after-bless.yml" "${baseline_file}"
 
