@@ -61,6 +61,10 @@ cleanup() {
     echo "Conformance run failed; printing live stack logs." >&2
     MCP_CONFORMANCE_TOKEN=diagnostics-only \
       docker compose -f "${compose_file}" logs --no-color || true
+    if [ -f "${repo_root}/conformance-logs/reference-server.log" ]; then
+      echo "Official fixture log:" >&2
+      sed -n '1,240p' "${repo_root}/conformance-logs/reference-server.log" >&2
+    fi
   fi
   MCP_CONFORMANCE_TOKEN="${MCP_CONFORMANCE_TOKEN:-cleanup-only}" \
     "${script_dir}/stop-live-stack.sh" || true
@@ -71,7 +75,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 MCP_CONFORMANCE_TOKEN=pull-only \
-  docker compose -f "${compose_file}" pull redis control-plane nginx
+  docker compose -f "${compose_file}" pull redis fixture-proxy control-plane nginx
 echo "Starting the fixture and control plane."
 MCP_CONFORMANCE_TOKEN=bootstrap-only \
   "${script_dir}/start-fixture-and-control-plane.sh"

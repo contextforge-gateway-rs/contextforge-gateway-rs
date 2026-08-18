@@ -38,16 +38,24 @@ These run in `cargo nextest run` with no Docker dependencies.
 
 `.github/workflows/mcp_conformance.yml` runs the pinned official conformance
 suite `0.2.0-alpha.11` with `--requirements 2026-07-28`. Its small live path is
-official runner → nginx → published `latest` dataplane → official fixture,
-with the published `latest` control plane registering and publishing the
-fixture through Redis. The control plane uses ephemeral SQLite, so PostgreSQL
-is unnecessary. The harness lives in `tests/conformance/`.
+official runner → nginx → checked-out dataplane → fixture proxy → official
+fixture, with the published `latest` control plane registering and publishing
+the fixture through Redis. The backend-only proxy rewrites `Host` to
+`localhost:3000`, which the official fixture's DNS-rebinding protection
+requires, while leaving dataplane header protections unchanged. The control
+plane uses ephemeral SQLite, so PostgreSQL is unnecessary. The harness lives
+in `tests/conformance/`.
 
 Because this conformance CLI cannot set a bearer header, nginx adds an
 ephemeral control-plane token when one is absent; there is no auth proxy or
 repository-owned JavaScript. A route probe prevents control-plane fallback.
-Counts appear directly in the Actions log, and `expected-failures.yml` guards
-the current baseline. The job does not retain a separate conformance artifact.
+Counts and the official fixture log appear directly in the Actions log, and
+`expected-failures.yml` guards the current baseline. The job does not retain a
+separate conformance artifact. `upstream-fixture-failures.yml` records the
+pinned fixture's seven scored failures and one warning; its other 47 failures
+are extension or pending scenarios and are already unscored. CI prints the
+exact actual-versus-baseline diff, adds annotations for unexpected and stale
+entries, and writes the same comparison to the job summary.
 
 ## Full-Stack Integration Harness
 

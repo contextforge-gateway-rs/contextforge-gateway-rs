@@ -7,6 +7,8 @@ server:
   - server-stateless:sep-2575-server-no-log-without-loglevel
   - completion-complete:completion-complete
   - tools-list:tools-list
+  # Dataplane-owned on main. The fixture passes these behavior checks itself;
+  # its separate wire-schema failures live in upstream-fixture-failures.yml.
   - tools-call-simple-text:tools-call-simple-text
   - tools-call-image:tools-call-image
   - tools-call-audio:tools-call-audio

@@ -36,11 +36,11 @@ api_request() {
 
 gateway="$(api_request POST /gateways '{
   "name": "_",
-  "url": "http://host.docker.internal:3000/mcp",
+  "url": "http://fixture-proxy/mcp",
   "transport": "STREAMABLEHTTP",
   "authType": "authheaders",
   "authHeaders": [{"key": "Host", "value": "localhost:3000"}],
-  "description": "Official MCP alpha.11 conformance fixture"
+  "description": "Official MCP alpha.11 conformance fixture through the test-only Host proxy"
 }')"
 gateway_id="$(jq --exit-status --raw-output '.id' <<< "${gateway}")"
 
