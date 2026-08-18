@@ -9,13 +9,6 @@ server:
   - tools-list:tools-list
   # Dataplane-owned on main. The fixture passes these behavior checks itself;
   # its separate wire-schema failures live in upstream-fixture-failures.yml.
-  - tools-call-simple-text:tools-call-simple-text
-  - tools-call-image:tools-call-image
-  - tools-call-audio:tools-call-audio
-  - tools-call-embedded-resource:tools-call-embedded-resource
-  - tools-call-mixed-content:tools-call-mixed-content
-  - tools-call-error:tools-call-error
-  - tools-call-with-progress:tools-call-with-progress
   - resources-list:resources-list
   - resources-read-text:resources-read-text
   - resources-read-binary:resources-read-binary
