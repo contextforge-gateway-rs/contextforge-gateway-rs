@@ -156,7 +156,7 @@ impl Gateway {
             config_store: Arc::clone(&user_config_store),
             config: config.clone(),
         };
-        let mcp_standard_header_limits = McpStandardHeaderLimits::from_config(&config);
+        let mcp_standard_header_limits = McpStandardHeaderLimits::from(&config);
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
