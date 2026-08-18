@@ -65,29 +65,30 @@ pub(crate) async fn mcp_header_limits_layer(
 }
 
 fn exceeded_limits(headers: &http::HeaderMap, limits: &McpStandardHeaderLimits) -> Option<McpStandardHeaderUsage> {
-    let mut count = 0usize;
-    let mut total_bytes = 0usize;
+    let usage = mcp_standard_header_usage(headers);
 
+    usage.exceeds(limits).then_some(usage)
+}
+
+fn mcp_standard_header_usage(headers: &http::HeaderMap) -> McpStandardHeaderUsage {
+    let mut usage = McpStandardHeaderUsage { count: 0, value_bytes: 0, total_bytes: 0 };
     for (name, value) in headers.iter().filter(|(name, _)| mcp_standard_headers::is_limited(name)) {
-        count = count.saturating_add(1);
-        if count > limits.count {
-            return Some(McpStandardHeaderUsage { count, value_bytes: 0, total_bytes });
-        }
-
         let value_bytes = value.as_bytes().len();
-        if value_bytes > limits.value_bytes {
-            return Some(McpStandardHeaderUsage { count, value_bytes, total_bytes });
-        }
 
+        usage.count = usage.count.saturating_add(1);
+        usage.value_bytes = usage.value_bytes.max(value_bytes);
         // Application budget only: this is not exact HTTP/1 wire size and does
         // not model HTTP/2 HPACK compression.
-        total_bytes = total_bytes.saturating_add(name.as_str().len()).saturating_add(value_bytes);
-        if total_bytes > limits.total_bytes {
-            return Some(McpStandardHeaderUsage { count, value_bytes, total_bytes });
-        }
+        usage.total_bytes = usage.total_bytes.saturating_add(name.as_str().len()).saturating_add(value_bytes);
     }
 
-    None
+    usage
+}
+
+impl McpStandardHeaderUsage {
+    fn exceeds(self, limits: &McpStandardHeaderLimits) -> bool {
+        self.count > limits.count || self.value_bytes > limits.value_bytes || self.total_bytes > limits.total_bytes
+    }
 }
 
 #[cfg(test)]
