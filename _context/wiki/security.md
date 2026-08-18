@@ -75,6 +75,11 @@ allowlist is configured, RMCP returns `400` for a missing or malformed authority
 and `403` for an unlisted authority. There is no same-origin fallback; configure
 both allowlists for public deployments.
 
+Host validation runs only after the request reaches the RMCP service. Origin,
+CORS, authentication, user-config, and virtual-host middleware can return a
+response first, so the Host-specific `400` and `403` statuses apply only after
+those earlier stages succeed.
+
 ## Local Bootstrap Helpers (`with_tools`)
 
 The `contextforge-data-plane-lib/with_tools` feature compiles in:
