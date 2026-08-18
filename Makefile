@@ -7,7 +7,7 @@ ARGS     ?=
 DETECT_SECRETS_SPEC ?= git+https://github.com/ibm/detect-secrets.git@076672a9a01abdfc7ecee2e7d14f08cdccb73976
 DETECT_SECRETS_EXCLUDE := '(?x)(Cargo\.lock$$|\.lock$$)|^\.secrets\.baseline$$'
 
-.PHONY: help docker-prod compose-up compose-down conformance docs-serve pre-commit secrets-scan-all configure-git
+.PHONY: help docker-prod compose-up compose-down conformance conformance-bless docs-serve pre-commit secrets-scan-all configure-git
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -28,6 +28,9 @@ compose-down: ## Tear down the stack
 conformance: ## Build the data plane and run official MCP 2026-07-28 conformance locally
 	docker build -t "$(CF_DATAPLANE_IMAGE)" -f docker/conformance.Dockerfile .
 	CF_DATAPLANE_IMAGE="$(CF_DATAPLANE_IMAGE)" tests/conformance/run-local.sh
+
+conformance-bless: ## Run conformance and update the expected-failure baseline
+	MCP_CONFORMANCE_BLESS=true $(MAKE) conformance
 
 docs-serve: ## Serve the wiki book locally at http://127.0.0.1:3000
 	mdbook serve _context/wiki --hostname 127.0.0.1 --port 3000 --open
