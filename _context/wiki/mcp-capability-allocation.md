@@ -138,6 +138,25 @@ authorization context.
   dataplane, and integration tests must define together. The current coarse
   `sub`-only implementation is not the Phase 3 target.
 
+### Stateless Task Handles
+
+Modern Tasks lifecycle calls are targeted operations under the same
+authorization invariants. The dataplane exposes an encrypted, stateless handle
+rather than an upstream task ID or process-local mapping. The handle binds the
+upstream ID and route to a trusted authorization-context ID, virtual server,
+configuration revision, immutable backend ID, and backend generation.
+
+Every `tasks/get`, `tasks/update`, and `tasks/cancel` request independently
+derives its authorization context from verified claims and the validated route,
+loads the current effective configuration, enforces method scope and compiled
+policy, and accepts the handle only when its backend ID still resolves to the
+same generation. A mismatch returns the same invalid-task error as malformed
+input and makes no upstream call. Dataplane replicas share the handle key so
+decoding does not require Redis task state or session affinity.
+
+The codec is a prerequisite only; task creation and lifecycle proxy handlers
+remain separate implementation work and are not current routing behavior.
+
 ## MCP Work Allocation
 
 | Work | Target owner and behavior |

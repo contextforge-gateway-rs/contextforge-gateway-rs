@@ -84,6 +84,7 @@ These routes are registered **outside the authentication middleware** — unauth
 ## Secrets Handling
 
 - The HMAC secret is held as a `SecretString`; key and certificate material is read from disk paths at startup.
-- Task handles are authenticated, encrypted, and scoped to JWT `sub` + virtual host + backend. They do not replace JWT validation.
+- The not-yet-wired task-handle codec encrypts upstream task IDs and binds them to a trusted authorization-context ID, virtual host, configuration revision, backend ID, and backend generation.
+- Task handles do not replace per-request JWT validation, effective-configuration lookup, scope/RBAC checks, or current backend-generation validation.
 - Never log: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig` documents, or backend credentials.
-- Treat task handles as opaque; do not log them.
+- Treat task handles and decoded upstream task IDs as opaque secrets; do not log them. Decoded-route debug output must remain redacted.

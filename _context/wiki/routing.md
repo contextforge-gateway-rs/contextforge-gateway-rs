@@ -52,11 +52,17 @@ The gateway wraps per-backend cursors inside its own opaque token (JSON, treated
 
 **Known limitation:** if backend set changes between pages, removed backend's cursor is silently dropped.
 
-## Task Handles
+## Task-Handle Codec (not wired)
 
-- Never expose an upstream task ID directly.
-- Encode it as `cfth1.<base64url>` with AES-256-GCM and a random nonce.
-- Bind the payload to JWT `sub`, virtual host, and backend; reject mismatches and removed backends as `invalid task ID`.
+The library contains the codec prerequisite for modern Tasks, but no current
+handler emits task handles or proxies `tasks/get`, `tasks/update`, or
+`tasks/cancel` yet.
+
+- Never expose or log an upstream task ID directly; decoded-route debug output redacts it.
+- Encode it as `cfth1.<base64url>` with misuse-resistant AES-256-GCM-SIV and a random nonce.
+- Bind the payload to the trusted authorization-context ID, virtual host, configuration revision, backend ID, and backend generation.
+- On decode, independently derive the current authorization scope and accept the backend only when the effective configuration resolves the same ID and generation.
+- Return every scope, revision, route, malformed-input, and version mismatch as `invalid task ID` without an upstream call.
 - Handles are stateless. Replicas must share the key; key rotation invalidates outstanding handles.
 
 ## Session State (local process)

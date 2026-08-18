@@ -157,8 +157,8 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_TOKEN_SECRET")]
     pub token_verification_secret: Option<SecretString<String>>,
 
-    /// Shared AES-256 key used to protect stateless task handles. The value is
-    /// URL-safe base64 without padding and must decode to exactly 32 bytes.
+    /// Shared AES-256-GCM-SIV key used to protect stateless task handles. The
+    /// value is URL-safe base64 without padding and must decode to 32 bytes.
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_TASK_HANDLE_KEY")]
     pub task_handle_key: Option<TaskHandleKey>,
 
