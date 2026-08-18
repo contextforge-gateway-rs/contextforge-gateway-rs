@@ -45,10 +45,6 @@ where
         initialization::initialize(self, request, cx).await
     }
 
-    async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        Ok(())
-    }
-
     async fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,

@@ -14,20 +14,20 @@ TCP/TLS listener
   -> HttpMetricsLayer
   -> TraceLayer
   -> /contextforge-rs nested router
-  -> mcp_origin_layer          → validates Host then Origin       (403 when disallowed)
+  -> mcp_origin_layer          → validates Origin                 (403 when invalid/disallowed)
   -> CORS layer
   -> virtual_host_id_layer       → inserts VirtualHostId           (400 on path mismatch)
   -> claims_layer                → inserts ContextForgeClaims      (401 on bad/missing JWT)
   -> session_id_layer            → inserts SessionId if present
   -> user_config_store_layer     → inserts UserConfig              (400 no config, 500 store error)
   -> virtual_host_config_layer   → rejects unknown vhost           (404 "Server not found")
-  -> /servers/{virtual_host_name}/mcp RMCP service
+  -> /servers/{virtual_host_name}/mcp RMCP service → validates Host, then dispatches MCP
 ```
 
-`mcp_origin_layer` implements the MCP `2026-07-28` DNS-rebinding guard. It
-checks the optional Host allowlist first, then rejects any present Origin that
-is malformed or not allowlisted; requests without Origin continue. See
-[Security](security.md#mcp-origin-and-host-validation).
+DNS-rebinding validation is split by behavior. `mcp_origin_layer` rejects any
+present Origin that is malformed or not allowlisted; requests without Origin
+continue. RMCP validates the optional Host allowlist at the MCP service
+boundary. See [Security](security.md#mcp-origin-and-host-validation).
 
 MCP handlers read typed extensions — they never parse headers, paths, or Redis keys directly.
 
@@ -35,8 +35,8 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 
 ```text
 downstream request
-  -> Host/Origin validation → virtual host extraction → JWT validation → session extraction
-  -> user config lookup → MCP handler validation
+  -> Origin validation → virtual host extraction → JWT validation → session extraction
+  -> user config lookup → RMCP Host validation → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)
 

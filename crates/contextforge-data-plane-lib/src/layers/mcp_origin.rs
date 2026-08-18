@@ -1,5 +1,5 @@
 use axum::{body::Body, extract::State, middleware::Next, response::Response};
-use http::{StatusCode, header, uri::Authority};
+use http::{StatusCode, header};
 use tracing::{debug, warn};
 use url::{Origin, Url};
 
@@ -24,22 +24,6 @@ pub(crate) fn parse_origin_str(raw: &str) -> Option<Origin> {
     parse_origin(raw)
 }
 
-fn request_authority(request: &http::Request<Body>) -> Option<Authority> {
-    request
-        .headers()
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<Authority>().ok())
-        .or_else(|| request.uri().authority().cloned())
-}
-
-fn authority_in_allowlist(authority: &Authority, allowed_hosts: &[Authority]) -> bool {
-    let request_port = authority.port_u16();
-    allowed_hosts.iter().any(|entry| {
-        entry.host().eq_ignore_ascii_case(authority.host()) && entry.port_u16().is_none_or(|p| Some(p) == request_port)
-    })
-}
-
 fn forbidden_response() -> Response {
     Response::builder()
         .status(StatusCode::FORBIDDEN)
@@ -48,22 +32,8 @@ fn forbidden_response() -> Response {
         .expect("response should build")
 }
 
-/// MCP 2026-07-28 DNS-rebinding protection middleware.
+/// MCP 2026-07-28 Origin validation middleware.
 pub async fn mcp_origin_layer(State(config): State<Config>, request: http::Request<Body>, next: Next) -> Response {
-    if let Some(ref allowed_hosts) = config.mcp_allowed_hosts {
-        match request_authority(&request) {
-            None => {
-                warn!("mcp_origin_layer - rejected request: Host header missing or unparseable");
-                return forbidden_response();
-            },
-            Some(ref authority) if !authority_in_allowlist(authority, allowed_hosts) => {
-                warn!("mcp_origin_layer - rejected request: Host not in allowlist host = {authority}");
-                return forbidden_response();
-            },
-            Some(_) => debug!("mcp_origin_layer - Host is in allowlist"),
-        }
-    }
-
     let Some(origin_header) = request.headers().get(header::ORIGIN) else {
         debug!("mcp_origin_layer - no Origin header, allowing request");
         return next.run(request).await;
@@ -108,21 +78,6 @@ mod tests {
     fn config_origins(origins: &[&str]) -> Config {
         Config {
             mcp_allowed_origins: Some(origins.iter().map(|s| s.parse::<Url>().unwrap()).collect()),
-            ..Config::default()
-        }
-    }
-
-    fn config_hosts(hosts: &[&str]) -> Config {
-        Config {
-            mcp_allowed_hosts: Some(hosts.iter().map(|s| s.parse::<Authority>().unwrap()).collect()),
-            ..Config::default()
-        }
-    }
-
-    fn config_origins_and_hosts(origins: &[&str], hosts: &[&str]) -> Config {
-        Config {
-            mcp_allowed_origins: Some(origins.iter().map(|s| s.parse::<Url>().unwrap()).collect()),
-            mcp_allowed_hosts: Some(hosts.iter().map(|s| s.parse::<Authority>().unwrap()).collect()),
             ..Config::default()
         }
     }
@@ -226,34 +181,6 @@ mod tests {
     #[test]
     fn parse_origin_str_rejects_invalid_origin() {
         assert!(parse_origin_str("not-an-origin").is_none());
-    }
-
-    // ── authority_in_allowlist unit tests ─────────────────────────────────────
-
-    #[test]
-    fn authority_exact_host_match() {
-        let auth = "gateway.example.com".parse::<Authority>().unwrap();
-        assert!(authority_in_allowlist(&auth, &["gateway.example.com".parse::<Authority>().unwrap()]));
-    }
-
-    #[test]
-    fn authority_entry_without_port_matches_any_port() {
-        let auth = "gateway.example.com:8080".parse::<Authority>().unwrap();
-        assert!(authority_in_allowlist(&auth, &["gateway.example.com".parse::<Authority>().unwrap()]));
-    }
-
-    #[test]
-    fn authority_entry_with_port_matches_only_that_port() {
-        let auth8080 = "gateway.example.com:8080".parse::<Authority>().unwrap();
-        let auth443 = "gateway.example.com:443".parse::<Authority>().unwrap();
-        assert!(authority_in_allowlist(&auth8080, &["gateway.example.com:8080".parse::<Authority>().unwrap()]));
-        assert!(!authority_in_allowlist(&auth443, &["gateway.example.com:8080".parse::<Authority>().unwrap()]));
-    }
-
-    #[test]
-    fn authority_mismatch_returns_false() {
-        let auth = "evil.example.com".parse::<Authority>().unwrap();
-        assert!(!authority_in_allowlist(&auth, &["gateway.example.com".parse::<Authority>().unwrap()]));
     }
 
     // ── middleware: no Origin ─────────────────────────────────────────────────
@@ -490,63 +417,6 @@ mod tests {
         let req = Request::builder()
             .uri("/mcp")
             .method("DELETE")
-            .header(header::ORIGIN, "https://attacker.invalid")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    }
-
-    // ── middleware: Host allowlist ────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn request_with_allowed_host_passes_host_check() {
-        let app = make_app(config_hosts(&["gateway.example.com"]));
-        let req = Request::builder()
-            .uri("/mcp")
-            .method("GET")
-            .header(header::HOST, "gateway.example.com")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    }
-
-    #[tokio::test]
-    async fn request_with_disallowed_host_returns_403() {
-        let app = make_app(config_hosts(&["gateway.example.com"]));
-        let req = Request::builder()
-            .uri("/mcp")
-            .method("POST")
-            .header(header::HOST, "evil.example.com")
-            .header(header::ORIGIN, "https://app.example.com")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn host_and_origin_both_valid_accepted() {
-        let app = make_app(config_origins_and_hosts(&["https://app.example.com"], &["gateway.example.com"]));
-        let req = Request::builder()
-            .uri("/mcp")
-            .method("POST")
-            .header(header::HOST, "gateway.example.com")
-            .header(header::ORIGIN, "https://app.example.com")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    }
-
-    #[tokio::test]
-    async fn valid_host_but_invalid_origin_returns_403() {
-        let app = make_app(config_origins_and_hosts(&["https://app.example.com"], &["gateway.example.com"]));
-        let req = Request::builder()
-            .uri("/mcp")
-            .method("POST")
-            .header(header::HOST, "gateway.example.com")
             .header(header::ORIGIN, "https://attacker.invalid")
             .body(Body::empty())
             .unwrap();

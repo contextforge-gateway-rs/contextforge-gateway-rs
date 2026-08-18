@@ -39,7 +39,7 @@ Origin and Host settings retain the explicitly configured
 | Flag | Environment variable | Default | Purpose |
 | --- | --- | --- | --- |
 | `--mcp-allowed-origins <origin,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_ORIGINS` | None | Browser Origin allowlist. Without it, requests lacking `Origin` pass and every request carrying `Origin` receives HTTP `403`. |
-| `--mcp-allowed-hosts <authority,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | None | Optional request-authority allowlist. When configured, missing, malformed, or unlisted authorities receive HTTP `403`. |
+| `--mcp-allowed-hosts <authority,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | None | Optional RMCP request-authority allowlist. When configured, missing or malformed authorities receive HTTP `400`; unlisted authorities receive HTTP `403`. |
 
 Values are comma-separated. Origin entries must be fully qualified serialized
 origins such as `https://app.example.com`; Host entries are authorities such as

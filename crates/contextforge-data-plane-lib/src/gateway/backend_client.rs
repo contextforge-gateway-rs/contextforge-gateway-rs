@@ -64,15 +64,16 @@ impl GatewayBackendClient {
         post_state: Option<RuntimeHookState>,
     ) -> Result<RequestHandle<RoleClient>, ServiceError> {
         debug!("track_tool_call {tool_name} {downstream_progress_token:?} {post_state:?}");
+        let request = ClientRequest::CallToolRequest(Request::new(request));
         let Some(downstream_progress_token) = downstream_progress_token else {
-            return start_backend_tool_call(peer, request).await;
+            return peer.send_cancellable_request(request, PeerRequestOptions::no_options()).await;
         };
 
         // RMCP publishes the request before returning its generated progress
         // token. Holding the write guard across that enqueue makes progress
         // lookups wait until the generated-to-downstream mapping is visible.
         let mut calls = self.in_flight_calls.write().await;
-        let handle = start_backend_tool_call(peer, request).await?;
+        let handle = peer.send_cancellable_request(request, PeerRequestOptions::no_options()).await?;
         let backend_progress_token = handle.progress_token.clone();
         let call = Arc::new(InFlightToolCall { downstream_progress_token, tool_name, post_state, downstream });
         calls.insert(backend_progress_token, call);
@@ -174,19 +175,6 @@ impl ClientHandler for GatewayBackendClient {
 
 fn resource_uri_for_downstream(backend_name: &str, uri: String, namespace_identifiers: bool) -> String {
     if namespace_identifiers { prefixed_name(backend_name, &uri) } else { uri }
-}
-
-/// Starts a backend tool call and exposes RMCP's generated progress token so
-/// notifications can be mapped back to the downstream token.
-pub(crate) async fn start_backend_tool_call(
-    peer: &Peer<RoleClient>,
-    request: CallToolRequestParams,
-) -> Result<RequestHandle<RoleClient>, ServiceError> {
-    peer.send_cancellable_request(
-        ClientRequest::CallToolRequest(Request::new(request)),
-        PeerRequestOptions::no_options(),
-    )
-    .await
 }
 
 /// Awaits a started backend tool call while relaying downstream cancellation.
