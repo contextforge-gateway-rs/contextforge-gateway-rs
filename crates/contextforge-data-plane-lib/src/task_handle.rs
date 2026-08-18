@@ -9,14 +9,16 @@
 use std::{fmt, str::FromStr};
 
 use aes_gcm_siv::{
-    Aes256GcmSiv, Nonce,
-    aead::{Aead, KeyInit, Payload as AeadPayload},
+    Aes256GcmSiv, Key, Nonce,
+    aead::{Aead, Generate, KeyInit, Payload as AeadPayload},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rmcp::{ErrorData, model::ErrorCode};
-use secret_string::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use zeroize::Zeroizing;
+
+use crate::VirtualHostId;
 
 const HANDLE_PREFIX: &str = "cfth1";
 const HANDLE_FAMILY_PREFIX: &str = "cfth";
@@ -29,22 +31,18 @@ const TAG_LEN: usize = 16;
 /// The textual form is URL-safe base64 without padding and must decode to
 /// exactly 32 bytes. Its [`Debug`] output is always redacted.
 #[derive(Clone, PartialEq, Eq)]
-pub struct TaskHandleKey(SecretString<String>);
-
-impl TaskHandleKey {
-    fn bytes(&self) -> Result<[u8; KEY_LEN], TaskHandleKeyError> {
-        let bytes = URL_SAFE_NO_PAD.decode(self.0.value()).map_err(|_| TaskHandleKeyError)?;
-        bytes.try_into().map_err(|_| TaskHandleKeyError)
-    }
-}
+pub struct TaskHandleKey(Zeroizing<[u8; KEY_LEN]>);
 
 impl FromStr for TaskHandleKey {
     type Err = TaskHandleKeyError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let key = Self(SecretString::new(value.to_owned()));
-        key.bytes()?;
-        Ok(key)
+        let mut key = Zeroizing::new([0_u8; KEY_LEN]);
+        let decoded_len = URL_SAFE_NO_PAD.decode_slice(value, key.as_mut()).map_err(|_| TaskHandleKeyError)?;
+        if decoded_len != KEY_LEN {
+            return Err(TaskHandleKeyError);
+        }
+        Ok(Self(key))
     }
 }
 
@@ -60,6 +58,34 @@ impl fmt::Debug for TaskHandleKey {
 #[error("task handle key must be URL-safe base64 without padding and decode to exactly 32 bytes")]
 pub struct TaskHandleKeyError;
 
+macro_rules! string_identifier {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub struct $name(String);
+
+        impl $name {
+            /// Creates an identifier from its canonical trusted value.
+            pub fn new(value: impl Into<String>) -> Self {
+                Self(value.into())
+            }
+
+            /// Returns the canonical value.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+    };
+}
+
+string_identifier!(
+    AuthorizationContextId,
+    "Canonical identity for the authenticated tenant, principal, team, and scope set."
+);
+string_identifier!(ConfigurationRevision, "Revision of the validated effective-configuration snapshot.");
+string_identifier!(BackendId, "Stable identity of a backend in effective configuration.");
+string_identifier!(BackendGeneration, "Generation of a backend's routing material.");
+
 /// Authenticated request scope to which a task handle is bound.
 ///
 /// The authorization-context ID and configuration revision must come from the
@@ -67,14 +93,18 @@ pub struct TaskHandleKeyError;
 /// metadata and MCP params are not trusted sources for either value.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct TaskHandleScope<'a> {
-    authorization_context_id: &'a str,
-    virtual_host_id: &'a str,
-    configuration_revision: &'a str,
+    authorization_context_id: &'a AuthorizationContextId,
+    virtual_host_id: &'a VirtualHostId,
+    configuration_revision: &'a ConfigurationRevision,
 }
 
 impl<'a> TaskHandleScope<'a> {
     /// Creates a scope from trusted authorization and routing context.
-    pub fn new(authorization_context_id: &'a str, virtual_host_id: &'a str, configuration_revision: &'a str) -> Self {
+    pub fn new(
+        authorization_context_id: &'a AuthorizationContextId,
+        virtual_host_id: &'a VirtualHostId,
+        configuration_revision: &'a ConfigurationRevision,
+    ) -> Self {
         Self { authorization_context_id, virtual_host_id, configuration_revision }
     }
 }
@@ -86,23 +116,23 @@ impl<'a> TaskHandleScope<'a> {
 /// outstanding upstream task IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskHandleBackend<'a> {
-    id: &'a str,
-    generation: &'a str,
+    id: &'a BackendId,
+    generation: &'a BackendGeneration,
 }
 
 impl<'a> TaskHandleBackend<'a> {
     /// Creates backend identity from trusted effective configuration.
-    pub fn new(id: &'a str, generation: &'a str) -> Self {
+    pub fn new(id: &'a BackendId, generation: &'a BackendGeneration) -> Self {
         Self { id, generation }
     }
 
     /// Stable backend identifier used for routing.
-    pub fn id(self) -> &'a str {
+    pub fn id(self) -> &'a BackendId {
         self.id
     }
 
     /// Generation of the backend routing material.
-    pub fn generation(self) -> &'a str {
+    pub fn generation(self) -> &'a BackendGeneration {
         self.generation
     }
 }
@@ -110,26 +140,26 @@ impl<'a> TaskHandleBackend<'a> {
 /// The route recovered from a valid task handle.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TaskHandleRoute {
-    backend_id: String,
-    upstream_task_id: String,
+    backend_id: BackendId,
+    upstream_task_id: Zeroizing<String>,
 }
 
 impl TaskHandleRoute {
     /// Stable backend ID in the caller's current effective configuration.
-    pub fn backend_id(&self) -> &str {
+    pub fn backend_id(&self) -> &BackendId {
         &self.backend_id
     }
 
     /// Original task identifier expected by the upstream backend.
     pub fn upstream_task_id(&self) -> &str {
-        &self.upstream_task_id
+        self.upstream_task_id.as_str()
     }
 }
 
 impl fmt::Debug for TaskHandleRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TaskHandleRoute")
-            .field("backend_id", &self.backend_id)
+            .field("backend_id", &self.backend_id.as_str())
             .field("upstream_task_id", &"[REDACTED]")
             .finish()
     }
@@ -141,14 +171,19 @@ impl fmt::Debug for TaskHandleRoute {
 /// distinguish a malformed handle from a valid handle outside its scope.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TaskHandleError {
+    /// The protected handle could not be created.
     #[error("failed to create task handle")]
     Encode,
+    /// The handle is malformed or fails authentication.
     #[error("invalid task handle")]
     Invalid,
+    /// The handle belongs to another codec version.
     #[error("invalid task handle")]
     UnsupportedVersion,
+    /// The handle does not belong to the authenticated request scope.
     #[error("invalid task handle")]
     WrongScope,
+    /// The referenced backend and generation are not currently routable.
     #[error("invalid task handle")]
     UnavailableBackend,
 }
@@ -165,9 +200,19 @@ impl From<TaskHandleError> for ErrorData {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
+struct TaskHandlePayload<'a> {
+    authorization_context_id: &'a str,
+    virtual_host_id: &'a str,
+    configuration_revision: &'a str,
+    backend_id: &'a str,
+    backend_generation: &'a str,
+    upstream_task_id: &'a str,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct TaskHandlePayload {
+struct DecodedTaskHandlePayload {
     authorization_context_id: String,
     virtual_host_id: String,
     configuration_revision: String,
@@ -184,9 +229,10 @@ pub struct TaskHandleCodec {
 
 impl TaskHandleCodec {
     /// Creates a codec from a validated shared key.
-    pub fn new(key: &TaskHandleKey) -> Result<Self, TaskHandleKeyError> {
-        let cipher = Aes256GcmSiv::new_from_slice(&key.bytes()?).map_err(|_| TaskHandleKeyError)?;
-        Ok(Self { cipher })
+    pub fn new(key: &TaskHandleKey) -> Self {
+        let key: &Key<Aes256GcmSiv> = (&*key.0).into();
+        let cipher = Aes256GcmSiv::new(key);
+        Self { cipher }
     }
 
     /// Creates an opaque handle for one upstream task.
@@ -197,25 +243,23 @@ impl TaskHandleCodec {
         upstream_task_id: &str,
     ) -> Result<String, TaskHandleError> {
         let payload = TaskHandlePayload {
-            authorization_context_id: scope.authorization_context_id.to_owned(),
-            virtual_host_id: scope.virtual_host_id.to_owned(),
-            configuration_revision: scope.configuration_revision.to_owned(),
-            backend_id: backend.id.to_owned(),
-            backend_generation: backend.generation.to_owned(),
-            upstream_task_id: upstream_task_id.to_owned(),
+            authorization_context_id: scope.authorization_context_id.as_str(),
+            virtual_host_id: scope.virtual_host_id.as_str(),
+            configuration_revision: scope.configuration_revision.as_str(),
+            backend_id: backend.id.as_str(),
+            backend_generation: backend.generation.as_str(),
+            upstream_task_id,
         };
-        let plaintext = serde_json::to_vec(&payload).map_err(|_| TaskHandleError::Encode)?;
+        let plaintext = Zeroizing::new(serde_json::to_vec(&payload).map_err(|_| TaskHandleError::Encode)?);
 
-        let mut nonce_bytes = [0_u8; NONCE_LEN];
-        getrandom::fill(&mut nonce_bytes).map_err(|_| TaskHandleError::Encode)?;
-        let nonce = Nonce::from(nonce_bytes);
+        let nonce = Nonce::try_generate().map_err(|_| TaskHandleError::Encode)?;
         let ciphertext = self
             .cipher
-            .encrypt(&nonce, AeadPayload { msg: &plaintext, aad: HANDLE_PREFIX.as_bytes() })
+            .encrypt(&nonce, AeadPayload { msg: plaintext.as_slice(), aad: HANDLE_PREFIX.as_bytes() })
             .map_err(|_| TaskHandleError::Encode)?;
 
         let mut protected = Vec::with_capacity(NONCE_LEN + ciphertext.len());
-        protected.extend_from_slice(&nonce_bytes);
+        protected.extend_from_slice(&nonce);
         protected.extend_from_slice(&ciphertext);
         Ok(format!("{HANDLE_PREFIX}.{}", URL_SAFE_NO_PAD.encode(protected)))
     }
@@ -248,23 +292,27 @@ impl TaskHandleCodec {
         let (nonce_bytes, ciphertext) = protected.split_at(NONCE_LEN);
         let nonce_bytes: [u8; NONCE_LEN] = nonce_bytes.try_into().map_err(|_| TaskHandleError::Invalid)?;
         let nonce = Nonce::from(nonce_bytes);
-        let plaintext = self
-            .cipher
-            .decrypt(&nonce, AeadPayload { msg: ciphertext, aad: HANDLE_PREFIX.as_bytes() })
-            .map_err(|_| TaskHandleError::Invalid)?;
-        let payload: TaskHandlePayload = serde_json::from_slice(&plaintext).map_err(|_| TaskHandleError::Invalid)?;
+        let plaintext = Zeroizing::new(
+            self.cipher
+                .decrypt(&nonce, AeadPayload { msg: ciphertext, aad: HANDLE_PREFIX.as_bytes() })
+                .map_err(|_| TaskHandleError::Invalid)?,
+        );
+        let payload: DecodedTaskHandlePayload =
+            serde_json::from_slice(&plaintext).map_err(|_| TaskHandleError::Invalid)?;
 
-        if payload.authorization_context_id != expected_scope.authorization_context_id
-            || payload.virtual_host_id != expected_scope.virtual_host_id
-            || payload.configuration_revision != expected_scope.configuration_revision
+        if payload.authorization_context_id != expected_scope.authorization_context_id.as_str()
+            || payload.virtual_host_id != expected_scope.virtual_host_id.as_str()
+            || payload.configuration_revision != expected_scope.configuration_revision.as_str()
         {
             return Err(TaskHandleError::WrongScope);
         }
-        if !backend_is_current(TaskHandleBackend::new(&payload.backend_id, &payload.backend_generation)) {
+        let backend_id = BackendId::new(payload.backend_id);
+        let backend_generation = BackendGeneration::new(payload.backend_generation);
+        if !backend_is_current(TaskHandleBackend::new(&backend_id, &backend_generation)) {
             return Err(TaskHandleError::UnavailableBackend);
         }
 
-        Ok(TaskHandleRoute { backend_id: payload.backend_id, upstream_task_id: payload.upstream_task_id })
+        Ok(TaskHandleRoute { backend_id, upstream_task_id: Zeroizing::new(payload.upstream_task_id) })
     }
 }
 
@@ -276,37 +324,48 @@ fn is_other_version(prefix: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use super::*;
 
     const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"; // pragma: allowlist secret
-    const AUTHORIZATION_CONTEXT: &str = "tenant-a:principal-a:team-a:scope-set-a";
-    const VIRTUAL_HOST_ID: &str = "host-a";
-    const CONFIGURATION_REVISION: &str = "revision-7";
-    const BACKEND_ID: &str = "backend-a";
-    const BACKEND_GENERATION: &str = "generation-3";
+    const AUTHORIZATION_CONTEXT_VALUE: &str = "tenant-a:principal-a:team-a:scope-set-a";
+    const VIRTUAL_HOST_ID_VALUE: &str = "host-a";
+    const CONFIGURATION_REVISION_VALUE: &str = "revision-7";
+    const BACKEND_ID_VALUE: &str = "backend-a";
+    const BACKEND_GENERATION_VALUE: &str = "generation-3";
+
+    static AUTHORIZATION_CONTEXT: LazyLock<AuthorizationContextId> =
+        LazyLock::new(|| AuthorizationContextId::new(AUTHORIZATION_CONTEXT_VALUE));
+    static VIRTUAL_HOST_ID: LazyLock<VirtualHostId> = LazyLock::new(|| VirtualHostId::new(VIRTUAL_HOST_ID_VALUE));
+    static CONFIGURATION_REVISION: LazyLock<ConfigurationRevision> =
+        LazyLock::new(|| ConfigurationRevision::new(CONFIGURATION_REVISION_VALUE));
+    static BACKEND_ID: LazyLock<BackendId> = LazyLock::new(|| BackendId::new(BACKEND_ID_VALUE));
+    static BACKEND_GENERATION: LazyLock<BackendGeneration> =
+        LazyLock::new(|| BackendGeneration::new(BACKEND_GENERATION_VALUE));
 
     fn codec() -> TaskHandleCodec {
-        TaskHandleCodec::new(&KEY.parse().expect("test key is valid")).expect("test key initializes AES-256-GCM-SIV")
+        TaskHandleCodec::new(&KEY.parse().expect("test key is valid"))
     }
 
     fn scope<'a>(
-        authorization_context_id: &'a str,
-        virtual_host_id: &'a str,
-        configuration_revision: &'a str,
+        authorization_context_id: &'a AuthorizationContextId,
+        virtual_host_id: &'a VirtualHostId,
+        configuration_revision: &'a ConfigurationRevision,
     ) -> TaskHandleScope<'a> {
         TaskHandleScope::new(authorization_context_id, virtual_host_id, configuration_revision)
     }
 
     fn current_scope() -> TaskHandleScope<'static> {
-        scope(AUTHORIZATION_CONTEXT, VIRTUAL_HOST_ID, CONFIGURATION_REVISION)
+        scope(&AUTHORIZATION_CONTEXT, &VIRTUAL_HOST_ID, &CONFIGURATION_REVISION)
     }
 
-    fn backend<'a>(id: &'a str, generation: &'a str) -> TaskHandleBackend<'a> {
+    fn backend<'a>(id: &'a BackendId, generation: &'a BackendGeneration) -> TaskHandleBackend<'a> {
         TaskHandleBackend::new(id, generation)
     }
 
     fn current_backend() -> TaskHandleBackend<'static> {
-        backend(BACKEND_ID, BACKEND_GENERATION)
+        backend(&BACKEND_ID, &BACKEND_GENERATION)
     }
 
     fn decode_current(
@@ -330,7 +389,7 @@ mod tests {
             let handle = codec.encode(current_scope(), current_backend(), task_id).expect("handle encodes");
             let route = decode_current(&codec, &handle, current_scope(), current_backend()).expect("handle decodes");
 
-            assert_eq!(route.backend_id(), BACKEND_ID);
+            assert_eq!(route.backend_id().as_str(), BACKEND_ID_VALUE);
             assert_eq!(route.upstream_task_id(), task_id);
         }
     }
@@ -338,17 +397,21 @@ mod tests {
     #[test]
     fn identical_task_ids_from_different_backends_remain_isolated() {
         let codec = codec();
-        let backend_a = backend("backend-a", "generation-a");
-        let backend_b = backend("backend-b", "generation-b");
-        let handle_a = codec.encode(current_scope(), backend_a, "same-id").expect("handle A encodes");
-        let handle_b = codec.encode(current_scope(), backend_b, "same-id").expect("handle B encodes");
+        let first_identity = (BackendId::new("backend-a"), BackendGeneration::new("generation-a"));
+        let second_identity = (BackendId::new("backend-b"), BackendGeneration::new("generation-b"));
+        let first_backend = backend(&first_identity.0, &first_identity.1);
+        let second_backend = backend(&second_identity.0, &second_identity.1);
+        let first_handle = codec.encode(current_scope(), first_backend, "same-id").expect("first handle encodes");
+        let second_handle = codec.encode(current_scope(), second_backend, "same-id").expect("second handle encodes");
 
-        let route_a = decode_current(&codec, &handle_a, current_scope(), backend_a).expect("handle A decodes");
-        let route_b = decode_current(&codec, &handle_b, current_scope(), backend_b).expect("handle B decodes");
+        let first_route =
+            decode_current(&codec, &first_handle, current_scope(), first_backend).expect("first handle decodes");
+        let second_route =
+            decode_current(&codec, &second_handle, current_scope(), second_backend).expect("second handle decodes");
 
-        assert_ne!(handle_a, handle_b);
-        assert_eq!(route_a.backend_id(), "backend-a");
-        assert_eq!(route_b.backend_id(), "backend-b");
+        assert_ne!(first_handle, second_handle);
+        assert_eq!(first_route.backend_id().as_str(), "backend-a");
+        assert_eq!(second_route.backend_id().as_str(), "backend-b");
     }
 
     #[test]
@@ -404,11 +467,14 @@ mod tests {
     fn authorization_virtual_host_and_revision_scope_are_enforced() {
         let codec = codec();
         let handle = codec.encode(current_scope(), current_backend(), "task-42").expect("handle encodes");
+        let other_authorization_context = AuthorizationContextId::new("tenant-b:principal-a:team-a:scope-set-a");
+        let other_virtual_host_id = VirtualHostId::new("host-b");
+        let other_configuration_revision = ConfigurationRevision::new("revision-8");
 
         for wrong_scope in [
-            scope("tenant-b:principal-a:team-a:scope-set-a", VIRTUAL_HOST_ID, CONFIGURATION_REVISION),
-            scope(AUTHORIZATION_CONTEXT, "host-b", CONFIGURATION_REVISION),
-            scope(AUTHORIZATION_CONTEXT, VIRTUAL_HOST_ID, "revision-8"),
+            scope(&other_authorization_context, &VIRTUAL_HOST_ID, &CONFIGURATION_REVISION),
+            scope(&AUTHORIZATION_CONTEXT, &other_virtual_host_id, &CONFIGURATION_REVISION),
+            scope(&AUTHORIZATION_CONTEXT, &VIRTUAL_HOST_ID, &other_configuration_revision),
         ] {
             assert_eq!(
                 decode_current(&codec, &handle, wrong_scope, current_backend()),
@@ -424,22 +490,25 @@ mod tests {
 
         assert!(decode_current(&codec, &handle, current_scope(), current_backend()).is_ok());
         let removed = codec.decode(&handle, current_scope(), |_| false).expect_err("removed backend is rejected");
-        let reassigned = decode_current(&codec, &handle, current_scope(), backend(BACKEND_ID, "generation-4"))
+        let reassigned_generation = BackendGeneration::new("generation-4");
+        let reassigned = decode_current(&codec, &handle, current_scope(), backend(&BACKEND_ID, &reassigned_generation))
             .expect_err("reassigned backend is rejected");
 
         for error in [removed, reassigned] {
             assert_eq!(error, TaskHandleError::UnavailableBackend);
             assert_eq!(error.to_string(), "invalid task handle");
-            assert!(!error.to_string().contains(BACKEND_ID));
-            assert!(!error.to_string().contains(BACKEND_GENERATION));
+            assert!(!error.to_string().contains(BACKEND_ID_VALUE));
+            assert!(!error.to_string().contains(BACKEND_GENERATION_VALUE));
         }
     }
 
     #[test]
     fn invalid_keys_and_sensitive_debug_output_are_redacted() {
-        assert_eq!("short".parse::<TaskHandleKey>(), Err(TaskHandleKeyError));
+        assert!("short".parse::<TaskHandleKey>().is_err());
+        assert!(format!("{KEY}=").parse::<TaskHandleKey>().is_err());
+        assert!(format!("{KEY}AA").parse::<TaskHandleKey>().is_err());
         let key: TaskHandleKey = KEY.parse().expect("test key is valid");
-        let codec = TaskHandleCodec::new(&key).expect("test key initializes codec");
+        let codec = TaskHandleCodec::new(&key);
         let handle = codec.encode(current_scope(), current_backend(), "bearer-task-id").expect("handle encodes");
         let route = decode_current(&codec, &handle, current_scope(), current_backend()).expect("handle decodes");
 

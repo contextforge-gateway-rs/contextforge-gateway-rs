@@ -2,17 +2,20 @@ use axum::{body::Body, middleware::Next, response::Response};
 use http::{StatusCode, header};
 use tracing::debug;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+/// Virtual-server identifier extracted from the downstream MCP route.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VirtualHostId {
     value: String,
 }
 
 impl VirtualHostId {
-    pub(crate) fn new(value: String) -> Self {
-        Self { value }
+    /// Creates a virtual-server identifier from its canonical route value.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self { value: value.into() }
     }
 
-    pub fn value(&self) -> &String {
+    /// Returns the canonical route value.
+    pub fn as_str(&self) -> &str {
         &self.value
     }
 }
@@ -40,7 +43,7 @@ fn extract_virtual_host_id(path: &str) -> Option<VirtualHostId> {
             let l1 = "/servers/".len();
             let l2 = path.len() - "/mcp".len();
             let vh = &path[l1..l2];
-            VirtualHostId::new(vh.to_owned())
+            VirtualHostId::new(vh)
         })
     } else {
         None
@@ -52,12 +55,12 @@ mod tests {
     use crate::layers::virtual_host_id::{VirtualHostId, extract_virtual_host_id};
 
     #[test]
-    fn test_virutal_host_extractor() {
+    fn extracts_only_virtual_host_from_server_mcp_routes() {
         assert_eq!(None, extract_virtual_host_id("/mcp/servers"));
         assert_eq!(None, extract_virtual_host_id("/servers"));
         assert_eq!(None, extract_virtual_host_id("/servers/12345_abcd-efgh/mcp/dkfjk"));
         assert_eq!(
-            Some(VirtualHostId { value: "12345_abcd-efgh".to_owned() }),
+            Some(VirtualHostId::new("12345_abcd-efgh")),
             extract_virtual_host_id("/servers/12345_abcd-efgh/mcp")
         );
         assert_eq!(None, extract_virtual_host_id("/12345_abcd-efgh/12345_abcd-efgh/mcp"));

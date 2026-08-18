@@ -29,7 +29,7 @@ impl<'a> AuthorizedCallValidator<'a> {
         let virtual_hosts = maybe_user_config.map_or(0, |user_config| user_config.virtual_hosts.len());
         let has_session_id = maybe_session_id.is_some();
         let has_claims = maybe_claims.is_some();
-        let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", |id| id.value().as_str());
+        let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", VirtualHostId::as_str);
         debug!(
             "AuthorizedCallValidator::validate - mcp call validation call_name = {call_name} has_user_config = {has_user_config} virtual_hosts = {virtual_hosts} has_session_id = {has_session_id} has_claims = {has_claims} virtual_host_id = {virtual_host_id}"
         );
@@ -58,9 +58,9 @@ impl<'a> AuthorizedCallValidator<'a> {
             });
         };
 
-        let Some(virtual_host) = user_config.virtual_hosts.get(virtual_host_id.value()) else {
+        let Some(virtual_host) = user_config.virtual_hosts.get(virtual_host_id.as_str()) else {
             let call_name = self.call_name;
-            let virtual_host_id = virtual_host_id.value();
+            let virtual_host_id = virtual_host_id.as_str();
             let virtual_hosts = user_config.virtual_hosts.len();
             debug!(
                 "AuthorizedCallValidator::validate - mcp virtual host config missing call_name = {call_name} virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
@@ -104,7 +104,7 @@ impl<'a> InitializeCallValidator<'a> {
         let virtual_hosts = maybe_user_config.map_or(0, |user_config| user_config.virtual_hosts.len());
         let has_session_id = true;
         let has_claims = maybe_claims.is_some();
-        let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", |id| id.value().as_str());
+        let virtual_host_id = maybe_virtual_host_id.map_or("<missing>", VirtualHostId::as_str);
         debug!(
             "InitializeCallValidator::validate - mcp call validation call_name = {call_name} has_user_config = {has_user_config} virtual_hosts = {virtual_hosts} has_session_id = {has_session_id} has_claims = {has_claims} virtual_host_id = {virtual_host_id}"
         );
@@ -125,9 +125,9 @@ impl<'a> InitializeCallValidator<'a> {
             });
         };
 
-        let Some(virtual_host) = user_config.virtual_hosts.get(virtual_host_id.value()) else {
+        let Some(virtual_host) = user_config.virtual_hosts.get(virtual_host_id.as_str()) else {
             let call_name = "initialize";
-            let virtual_host_id = virtual_host_id.value();
+            let virtual_host_id = virtual_host_id.as_str();
             let virtual_hosts = user_config.virtual_hosts.len();
             debug!(
                 "InitializeCallValidator::validate - mcp virtual host config missing call_name = {call_name} virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
