@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
@@ -41,14 +41,19 @@ pub(crate) fn plaintext_config(gateway_port: u16) -> Config {
 }
 
 pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
-    (0..ports).map(|_| openport::pick_random_unused_port().expect("Expecting to find port")).collect()
+    let mut selected = Vec::with_capacity(ports);
+    while selected.len() < ports {
+        let port = openport::pick_random_unused_port().expect("Expecting to find port");
+        if !selected.contains(&port) {
+            selected.push(port);
+        }
+    }
+    selected
 }
 
 pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<ListToolsGatewaySettings> {
     let mocked_user_config_store = MemoryUserConfigStore::default();
-
-    let gateway_one_ports = create_ports(2);
-    let gateway_two_ports = create_ports(2);
+    let gateway_port = config.address.ok_or("Invalid configuration")?.port();
 
     let service = StreamableHttpService::new(
         || Ok(mock_counter::Counter::new()),
@@ -57,6 +62,9 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     );
 
     let router = axum::Router::new().route_service("/mcp", service);
+
+    let (gateway_one_ports, servers_one) = create_axum_servers(2, gateway_port, &router).await?;
+    let (gateway_two_ports, servers_two) = create_axum_servers(2, gateway_port, &router).await?;
 
     assert_ne!(gateway_one_ports, gateway_two_ports);
 
@@ -102,8 +110,6 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     if let Some(address) = config.address.as_ref() {
         let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
-        let servers_one = create_axum_servers(&gateway_one_ports, &router);
-        let servers_two = create_axum_servers(&gateway_two_ports, &router);
         let handle =
             tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
@@ -125,9 +131,7 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     config: Config,
 ) -> Result<ListToolsGatewaySettings> {
     let mocked_user_config_store = MemoryUserConfigStore::default();
-
-    let gateway_one_ports = create_ports(2);
-    let gateway_two_ports = create_ports(2);
+    let gateway_port = config.tls_address.ok_or("Invalid configuration")?.port();
 
     let service = StreamableHttpService::new(
         || Ok(mock_counter::Counter::new()),
@@ -136,6 +140,9 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     );
 
     let router = axum::Router::new().route_service("/mcp", service);
+
+    let (gateway_one_ports, servers_one) = create_axum_tls_servers(2, gateway_port, router.clone()).await?;
+    let (gateway_two_ports, servers_two) = create_axum_tls_servers(2, gateway_port, router).await?;
 
     assert_ne!(gateway_one_ports, gateway_two_ports);
 
@@ -181,8 +188,6 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     if let Some(address) = config.tls_address.as_ref() {
         let gateway_url = format!("https://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
-        let servers_one = create_axum_tls_servers(&gateway_one_ports, router.clone()).await;
-        let servers_two = create_axum_tls_servers(&gateway_two_ports, router.clone()).await;
         let handle =
             tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
@@ -272,41 +277,68 @@ fn create_resource_template_uris(ports: &[u16]) -> Vec<String> {
         .collect()
 }
 
-fn create_axum_servers(ports: &[u16], router: &axum::Router) -> Vec<BoxFuture<'static, Result<()>>> {
-    ports
-        .iter()
-        .map(|port| {
-            let addr = format!("127.0.0.1:{port}");
-            let router = router.clone();
-            async {
-                let listener = tokio::net::TcpListener::bind(addr).await.expect("Expect this to work");
-                axum::serve(listener, router).await.expect("server runs");
+async fn create_axum_servers(
+    server_count: usize,
+    gateway_port: u16,
+    router: &axum::Router,
+) -> Result<(Vec<u16>, Vec<BoxFuture<'static, Result<()>>>)> {
+    let mut ports = Vec::with_capacity(server_count);
+    let mut servers = Vec::with_capacity(server_count);
+
+    while ports.len() < server_count {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        if port == gateway_port {
+            continue;
+        }
+
+        let router = router.clone();
+        ports.push(port);
+        servers.push(
+            async move {
+                axum::serve(listener, router).await?;
                 Ok(())
             }
-            .boxed()
-        })
-        .collect()
+            .boxed(),
+        );
+    }
+
+    Ok((ports, servers))
 }
 
-async fn create_axum_tls_servers(ports: &[u16], router: axum::Router) -> Vec<BoxFuture<'static, Result<()>>> {
+async fn create_axum_tls_servers(
+    server_count: usize,
+    gateway_port: u16,
+    router: axum::Router,
+) -> Result<(Vec<u16>, Vec<BoxFuture<'static, Result<()>>>)> {
     let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
         "../../assets/contextforgeCA/contextforge-server.cert.pem",
         "../../assets/contextforgeCA/contextforge-server.key.pem",
     )
     .await
     .expect("Expect this to work");
+    let mut ports = Vec::with_capacity(server_count);
+    let mut servers = Vec::with_capacity(server_count);
 
-    ports
-        .iter()
-        .map(|port| {
-            let router = router.clone();
-            let addr: SocketAddr = format!("127.0.0.1:{port}").parse().expect("Expect this to work");
-            let config = config.clone();
+    while ports.len() < server_count {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        if port == gateway_port {
+            continue;
+        }
+
+        listener.set_nonblocking(true)?;
+        let server = axum_server::from_tcp_rustls(listener, config.clone())?;
+        let router = router.clone();
+        ports.push(port);
+        servers.push(
             async move {
-                _ = axum_server::bind_rustls(addr, config).serve(router.into_make_service()).await;
+                server.serve(router.into_make_service()).await?;
                 Ok(())
             }
-            .boxed()
-        })
-        .collect()
+            .boxed(),
+        );
+    }
+
+    Ok((ports, servers))
 }
