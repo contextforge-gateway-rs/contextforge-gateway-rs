@@ -206,7 +206,8 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_VALUE_BYTES", default_value_t = DEFAULT_MCP_STANDARD_HEADER_MAX_VALUE_BYTES)]
     pub mcp_standard_header_max_value_bytes: usize,
 
-    /// Approximate maximum total bytes accepted across MCP standard headers.
+    /// Approximate request-level aggregate bytes accepted across all matched
+    /// MCP standard header names and values.
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES", default_value_t = DEFAULT_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES)]
     pub mcp_standard_header_max_total_bytes: usize,
 
