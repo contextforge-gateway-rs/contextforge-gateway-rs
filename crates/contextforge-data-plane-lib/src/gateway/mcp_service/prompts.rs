@@ -93,16 +93,14 @@ where
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
-
     let service_name = backend_name.clone();
-    let backend_service =
-        connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
-
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name).await?
     } else {
         PromptPreFetchResult::unchanged()
     };
+    let backend_service =
+        connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &prompt_name);
     let response = backend_service
