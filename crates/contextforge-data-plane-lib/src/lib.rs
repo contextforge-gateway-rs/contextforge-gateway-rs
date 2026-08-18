@@ -25,6 +25,7 @@ mod user_config_store;
 pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
 use gateway::{BackendTransports, McpService};
 use layers::session_id::SessionId;
+pub use layers::virtual_host_id::VirtualHostId;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use transports::{DownstreamTls, Tcp};

@@ -686,7 +686,6 @@ dependencies = [
  "cpex",
  "cpex-secrets-detection",
  "futures",
- "getrandom 0.4.3",
  "http",
  "hyper",
  "hyper-util",
@@ -716,6 +715,7 @@ dependencies = [
  "typed-builder",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

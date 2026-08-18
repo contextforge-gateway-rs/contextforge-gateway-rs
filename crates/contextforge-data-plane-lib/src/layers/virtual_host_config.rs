@@ -14,7 +14,7 @@ pub async fn virtual_host_config_layer(request: http::Request<axum::body::Body>,
     if let (Some(virtual_host_id), Some(user_config)) = (virtual_host_id, user_config)
         && !has_virtual_host(user_config, virtual_host_id)
     {
-        let virtual_host_id = virtual_host_id.value();
+        let virtual_host_id = virtual_host_id.as_str();
         let virtual_hosts = user_config.virtual_hosts.len();
         debug!(
             "virtual_host_config_layer - virtual host config missing virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
@@ -26,7 +26,7 @@ pub async fn virtual_host_config_layer(request: http::Request<axum::body::Body>,
 }
 
 fn has_virtual_host(user_config: &UserConfig, virtual_host_id: &VirtualHostId) -> bool {
-    user_config.virtual_hosts.contains_key(virtual_host_id.value())
+    user_config.virtual_hosts.contains_key(virtual_host_id.as_str())
 }
 
 fn server_not_found_response() -> Response {
