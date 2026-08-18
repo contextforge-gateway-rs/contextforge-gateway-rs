@@ -8,15 +8,15 @@ use crate::common::{
 };
 use crate::mcp_standard_headers;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct McpStandardHeaderLimits {
     pub(crate) count: usize,
     pub(crate) value_bytes: usize,
     pub(crate) total_bytes: usize,
 }
 
-impl McpStandardHeaderLimits {
-    pub(crate) fn from_config(config: &Config) -> Self {
+impl From<&Config> for McpStandardHeaderLimits {
+    fn from(config: &Config) -> Self {
         Self {
             count: configured_or_default(config.mcp_standard_header_max_count, DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT),
             value_bytes: configured_or_default(
@@ -47,7 +47,7 @@ pub(crate) async fn mcp_header_limits_layer(
     request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    if let Some(usage) = exceeded_limits(request.headers(), limits) {
+    if let Some(usage) = exceeded_limits(request.headers(), &limits) {
         let count = usage.count;
         let value_bytes = usage.value_bytes;
         let total_bytes = usage.total_bytes;
@@ -64,7 +64,7 @@ pub(crate) async fn mcp_header_limits_layer(
     next.run(request).await
 }
 
-fn exceeded_limits(headers: &http::HeaderMap, limits: McpStandardHeaderLimits) -> Option<McpStandardHeaderUsage> {
+fn exceeded_limits(headers: &http::HeaderMap, limits: &McpStandardHeaderLimits) -> Option<McpStandardHeaderUsage> {
     let mut count = 0usize;
     let mut total_bytes = 0usize;
 
