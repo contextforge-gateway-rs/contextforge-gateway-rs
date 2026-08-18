@@ -3,11 +3,12 @@ use std::{collections::HashMap, sync::Arc};
 use contextforge_data_plane_apis::user_store::BackendMCPGateway;
 use http::request::Parts;
 use rmcp::{
-    ClientLifecycleMode, ClientServiceExt, ErrorData, RoleClient, RoleServer, ServiceExt,
+    ClientLifecycleMode, ErrorData, RoleClient, RoleServer, ServiceExt,
     model::{
         ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, InitializeResult, ProtocolVersion,
         ServerCapabilities,
     },
+    service::serve_client_with_lifecycle_and_ct,
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
@@ -230,6 +231,7 @@ where
         Implementation::new("contextforge-data-plane", env!("CARGO_PKG_VERSION")),
     )
     .with_protocol_version(ProtocolVersion::V_2026_07_28);
+
     let backend_client = GatewayBackendClient::new(
         backend_name.to_owned(),
         namespace_identifiers,
@@ -237,38 +239,26 @@ where
         mcp_service.plugin_runtime.clone(),
     );
 
-    backend_client
-        .serve_with_lifecycle(
-            transport,
-            ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
-        )
-        .await
-        .map_err(|error| {
-            warn!(
-                "connect_backend_for_request - backend connection failed backend_name = {backend_name} error = {error:?}"
-            );
-            ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Routing problem... backend unavailable".into(),
-                data: None,
-            }
-        })
+    serve_client_with_lifecycle_and_ct(
+        backend_client,
+        transport,
+        ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
+        cx.ct.clone(),
+    )
+    .await
+    .map_err(|error| {
+        warn!(
+            "connect_backend_for_request - backend connection failed backend_name = {backend_name} error = {error:?}"
+        );
+        ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... backend unavailable".into(),
+            data: None,
+        }
+    })
 }
 
 /// Apply a backend's header config to the upstream header map.
-///
-/// Order: passthrough (copy named headers from the downstream request) -> add
-/// (inject/override static headers) -> remove (strip named headers).
-///
-/// Protected headers are silently skipped in every phase:
-/// - Gateway-managed: `Host` (set from backend URL before this runs)
-/// - Body-framing: `Content-Length`, `Content-Type` (gateway owns framing)
-/// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`,
-///   `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
-/// - Non-standard hop-by-hop: `Proxy-Connection`
-/// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
-///
-/// ponytail: single-value per name; a repeated downstream header keeps its first value.
 fn apply_header_config(
     headers: &mut HashMap<http::HeaderName, http::HeaderValue>,
     backend: &BackendMCPGateway,
