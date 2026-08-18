@@ -96,7 +96,8 @@ Order is invariant: auth/config before backend selection; request plugins before
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |
-| Backend RMCP services | `BackendTransports` map | Local process, per principal/backend/session |
+| Backend RMCP services (initialize, list ops) | `BackendTransports` map | Local process, per principal/backend/session |
+| Backend RMCP services (call_tool) | Per-request connection | Single HTTP request |
 | Local user session mapping | `LocalUserSessionStore` | Local LRU, 50k entries, 1 hour |
 | Plugin manager | `CpexRuntimeRegistry` | Process, reloadable |
 
@@ -117,7 +118,7 @@ In multi-runtime mode, the first thread initializes the optional CPEX plugin run
 
 | State | Lock | Contention profile |
 | --- | --- | --- |
-| `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, per-call borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. |
+| `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, list-op borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. `call_tool` bypasses this map entirely. |
 | Subscription set | `Arc<tokio::sync::Mutex<HashSet<String>>>` | Local `subscribe`/`unsubscribe` only. |
 | User config LRU cache | `Arc<tokio::sync::Mutex<LruCache>>` inside `RedisUserConfigStore` | One lock per config lookup on the hot path; misses add a Redis round trip. |
 | User session LRU cache | Same pattern in `LocalUserSessionStore` | Initialize and delete paths. |
@@ -137,7 +138,8 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 
 - `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
 - List methods fan out to all connected backends concurrently and merge.
-- Targeted calls resolve exactly one backend service handle.
+- Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
+- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow
