@@ -42,7 +42,7 @@ Origin and Host settings retain the explicitly configured
 | `--mcp-allowed-hosts <authority,...>` | `CONTEXTFORGE_GATEWAY_RS_MCP_ALLOWED_HOSTS` | None | Optional request-authority allowlist. When configured, missing, malformed, or unlisted authorities receive HTTP `403`. |
 | `--mcp-standard-header-max-count <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_COUNT` | `32` | Maximum MCP standard headers accepted on one request. |
 | `--mcp-standard-header-max-value-bytes <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_VALUE_BYTES` | `8192` | Maximum byte length accepted for one MCP standard header value. |
-| `--mcp-standard-header-max-total-bytes <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES` | `65536` | Approximate maximum combined bytes across MCP standard header names and values. |
+| `--mcp-standard-header-max-total-bytes <n>` | `CONTEXTFORGE_DATA_PLANE_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES` | `65536` | Approximate request-level aggregate bytes across all matched MCP standard header names and values. |
 
 Values are comma-separated. Origin entries must be fully qualified serialized
 origins such as `https://app.example.com`; Host entries are authorities such as
@@ -50,9 +50,11 @@ origins such as `https://app.example.com`; Host entries are authorities such as
 The MCP standard header limits apply to `Mcp-Method`, `Mcp-Name`,
 `Mcp-Protocol-Version`, `Mcp-Session-Id`, and `Mcp-Param-*`. A configured value
 of `0` is treated as the documented default. The byte totals are
-application-level budgets based on header name and value lengths; they are not
-exact wire-size accounting and do not model HTTP/2 header compression.
-Non-MCP headers remain bounded by the HTTP transport.
+application-level aggregate budgets based on all matched header name and value
+lengths on one request; they do not allow a single oversized value, which is
+still capped by `--mcp-standard-header-max-value-bytes`. They are not exact
+wire-size accounting and do not model HTTP/2 header compression. Non-MCP
+headers remain bounded by the HTTP transport.
 
 ### Redis
 
