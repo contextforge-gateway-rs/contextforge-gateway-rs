@@ -17,6 +17,7 @@ use crate::gateway::{
     mcp_call_validator::InitializeCallValidator,
     session_store::{UserSession, UserSessionStore},
 };
+use crate::mcp_standard_headers;
 
 pub(super) async fn initialize<T>(
     mcp_service: &McpService<T>,
@@ -247,6 +248,7 @@ fn apply_header_config(
 /// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
 /// - Non-standard hop-by-hop: `Proxy-Connection` (must not cross gateway boundary)
 /// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
+/// - MCP standard computed headers: `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`, `Mcp-Param-*`
 fn is_protected_header(name: &http::HeaderName) -> bool {
     const PROTECTED: &[&str] = &[
         "host",
@@ -270,7 +272,7 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
         "accept",
         "last-event-id",
     ];
-    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p))
+    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p)) || mcp_standard_headers::is_computed(name)
 }
 
 #[cfg(test)]
@@ -404,6 +406,36 @@ mod tests {
         );
         apply_header_config(&mut headers, &cfg, Some(&ds));
         assert!(headers.is_empty(), "no RMCP-reserved header must reach the upstream config");
+    }
+
+    #[test]
+    fn computed_mcp_headers_cannot_be_passed_through_added_or_removed() {
+        let mut headers = HashMap::new();
+        headers.insert(http::HeaderName::from_static("mcp-method"), http::HeaderValue::from_static("tools/call"));
+        headers.insert(http::HeaderName::from_static("mcp-param-user"), http::HeaderValue::from_static("computed"));
+        let ds = downstream(&[
+            ("Mcp-Method", "wrong/method"),
+            ("Mcp-Name", "wrong-tool"),
+            ("Mcp-Protocol-Version", "2020-01-01"),
+            ("Mcp-Param-User", "wrong-user"),
+        ]);
+        let cfg = backend(
+            &["mcp-method", "mcp-name", "mcp-protocol-version", "mcp-param-user"],
+            &[
+                ("Mcp-Method", "added/method"),
+                ("Mcp-Name", "added-tool"),
+                ("Mcp-Protocol-Version", "2020-01-01"),
+                ("Mcp-Param-User", "added-user"),
+            ],
+            &["mcp-method", "mcp-param-user"],
+        );
+
+        apply_header_config(&mut headers, &cfg, Some(&ds));
+
+        assert_eq!(headers[&http::HeaderName::from_static("mcp-method")], "tools/call");
+        assert_eq!(headers[&http::HeaderName::from_static("mcp-param-user")], "computed");
+        assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-name")));
+        assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-protocol-version")));
     }
 
     #[test]
