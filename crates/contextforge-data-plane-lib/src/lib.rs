@@ -83,8 +83,9 @@ impl Gateway {
         };
         let mcp_plugin_runtime = self.plugin_runtime;
 
-        // mcp_origin_layer is the sole enforcement point; disable RMCP's built-in checks.
-        // Pass the host list to RMCP as well when configured (defense-in-depth).
+        // RMCP owns Host validation. Keep its Origin validator disabled because
+        // mcp_origin_layer enforces exact origin tuples and returns 403 for every
+        // invalid present Origin, including when no allowlist is configured.
         let streamable_config = if let Some(ref hosts) = config.mcp_allowed_hosts {
             StreamableHttpServerConfig::default()
                 .with_allowed_hosts(hosts.iter().map(Authority::as_str))

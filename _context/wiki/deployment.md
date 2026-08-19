@@ -70,7 +70,7 @@ Both default to ~60s. For functional tests, shorten the publisher interval and d
 | Concern | Current state |
 | --- | --- |
 | JWT revocation | None. A leaked token is valid until `exp`. Rotate the key and restart to invalidate. |
-| CORS / Origin | CORS response headers are permissive. DNS-rebinding protection is enforced separately by `mcp_origin_layer`: configure both `--mcp-allowed-hosts` and `--mcp-allowed-origins` for production. |
+| CORS / Origin | CORS response headers are permissive. `mcp_origin_layer` validates Origin before authentication, and RMCP validates Host at the MCP service boundary. Configure both `--mcp-allowed-hosts` and `--mcp-allowed-origins` for production. |
 | Local bootstrap routes | `/contextforge-rs/admin/tokens/{user}`, `/admin/userconfigs/{user}`, `/health` are **outside auth middleware — unauthenticated by design.** Only exist with `with_tools`. Production builds must not enable `with_tools`. |
 | Redis trust | Whoever can write Redis controls routing (arbitrary backend URLs receive caller traffic) AND which registered plugin hooks execute on payloads. Protect with TLS/mTLS and restrict write access to the control plane. |
 | Downstream TLS | Optional. Plain HTTP is acceptable only behind a trusted front door on a private network. Identity is always the bearer JWT, not mTLS. |
