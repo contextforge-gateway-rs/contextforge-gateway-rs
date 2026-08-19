@@ -416,7 +416,10 @@ async fn stateless_alias_and_namespaced_tool_names_route() {
         support::modern_client_info(),
     )
     .await;
-    let alias = expected_tool_names.iter().find(|name| name.ends_with(".sum")).expect("sum alias is advertised");
+    let alias = expected_tool_names
+        .iter()
+        .find(|name| std::path::Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sum")))
+        .expect("sum alias is advertised");
     let backend_port = alias
         .strip_prefix("backend-")
         .and_then(|name| name.strip_suffix(".sum"))
