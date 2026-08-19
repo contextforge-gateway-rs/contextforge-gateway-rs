@@ -410,7 +410,12 @@ async fn stateless_alias_and_namespaced_tool_names_route() {
         support::create_gateway_with_four_counters(TEST_USER_ID, support::plaintext_config(gateway_port))
             .await
             .expect("gateway starts");
-    let service = support::connect_modern_client(&gateway_url, support::create_client(TEST_USER_ID), support::modern_client_info()).await;
+    let service = support::connect_modern_client(
+        &gateway_url,
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
     let alias = expected_tool_names.iter().find(|name| name.ends_with(".sum")).expect("sum alias is advertised");
     let backend_port = alias
         .strip_prefix("backend-")
@@ -429,7 +434,8 @@ async fn stateless_concurrent_progress_calls_remain_request_scoped() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
-    let service = support::connect_modern_client(gateway.gateway_url(), support::create_client(TEST_USER_ID), client).await;
+    let service =
+        support::connect_modern_client(gateway.gateway_url(), support::create_client(TEST_USER_ID), client).await;
     let first = send_progress_call(&service, "progress_sum").await;
     let first_progress_token = first.progress_token.clone();
     let second = send_progress_call(&service, "progress_sum").await;
@@ -453,8 +459,6 @@ async fn stateless_concurrent_progress_calls_remain_request_scoped() {
     assert_eq!(4, progress.iter().filter(|event| event.progress_token == first_progress_token).count());
     assert_eq!(4, progress.iter().filter(|event| event.progress_token == second_progress_token).count());
 }
-
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn secrets_detection_pre_hook_redacts_tool_arguments_before_backend_call() {
