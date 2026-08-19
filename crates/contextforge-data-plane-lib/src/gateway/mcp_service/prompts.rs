@@ -99,14 +99,15 @@ where
     } else {
         PromptPreFetchResult::unchanged()
     };
-    let backend_service =
+    let mut backend_service =
         connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &prompt_name);
-    let response = backend_service
-        .get_prompt(routed_request)
-        .await
-        .map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
+    let response = backend_service.get_prompt(routed_request).await;
+    if let Err(error) = backend_service.close().await {
+        tracing::warn!("get_prompt: backend cleanup failed backend_name = {service_name} error = {error:?}");
+    }
+    let response = response.map_err(|error| backend_forward_error("get_prompt", &service_name, &error))?;
     info!("get_prompt: backend {service_name} returned {} messages", response.messages.len());
     let response = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.after_get_prompt(&prompt_name, response, pre_result.state).await?

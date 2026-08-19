@@ -96,16 +96,18 @@ where
     })?;
 
     let service_name = backend_name.clone();
-    let backend_service =
+    let mut backend_service =
         connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
 
     let mut routed_request = request;
     routed_request.uri = resource_uri;
 
-    let response = backend_service
-        .read_resource(routed_request)
-        .await
-        .map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
+    let response = backend_service.read_resource(routed_request).await;
+    if let Err(error) = backend_service.close().await {
+        tracing::warn!("read_resource: backend cleanup failed backend_name = {service_name} error = {error:?}");
+    }
+    let response = response.map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
+
     info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
 
     Ok(response.into())
