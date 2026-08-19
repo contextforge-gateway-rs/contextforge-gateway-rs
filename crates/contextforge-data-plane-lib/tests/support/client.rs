@@ -71,3 +71,47 @@ where
         }
     }
 }
+
+
+pub(crate) fn modern_client_info() -> InitializeRequestParams {
+    use rmcp::model::{ClientCapabilities, Implementation, ProtocolVersion};
+    InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("stateless-test-client", "0.1.0"),
+    )
+    .with_protocol_version(ProtocolVersion::V_2026_07_28)
+}
+
+pub(crate) async fn connect_modern_client<H>(
+    gateway_url: &str,
+    client: reqwest::Client,
+    handler: H,
+) -> rmcp::service::RunningService<rmcp::RoleClient, H>
+where
+    H: rmcp::ClientHandler + Clone,
+{
+    let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
+    loop {
+        let transport = StreamableHttpClientTransport::with_client(
+            client.clone(),
+            StreamableHttpClientTransportConfig::with_uri(gateway_url.to_owned()),
+        );
+        match rmcp::service::serve_client_with_lifecycle(
+            handler.clone(),
+            transport,
+            rmcp::ClientLifecycleMode::Discover {
+                preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await
+        {
+            Ok(service) => return service,
+            Err(error) if Instant::now() < deadline => {
+                warn!("No Service {error:?}");
+                tokio::time::sleep(TEST_POLL_INTERVAL).await;
+            },
+            Err(error) => panic!("modern stateless client connects: {error:?}"),
+        }
+    }
+}
+
