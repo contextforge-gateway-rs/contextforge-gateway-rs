@@ -48,8 +48,9 @@ Values are comma-separated. Origin entries must be fully qualified serialized
 origins such as `https://app.example.com`; Host entries are authorities such as
 `gateway.example.com` or `gateway.example.com:8443`. See [Security](security.md#mcp-origin-and-host-validation).
 The MCP standard header limits apply to `Mcp-Method`, `Mcp-Name`,
-`Mcp-Protocol-Version`, `Mcp-Session-Id`, and `Mcp-Param-*`. A configured value
-of `0` is treated as the documented default. The byte totals are
+`Mcp-Protocol-Version`, and `Mcp-Param-*`. The same guardrail also covers the
+legacy/RMCP transport header `Mcp-Session-Id`. A configured value of `0` is
+treated as the documented default. The byte totals are
 application-level aggregate budgets based on all matched header name and value
 lengths on one request; they do not allow a single oversized value, which is
 still capped by `--mcp-standard-header-max-value-bytes`. They are not exact
