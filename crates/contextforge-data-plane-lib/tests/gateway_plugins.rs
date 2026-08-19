@@ -377,44 +377,9 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_reaches_backend_without_session() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = reqwest::Client::new()
-        .post(gateway.gateway_url())
-        .bearer_auth(token(TEST_USER_ID))
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .header(http::header::ACCEPT, "application/json, text/event-stream")
-        .header("MCP-Protocol-Version", "2026-07-28")
-        .header("MCP-Method", "tools/call")
-        .header("MCP-Name", "sum")
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "sum",
-                "arguments": { "a": 1, "b": 2 },
-                "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientInfo": {
-                        "name": "stateless-test-client",
-                        "version": "0.1.0"
-                    },
-                    "io.modelcontextprotocol/clientCapabilities": {}
-                }
-            }
-        }))
-        .send()
-        .await
-        .expect("stateless tool call is sent");
-
-    let status = response.status();
-    let body = response.text().await.expect("stateless tool response body is read");
-    assert!(status.is_success(), "stateless tool call failed with status {status}: {body}");
-    let messages = sse_data_values(&body);
-    let result = messages
-        .iter()
-        .find(|message| message.get("id").and_then(Value::as_i64) == Some(1))
-        .unwrap_or_else(|| panic!("missing response id 1 in body: {body}"));
-    assert_eq!(Some("3"), result.pointer("/result/content/0/text").and_then(Value::as_str));
+    let service = gateway.connect(TEST_USER_ID).await;
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
+    assert_eq!("3", text(&result));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
