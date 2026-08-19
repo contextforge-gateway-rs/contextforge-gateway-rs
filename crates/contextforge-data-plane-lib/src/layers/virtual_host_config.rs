@@ -3,7 +3,13 @@ use contextforge_data_plane_apis::user_store::UserConfig;
 use http::{StatusCode, header};
 use tracing::debug;
 
-use crate::layers::virtual_host_id::VirtualHostId;
+use crate::{
+    common::ContextForgeClaims,
+    layers::{
+        request_context::{GatewayRequestContext, scope_gateway_request_context},
+        virtual_host_id::VirtualHostId,
+    },
+};
 
 const SERVER_NOT_FOUND_BODY: &str = r#"{"detail":"Server not found"}"#;
 
@@ -11,22 +17,26 @@ pub async fn virtual_host_config_layer(request: http::Request<axum::body::Body>,
     let virtual_host_id = request.extensions().get::<VirtualHostId>();
     let user_config = request.extensions().get::<UserConfig>();
 
-    if let (Some(virtual_host_id), Some(user_config)) = (virtual_host_id, user_config)
-        && !has_virtual_host(user_config, virtual_host_id)
-    {
+    if let (Some(virtual_host_id), Some(user_config)) = (virtual_host_id, user_config) {
+        let Some(virtual_host) = user_config.virtual_hosts.get(virtual_host_id.value()) else {
+            let virtual_host_id = virtual_host_id.value();
+            let virtual_hosts = user_config.virtual_hosts.len();
+            debug!(
+                "virtual_host_config_layer - virtual host config missing virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
+            );
+            return server_not_found_response();
+        };
+
+        if let Some(claims) = request.extensions().get::<ContextForgeClaims>() {
+            let gateway_context = GatewayRequestContext::new(claims, virtual_host_id, virtual_host);
+            return scope_gateway_request_context(gateway_context, next.run(request)).await;
+        }
+
         let virtual_host_id = virtual_host_id.value();
-        let virtual_hosts = user_config.virtual_hosts.len();
-        debug!(
-            "virtual_host_config_layer - virtual host config missing virtual_host_id = {virtual_host_id} virtual_hosts = {virtual_hosts}"
-        );
-        return server_not_found_response();
+        debug!("virtual_host_config_layer - claims missing virtual_host_id = {virtual_host_id}");
     }
 
     next.run(request).await
-}
-
-fn has_virtual_host(user_config: &UserConfig, virtual_host_id: &VirtualHostId) -> bool {
-    user_config.virtual_hosts.contains_key(virtual_host_id.value())
 }
 
 fn server_not_found_response() -> Response {

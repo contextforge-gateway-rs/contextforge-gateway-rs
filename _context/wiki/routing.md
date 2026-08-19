@@ -65,6 +65,57 @@ This is **local process state only**. Implications:
 - Gateway restart → all sessions lost → clients must re-run `initialize`.
 - Multi-runtime mode (`--single-runtime false`): each runtime thread has its own `BackendTransports` with no cross-thread affinity.
 
+## Modern Discovery And Subscription Admission
+
+Modern downstream clients use `server/discover` with MCP `2026-07-28`.
+`McpService::supported_protocol_versions()` advertises only `2026-07-28`, so
+requests that declare older protocol versions fail protocol-version validation.
+Full removal of RMCP legacy session behavior belongs to the stateless routing
+migration tracked separately.
+
+For normal requests, `virtual_host_config_layer` carries the authenticated
+principal, selected virtual host id, and selected `VirtualHost` into the RMCP
+service factory. The per-request `McpService` then uses that context for local
+modern methods:
+
+```text
+MCP client
+  -> /servers/{virtual_host_id}/mcp
+  -> auth + user config + virtual host check
+  -> RMCP service factory receives principal + virtual host
+  -> server/discover and subscriptions/listen use that context
+```
+
+`server/discover` reports capabilities derived from the selected virtual host.
+Today this is vhost-accurate, not backend-live-accurate: a non-empty virtual
+host advertises list-change and resource subscription support, while backend
+capability-cache refinement belongs to the stateless routing work.
+
+`subscriptions/listen` uses RMCP's subscription machinery. The gateway narrows
+the requested filter to supported notification kinds and routable resource
+subscription URIs, registers the accepted `SubscriptionSink`s in
+`DownstreamSubscriptionRegistry`, and removes them when the listen stream is
+cancelled or closed.
+
+```text
+MCP client
+   |
+   | subscriptions/listen
+   v
+Gateway
+   |
+   | narrow filter against selected virtual host
+   | register accepted sinks
+   | wait for listen cancellation
+   | remove sinks on close
+   v
+DownstreamSubscriptionRegistry
+```
+
+Notification delivery is intentionally separate follow-up work:
+`*/list_changed` relay, `resources/updated` relay over `subscriptions/listen`,
+and upstream `subscriptions/listen` management.
+
 
 ```mermaid
 sequenceDiagram
@@ -136,4 +187,6 @@ If RMCP rejects the delete, local state is untouched.
 | `get_prompt` | Targeted | Single-backend: name unchanged. Multi-backend: strips prefix. Runs pre/post prompt hooks around the backend call: the pre hook may rewrite arguments or deny, the post hook may rewrite or reject the rendered messages. |
 | `complete` | Targeted | Routes on prompt name or resource URI inside `ref`. |
 | `ping` | Local | Returns success; no backend fanout. |
+| `server/discover` | Local | Reports `2026-07-28` support and capabilities derived from the authenticated user's selected virtual host. |
+| `subscriptions/listen` | Local | Narrows the requested subscription filter, registers downstream sinks, and cleans them up when the listen stream closes. Backend notification delivery is follow-up work. |
 | `DELETE` | Session | RMCP handles first; on success `session_id_layer` removes local session + backend transports. |

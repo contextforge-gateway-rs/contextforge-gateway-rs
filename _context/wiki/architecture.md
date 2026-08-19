@@ -95,8 +95,10 @@ Order is invariant: auth/config before backend selection; request plugins before
 | JWT decoders | `ContextForgeDataPlaneAppState` | Process |
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
+| Gateway request context | `virtual_host_config_layer` task-local | One HTTP request; copied into the RMCP service factory for context-aware local methods |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |
 | Backend RMCP services | `BackendTransports` map | Local process, per principal/backend/session |
+| Downstream subscription sinks | `DownstreamSubscriptionRegistry` | Listen-stream lifetime, keyed by principal, virtual host, subscription id, registration id, and notification kind |
 | Local user session mapping | `LocalUserSessionStore` | Local LRU, 50k entries, 1 hour |
 | Plugin manager | `CpexRuntimeRegistry` | Process, reloadable |
 
@@ -118,6 +120,7 @@ In multi-runtime mode, the first thread initializes the optional CPEX plugin run
 | State | Lock | Contention profile |
 | --- | --- | --- |
 | `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, per-call borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. |
+| `DownstreamSubscriptionRegistry` map | `Arc<std::sync::Mutex<HashMap<...>>>` | Locked only for short insert/remove operations. Cleanup runs from `Drop`, so it cannot await. No registry lock is held across stream waits or backend I/O. |
 | Subscription set | `Arc<tokio::sync::Mutex<HashSet<String>>>` | Local `subscribe`/`unsubscribe` only. |
 | User config LRU cache | `Arc<tokio::sync::Mutex<LruCache>>` inside `RedisUserConfigStore` | One lock per config lookup on the hot path; misses add a Redis round trip. |
 | User session LRU cache | Same pattern in `LocalUserSessionStore` | Initialize and delete paths. |
@@ -139,6 +142,7 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - List methods fan out to all connected backends concurrently and merge.
 - Targeted calls resolve exactly one backend service handle.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
+- `subscriptions/listen` registers downstream sinks, parks on RMCP cancellation, and removes those sinks when the listen stream closes.
 
 ## Startup And Response Flow
 
