@@ -14,6 +14,7 @@ mod common;
 mod const_values;
 mod gateway;
 mod layers;
+mod mcp_standard_headers;
 mod telemetry;
 mod transports;
 
@@ -41,6 +42,7 @@ use crate::{
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer,
+        mcp_header_limits::{McpStandardHeaderLimits, mcp_header_limits_layer},
         mcp_origin::mcp_origin_layer,
         session_id::{SessionIdState, session_id_layer},
         user_config_store::user_config_store_layer,
@@ -67,10 +69,28 @@ pub struct Gateway {
 
 impl Gateway {
     pub async fn run_gateway(self) -> Result<()> {
-        let config = &self.config;
-        let session_manager = self.session_manager;
-        let user_config_store = match self.user_config_store_type {
-            UserConfigStoreType::Redis => Arc::new(get_config_store(config).await?),
+        let config = self.config.clone();
+        let app = self.build_app().await?;
+
+        let mut handlers = vec![];
+
+        if let Some(tcp) = Option::<Tcp>::try_from(&config)? {
+            handlers.push(tcp.handle_tcp(app.clone()).boxed());
+        }
+
+        if let Some(tls) = Option::<DownstreamTls>::try_from(&config)? {
+            handlers.push(tls.handle_tls(app.clone()).boxed());
+        }
+
+        let _ = futures::future::join_all(handlers).await;
+
+        Ok(())
+    }
+
+    async fn build_app(self) -> Result<axum::Router> {
+        let Gateway { config, session_manager, user_config_store_type, plugin_runtime } = self;
+        let user_config_store = match user_config_store_type {
+            UserConfigStoreType::Redis => Arc::new(get_config_store(&config).await?),
             UserConfigStoreType::Test(store) => store,
         };
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
@@ -81,7 +101,6 @@ impl Gateway {
             user_session_store: Arc::new(user_session_store.clone()),
             backend_transports: backend_transports.clone(),
         };
-        let mcp_plugin_runtime = self.plugin_runtime;
 
         // RMCP owns Host validation. Keep its Origin validator disabled because
         // mcp_origin_layer enforces exact origin tuples and returns 403 for every
@@ -94,7 +113,7 @@ impl Gateway {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
         };
 
-        let reqwest_backend_client = reqwest::Client::try_from(config)?;
+        let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service
         let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
@@ -104,7 +123,7 @@ impl Gateway {
                         .with_user_session_store(user_session_store.clone())
                         .with_http_client(reqwest_backend_client.clone())
                         .with_transports(backend_transports.clone())
-                        .with_plugin_runtime(mcp_plugin_runtime.clone())
+                        .with_plugin_runtime(plugin_runtime.clone())
                         .build())
                 },
                 session_manager,
@@ -138,6 +157,7 @@ impl Gateway {
             config_store: Arc::clone(&user_config_store),
             config: config.clone(),
         };
+        let mcp_standard_header_limits = McpStandardHeaderLimits::from(&config);
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
@@ -146,6 +166,9 @@ impl Gateway {
             .layer(middleware::from_fn_with_state(session_id_state, session_id_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
+            // Keep this outside auth/config/RMCP work so oversized MCP headers
+            // are rejected before JWT validation or body parsing.
+            .layer(middleware::from_fn_with_state(mcp_standard_header_limits, mcp_header_limits_layer))
             .layer(cors_layer)
             // mcp_origin_layer is the outermost wrapper: fires before JWT auth,
             // session creation, and backend fan-out.
@@ -160,19 +183,7 @@ impl Gateway {
             .layer(TraceLayer::new_for_http().make_span_with(telemetry::ExtractingMakeSpan))
             .layer(HttpMetricsLayerBuilder::new().build());
 
-        let mut handlers = vec![];
-
-        if let Some(tcp) = Option::<Tcp>::try_from(config)? {
-            handlers.push(tcp.handle_tcp(app.clone()).boxed());
-        }
-
-        if let Some(tls) = Option::<DownstreamTls>::try_from(config)? {
-            handlers.push(tls.handle_tls(app.clone()).boxed());
-        }
-
-        let _ = futures::future::join_all(handlers).await;
-
-        Ok(())
+        Ok(app)
     }
 }
 
@@ -180,4 +191,59 @@ pub async fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
     let redis_config = RedisConfig::try_from(config)?;
     let cache_expiry = std::time::Duration::from_secs(config.user_config_cache_expiry_seconds);
     RedisUserConfigStore::new(&RedisClient::try_from(redis_config)?, cache_expiry).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use axum::body::Body;
+    use contextforge_data_plane_apis::{User, user_store::UserConfig};
+    use http::{Request, StatusCode};
+    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+    use tower::ServiceExt;
+
+    use crate::{
+        Config, Gateway, UserConfigStoreType,
+        user_config_store::{ConfigStoreError, UserConfigStore},
+    };
+
+    #[derive(Clone)]
+    struct UnusedConfigStore;
+
+    #[async_trait]
+    impl UserConfigStore for UnusedConfigStore {
+        async fn get_config<'a>(&self, _key: &'a User) -> Result<UserConfig, ConfigStoreError> {
+            unreachable!("mcp header limit rejection must run before config lookup")
+        }
+
+        async fn set_config<'a>(&self, _key: &'a User, _user_config: &'a UserConfig) -> Result<(), ConfigStoreError> {
+            unreachable!("mcp header limit rejection must run before config write")
+        }
+    }
+
+    #[tokio::test]
+    async fn production_router_rejects_excessive_mcp_headers_before_auth() {
+        let config = Config { mcp_standard_header_max_count: 1, ..Config::default() };
+        let app = Gateway::builder()
+            .with_config(config)
+            .with_session_manager(Arc::new(LocalSessionManager::default()))
+            .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(UnusedConfigStore)))
+            .build()
+            .build_app()
+            .await
+            .expect("Expecting this to work");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/contextforge-rs/servers/test-vhost/mcp")
+            .header("Mcp-Method", "tools/call")
+            .header("Mcp-Name", "example")
+            .body(Body::empty())
+            .expect("Expecting this to work");
+
+        let response = app.oneshot(request).await.expect("Expecting this to work");
+
+        assert_eq!(response.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+    }
 }

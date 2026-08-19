@@ -16,6 +16,7 @@ TCP/TLS listener
   -> /contextforge-rs nested router
   -> mcp_origin_layer          → validates Origin                 (403 when invalid/disallowed)
   -> CORS layer
+  -> mcp_header_limits_layer   → MCP standard header budgets      (431 when exceeded)
   -> virtual_host_id_layer       → inserts VirtualHostId           (400 on path mismatch)
   -> claims_layer                → inserts ContextForgeClaims      (401 on bad/missing JWT)
   -> session_id_layer            → inserts SessionId if present
@@ -28,6 +29,9 @@ DNS-rebinding validation is split by behavior. `mcp_origin_layer` rejects any
 present Origin that is malformed or not allowlisted; requests without Origin
 continue. RMCP validates the optional Host allowlist at the MCP service
 boundary. See [Security](security.md#mcp-origin-and-host-validation).
+`mcp_header_limits_layer` rejects excessive MCP standard headers before JWT
+validation, config lookup, session creation, backend fanout, or RMCP body
+parsing.
 
 MCP handlers read typed extensions — they never parse headers, paths, or Redis keys directly.
 
@@ -35,7 +39,7 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 
 ```text
 downstream request
-  -> Origin validation → virtual host extraction → JWT validation → session extraction
+  -> Origin validation → MCP header limits → virtual host extraction → JWT validation → session extraction
   -> user config lookup → RMCP Host validation → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)
