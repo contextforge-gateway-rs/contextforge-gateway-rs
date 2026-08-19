@@ -72,14 +72,10 @@ where
     }
 }
 
-
 pub(crate) fn modern_client_info() -> InitializeRequestParams {
     use rmcp::model::{ClientCapabilities, Implementation, ProtocolVersion};
-    InitializeRequestParams::new(
-        ClientCapabilities::default(),
-        Implementation::new("stateless-test-client", "0.1.0"),
-    )
-    .with_protocol_version(ProtocolVersion::V_2026_07_28)
+    InitializeRequestParams::new(ClientCapabilities::default(), Implementation::new("stateless-test-client", "0.1.0"))
+        .with_protocol_version(ProtocolVersion::V_2026_07_28)
 }
 
 pub(crate) async fn connect_modern_client<H>(
@@ -114,4 +110,3 @@ where
         }
     }
 }
-
