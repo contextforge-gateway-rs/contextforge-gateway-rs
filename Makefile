@@ -29,7 +29,7 @@ conformance: ## Build the data plane and run official MCP 2026-07-28 conformance
 	docker build -t "$(CF_DATAPLANE_IMAGE)" -f docker/conformance.Dockerfile .
 	CF_DATAPLANE_IMAGE="$(CF_DATAPLANE_IMAGE)" tests/conformance/run-local.sh
 
-conformance-bless: ## Run conformance and update the expected-failure baseline
+conformance-bless: ## Run conformance and update the server and client expected-failure baselines
 	MCP_CONFORMANCE_BLESS=true $(MAKE) conformance
 
 docs-serve: ## Serve the wiki book locally at http://127.0.0.1:3000

@@ -109,4 +109,15 @@ conformance_token="$(jq --exit-status --raw-output '.access_token' <<< "${token_
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   echo "::add-mask::${conformance_token}"
 fi
+
+jwt_payload="$(cut -d. -f2 <<< "${conformance_token}")"
+jwt_payload="${jwt_payload//-/+}"
+jwt_payload="${jwt_payload//_/\/}"
+case $((${#jwt_payload} % 4)) in
+  2) jwt_payload="${jwt_payload}==" ;;
+  3) jwt_payload="${jwt_payload}=" ;;
+esac
+conformance_subject="$(jq --raw-input --exit-status --raw-output '@base64d | fromjson | .sub' <<< "${jwt_payload}")"
+
 echo "MCP_CONFORMANCE_TOKEN=${conformance_token}" >> "${GITHUB_ENV}"
+echo "MCP_CONFORMANCE_SUBJECT=${conformance_subject}" >> "${GITHUB_ENV}"

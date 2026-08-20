@@ -37,25 +37,40 @@ These run in `cargo nextest run` with no Docker dependencies.
 ## MCP Conformance CI
 
 `.github/workflows/mcp_conformance.yml` runs the pinned official conformance
-suite `0.2.0-alpha.11` with `--requirements 2026-07-28`. Its small live path is
-official runner → nginx → checked-out external dataplane → fixture proxy →
-official fixture, with the published `latest` Python image's control plane
-registering and publishing the fixture through Redis. The backend-only proxy rewrites `Host` to
+suite `0.2.0-alpha.11` for MCP `2026-07-28` in both directions. The server leg
+is official client → nginx → checked-out external dataplane → fixture proxy
+→ official server, with the published `latest` Python image's control plane
+registering and publishing the fixture through Redis. The backend-only proxy
+rewrites `Host` to
 `localhost:3000`, which the official fixture's DNS-rebinding protection
 requires, while leaving external-dataplane header protections unchanged. The
 control plane uses ephemeral SQLite, so PostgreSQL is unnecessary. The harness lives
 in `tests/conformance/`.
 
+The scoped client leg then treats the external dataplane as an MCP client: the
+official runner starts a scenario backend, the adapter publishes an isolated
+route to Redis, and a downstream `tools/call` makes the external dataplane
+connect to that backend. It covers tool calls, per-request client metadata and
+protocol-version retry, standard MCP headers, and custom parameter headers. The
+control plane is stopped first so its periodic publisher cannot replace the
+scenario route or probe the observation backend. OAuth client scenarios remain
+a control-plane responsibility. Server and client results are written below
+`server/` and `client/`, with separate `expected-failures.yml` and
+`client-expected-failures.yml` baselines.
+
+`make conformance` runs both legs locally, while `make conformance-bless` runs
+both and refreshes both expected-failure baselines from that run.
+
 Because this conformance CLI cannot set a bearer header, nginx adds an
 ephemeral control-plane token when one is absent; there is no auth proxy or
 repository-owned JavaScript. A route probe prevents built-in-dataplane fallback.
-Counts and the official fixture log appear directly in the Actions log, and
-`expected-failures.yml` guards the current baseline. The job does not retain a
-separate conformance artifact. `upstream-fixture-failures.yml` records the
-pinned fixture's seven scored failures and one warning; its other 47 failures
-are extension or pending scenarios and are already unscored. CI prints the
-exact actual-versus-baseline diff, adds annotations for unexpected and stale
-entries, and writes the same comparison to the job summary.
+Counts and the official fixture log appear directly in the Actions log. The
+job does not retain a separate conformance artifact.
+`upstream-fixture-failures.yml` records the pinned fixture's seven scored
+failures and one warning; its other 47 failures are extension or pending
+scenarios and are already unscored. CI prints the exact server
+actual-versus-baseline diff, adds annotations for unexpected and stale entries,
+and writes the same comparison to the job summary.
 
 ## Full-Stack Integration Harness
 
