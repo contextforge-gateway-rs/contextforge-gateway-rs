@@ -65,6 +65,8 @@ This is **local process state only**. Implications:
 - Gateway restart → all sessions lost → clients must re-run `initialize`.
 - Multi-runtime mode (`--single-runtime false`): each runtime thread has its own `BackendTransports` with no cross-thread affinity.
 
+**Exception: `call_tool` uses per-request backend lifecycle.** Each tool call creates a fresh backend connection, executes the call with plugin hooks, then closes the connection. This bypasses `BackendTransports` entirely and does not require session affinity for tool calls specifically (though other MCP methods still do).
+
 
 ```mermaid
 sequenceDiagram
@@ -130,7 +132,7 @@ If RMCP rejects the delete, local state is untouched.
 | `list_resources` | List | Same as list_tools. |
 | `list_prompts` | List | Same as list_tools. |
 | `list_resource_templates` | List | Same — both name and URI template get prefixed for multi-backend. |
-| `call_tool` | Targeted | Resolves alias → single/multi-backend fallback. Runs pre/post plugin hooks. Forwards downstream cancellation to backend. Tracks backend progress tokens: RMCP assigns a new token per backend request; the gateway maps each backend token to the downstream token. Request enqueue and mapping publication are serialized against progress lookup so an immediate backend notification cannot overtake registration. When the notification matches an in-flight token, the gateway restores the downstream token and forwards it to the client. |
+| `call_tool` | Targeted | **Per-request backend lifecycle:** creates fresh connection via `connect_backend_for_request`, runs pre-hook, executes call, runs post-hook, closes connection. Resolves alias → single/multi-backend fallback. Forwards downstream cancellation to backend. Tracks backend progress tokens: RMCP assigns a new token per backend request; the gateway maps each backend token to the downstream token. Request enqueue and mapping publication are serialized against progress lookup so an immediate backend notification cannot overtake registration. When the notification matches an in-flight token, the gateway restores the downstream token and forwards it to the client. Does not use session-backed `BackendTransports`. |
 | `read_resource` | Targeted | Single-backend: URI unchanged. Multi-backend: strips prefix. |
 | `subscribe` / `unsubscribe` | Targeted | Same resource-URI routing; forwards/stops resource-update notifications. |
 | `get_prompt` | Targeted | Single-backend: name unchanged. Multi-backend: strips prefix. Runs pre/post prompt hooks around the backend call: the pre hook may rewrite arguments or deny, the post hook may rewrite or reject the rendered messages. |
