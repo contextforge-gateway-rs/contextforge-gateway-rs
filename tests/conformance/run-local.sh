@@ -12,6 +12,7 @@ export MCP_CONFORMANCE_SERVER_ID="${MCP_CONFORMANCE_SERVER_ID:-3f33286667d34b65a
 export MCP_CONFORMANCE_SUITE_DIR="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
 export CF_CONTROLPLANE_IMAGE="${CF_CONTROLPLANE_IMAGE:-ghcr.io/ibm/mcp-context-forge:latest}"
 export CF_DATAPLANE_IMAGE="${CF_DATAPLANE_IMAGE:-contextforge-data-plane:conformance}"
+export MCP_CONFORMANCE_COLOR="${MCP_CONFORMANCE_COLOR:-auto}"
 
 for command in curl docker git jq node npm; do
   if ! command -v "${command}" > /dev/null 2>&1; then
@@ -52,6 +53,9 @@ state_dir="$(mktemp -d "${TMPDIR:-/tmp}/contextforge-conformance.XXXXXX")"
 export GITHUB_ENV="${state_dir}/github-env"
 export GITHUB_OUTPUT="${state_dir}/github-output"
 touch "${GITHUB_ENV}" "${GITHUB_OUTPUT}"
+mkdir -p "${repo_root}/conformance-results"
+export MCP_CONFORMANCE_RESULTS_DIR
+MCP_CONFORMANCE_RESULTS_DIR="$(mktemp -d "${repo_root}/conformance-results/run.XXXXXX")"
 
 # shellcheck disable=SC2329 # Invoked by the trap below.
 cleanup() {
@@ -98,4 +102,17 @@ if [ -z "${runner_status}" ]; then
   echo "Conformance runner did not report a status." >&2
   exit 1
 fi
-exit "${runner_status}"
+
+set +e
+if [ "${MCP_CONFORMANCE_BLESS:-false}" = "true" ]; then
+  "${script_dir}/report-baseline-diff.sh" --bless "${MCP_CONFORMANCE_RESULTS_DIR}"
+else
+  "${script_dir}/report-baseline-diff.sh" "${MCP_CONFORMANCE_RESULTS_DIR}"
+fi
+report_status="$?"
+set -e
+
+if [ "${runner_status}" -ne 0 ] && [ "${report_status}" -eq 0 ]; then
+  echo "Official runner status ${runner_status} contained no dataplane baseline mismatch."
+fi
+exit "${report_status}"

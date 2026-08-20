@@ -17,7 +17,9 @@ use rmcp::{
 };
 use typed_builder::TypedBuilder;
 
-use super::{backend_transports::BackendTransports, session_store::UserSessionStore};
+use crate::gateway::UserSessionStore;
+
+use super::backend_transports::BackendTransports;
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
@@ -43,10 +45,6 @@ where
         cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
         initialization::initialize(self, request, cx).await
-    }
-
-    async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        Ok(())
     }
 
     async fn list_tools(

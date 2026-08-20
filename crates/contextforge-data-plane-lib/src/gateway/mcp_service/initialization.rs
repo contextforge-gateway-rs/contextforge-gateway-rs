@@ -3,8 +3,12 @@ use std::{collections::HashMap, sync::Arc};
 use contextforge_data_plane_apis::user_store::BackendMCPGateway;
 use http::request::Parts;
 use rmcp::{
-    ErrorData, RoleClient, RoleServer, ServiceExt,
-    model::{ErrorCode, Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities},
+    ClientLifecycleMode, ErrorData, RoleClient, RoleServer, ServiceExt,
+    model::{
+        ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, InitializeResult, ProtocolVersion,
+        ServerCapabilities,
+    },
+    service::serve_client_with_lifecycle_and_ct,
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
@@ -17,6 +21,7 @@ use crate::gateway::{
     mcp_call_validator::InitializeCallValidator,
     session_store::{UserSession, UserSessionStore},
 };
+use crate::mcp_standard_headers;
 
 pub(super) async fn initialize<T>(
     mcp_service: &McpService<T>,
@@ -192,20 +197,68 @@ fn merge_and_build_capabilities(server_capabilities: Vec<(String, Option<ServerC
     merged
 }
 
+pub(super) async fn connect_backend_for_request<T>(
+    mcp_service: &McpService<T>,
+    backend_name: &str,
+    backend: &BackendMCPGateway,
+    namespace_identifiers: bool,
+    cx: &RequestContext<RoleServer>,
+) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData>
+where
+    T: UserSessionStore + Send + Sync + 'static,
+{
+    let mut headers = HashMap::new();
+    let downstream_headers = cx.extensions.get::<Parts>().map(|parts| &parts.headers);
+
+    if let Some(host) = backend.url.host_str()
+        && backend.url.scheme() == "https"
+    {
+        let authority = if let Some(port) = backend.url.port() { format!("{host}:{port}") } else { host.to_owned() };
+        if let Ok(value) = http::HeaderValue::from_str(&authority) {
+            headers.insert(http::header::HOST, value);
+        } else {
+            warn!("connect_backend_for_request - invalid backend host backend_name = {backend_name}");
+        }
+    }
+
+    apply_header_config(&mut headers, backend, downstream_headers);
+    crate::telemetry::inject_current_context(&mut headers);
+
+    let config = StreamableHttpClientTransportConfig::with_uri(backend.url.to_string()).custom_headers(headers);
+    let transport = StreamableHttpClientTransport::with_client(mcp_service.http_client.clone(), config);
+    let client_info = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("contextforge-data-plane", env!("CARGO_PKG_VERSION")),
+    )
+    .with_protocol_version(ProtocolVersion::V_2026_07_28);
+
+    let backend_client = GatewayBackendClient::new(
+        backend_name.to_owned(),
+        namespace_identifiers,
+        client_info,
+        mcp_service.plugin_runtime.clone(),
+    );
+
+    serve_client_with_lifecycle_and_ct(
+        backend_client,
+        transport,
+        ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
+        cx.ct.clone(),
+    )
+    .await
+    .map_err(|error| {
+        warn!(
+            "connect_backend_for_request - backend connection failed backend_name = {backend_name} error = {error:?}"
+        );
+        ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... backend unavailable".into(),
+            data: None,
+        }
+    })
+}
+
 /// Apply a backend's header config to the upstream header map.
-///
-/// Order: passthrough (copy named headers from the downstream request) -> add
-/// (inject/override static headers) -> remove (strip named headers).
-///
-/// Protected headers are silently skipped in every phase:
-/// - Gateway-managed: `Host` (set from backend URL before this runs)
-/// - Body-framing: `Content-Length`, `Content-Type` (gateway owns framing)
-/// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`,
-///   `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
-/// - Non-standard hop-by-hop: `Proxy-Connection`
-/// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
-///
-/// ponytail: single-value per name; a repeated downstream header keeps its first value.
 fn apply_header_config(
     headers: &mut HashMap<http::HeaderName, http::HeaderValue>,
     backend: &BackendMCPGateway,
@@ -247,6 +300,7 @@ fn apply_header_config(
 /// - Hop-by-hop (RFC 7230 §6.1): `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade`
 /// - Non-standard hop-by-hop: `Proxy-Connection` (must not cross gateway boundary)
 /// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
+/// - MCP standard computed headers: `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`, `Mcp-Param-*`
 fn is_protected_header(name: &http::HeaderName) -> bool {
     const PROTECTED: &[&str] = &[
         "host",
@@ -270,7 +324,7 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
         "accept",
         "last-event-id",
     ];
-    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p))
+    PROTECTED.iter().any(|&p| name.as_str().eq_ignore_ascii_case(p)) || mcp_standard_headers::is_computed(name)
 }
 
 #[cfg(test)]
@@ -404,6 +458,36 @@ mod tests {
         );
         apply_header_config(&mut headers, &cfg, Some(&ds));
         assert!(headers.is_empty(), "no RMCP-reserved header must reach the upstream config");
+    }
+
+    #[test]
+    fn computed_mcp_headers_cannot_be_passed_through_added_or_removed() {
+        let mut headers = HashMap::new();
+        headers.insert(http::HeaderName::from_static("mcp-method"), http::HeaderValue::from_static("tools/call"));
+        headers.insert(http::HeaderName::from_static("mcp-param-user"), http::HeaderValue::from_static("computed"));
+        let ds = downstream(&[
+            ("Mcp-Method", "wrong/method"),
+            ("Mcp-Name", "wrong-tool"),
+            ("Mcp-Protocol-Version", "2020-01-01"),
+            ("Mcp-Param-User", "wrong-user"),
+        ]);
+        let cfg = backend(
+            &["mcp-method", "mcp-name", "mcp-protocol-version", "mcp-param-user"],
+            &[
+                ("Mcp-Method", "added/method"),
+                ("Mcp-Name", "added-tool"),
+                ("Mcp-Protocol-Version", "2020-01-01"),
+                ("Mcp-Param-User", "added-user"),
+            ],
+            &["mcp-method", "mcp-param-user"],
+        );
+
+        apply_header_config(&mut headers, &cfg, Some(&ds));
+
+        assert_eq!(headers[&http::HeaderName::from_static("mcp-method")], "tools/call");
+        assert_eq!(headers[&http::HeaderName::from_static("mcp-param-user")], "computed");
+        assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-name")));
+        assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-protocol-version")));
     }
 
     #[test]

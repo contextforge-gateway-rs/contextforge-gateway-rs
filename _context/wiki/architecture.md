@@ -14,20 +14,24 @@ TCP/TLS listener
   -> HttpMetricsLayer
   -> TraceLayer
   -> /contextforge-rs nested router
-  -> mcp_origin_layer          → validates Host then Origin       (403 when disallowed)
+  -> mcp_origin_layer          → validates Origin                 (403 when invalid/disallowed)
   -> CORS layer
+  -> mcp_header_limits_layer   → MCP standard header budgets      (431 when exceeded)
   -> virtual_host_id_layer       → inserts VirtualHostId           (400 on path mismatch)
   -> claims_layer                → inserts ContextForgeClaims      (401 on bad/missing JWT)
   -> session_id_layer            → inserts SessionId if present
   -> user_config_store_layer     → inserts UserConfig              (400 no config, 500 store error)
   -> virtual_host_config_layer   → rejects unknown vhost           (404 "Server not found")
-  -> /servers/{virtual_host_name}/mcp RMCP service
+  -> /servers/{virtual_host_name}/mcp RMCP service → validates Host, then dispatches MCP
 ```
 
-`mcp_origin_layer` implements the MCP `2026-07-28` DNS-rebinding guard. It
-checks the optional Host allowlist first, then rejects any present Origin that
-is malformed or not allowlisted; requests without Origin continue. See
-[Security](security.md#mcp-origin-and-host-validation).
+DNS-rebinding validation is split by behavior. `mcp_origin_layer` rejects any
+present Origin that is malformed or not allowlisted; requests without Origin
+continue. RMCP validates the optional Host allowlist at the MCP service
+boundary. See [Security](security.md#mcp-origin-and-host-validation).
+`mcp_header_limits_layer` rejects excessive MCP standard headers before JWT
+validation, config lookup, session creation, backend fanout, or RMCP body
+parsing.
 
 MCP handlers read typed extensions — they never parse headers, paths, or Redis keys directly.
 
@@ -35,8 +39,8 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 
 ```text
 downstream request
-  -> Host/Origin validation → virtual host extraction → JWT validation → session extraction
-  -> user config lookup → MCP handler validation
+  -> Origin validation → MCP header limits → virtual host extraction → JWT validation → session extraction
+  -> user config lookup → RMCP Host validation → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)
 
@@ -96,7 +100,8 @@ Order is invariant: auth/config before backend selection; request plugins before
 | User config | `RedisUserConfigStore` (LRU + Redis) | Request-path consumed; control-plane authored |
 | Request identity / VirtualHostId | Request extensions | One HTTP request |
 | Downstream session id | RMCP + `SessionId` extension | MCP session |
-| Backend RMCP services | `BackendTransports` map | Local process, per principal/backend/session |
+| Backend RMCP services (initialize, list ops) | `BackendTransports` map | Local process, per principal/backend/session |
+| Backend RMCP services (call_tool) | Per-request connection | Single HTTP request |
 | Local user session mapping | `LocalUserSessionStore` | Local LRU, 50k entries, 1 hour |
 | Plugin manager | `CpexRuntimeRegistry` | Process, reloadable |
 
@@ -117,7 +122,7 @@ In multi-runtime mode, the first thread initializes the optional CPEX plugin run
 
 | State | Lock | Contention profile |
 | --- | --- | --- |
-| `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, per-call borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. |
+| `BackendTransports` map | `Arc<tokio::sync::Mutex<HashMap<...>>>` | Locked briefly on initialize insert, list-op borrow, and cleanup. Borrowing clones `Arc<RunningService>` handles so the lock is not held across backend calls. `call_tool` bypasses this map entirely. |
 | Subscription set | `Arc<tokio::sync::Mutex<HashSet<String>>>` | Local `subscribe`/`unsubscribe` only. |
 | User config LRU cache | `Arc<tokio::sync::Mutex<LruCache>>` inside `RedisUserConfigStore` | One lock per config lookup on the hot path; misses add a Redis round trip. |
 | User session LRU cache | Same pattern in `LocalUserSessionStore` | Initialize and delete paths. |
@@ -137,7 +142,8 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 
 - `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
 - List methods fan out to all connected backends concurrently and merge.
-- Targeted calls resolve exactly one backend service handle.
+- Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
+- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow

@@ -9,6 +9,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 suite_dir="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
 conformance_port="${MCP_CONFORMANCE_PORT:-8080}"
+results_dir="${MCP_CONFORMANCE_RESULTS_DIR:-${repo_root}/conformance-results}"
 
 set +e
 (
@@ -18,7 +19,7 @@ set +e
     --url "http://127.0.0.1:${conformance_port}/servers/${MCP_CONFORMANCE_SERVER_ID}/mcp" \
     --requirements "${MCP_CONFORMANCE_SPEC_VERSION}" \
     --expected-failures "${script_dir}/expected-failures.yml" \
-    --output-dir "${repo_root}/conformance-results"
+    --output-dir "${results_dir}"
 )
 runner_status="$?"
 set -e
