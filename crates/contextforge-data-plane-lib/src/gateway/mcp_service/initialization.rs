@@ -4,12 +4,10 @@ use contextforge_data_plane_apis::user_store::BackendMCPGateway;
 use http::request::Parts;
 use rmcp::{
     ClientLifecycleMode, ErrorData, RoleClient, RoleServer, ServiceExt,
-    ClientLifecycleMode, ErrorData, RoleClient, RoleServer, ServiceExt,
     model::{
         ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, InitializeResult, ProtocolVersion,
         ServerCapabilities,
     },
-    service::serve_client_with_lifecycle_and_ct,
     service::serve_client_with_lifecycle_and_ct,
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
