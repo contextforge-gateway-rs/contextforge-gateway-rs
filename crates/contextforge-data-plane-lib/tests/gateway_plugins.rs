@@ -377,44 +377,90 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_reaches_backend_without_session() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = reqwest::Client::new()
-        .post(gateway.gateway_url())
-        .bearer_auth(token(TEST_USER_ID))
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .header(http::header::ACCEPT, "application/json, text/event-stream")
-        .header("MCP-Protocol-Version", "2026-07-28")
-        .header("MCP-Method", "tools/call")
-        .header("MCP-Name", "sum")
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "sum",
-                "arguments": { "a": 1, "b": 2 },
-                "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientInfo": {
-                        "name": "stateless-test-client",
-                        "version": "0.1.0"
-                    },
-                    "io.modelcontextprotocol/clientCapabilities": {}
-                }
-            }
-        }))
-        .send()
-        .await
-        .expect("stateless tool call is sent");
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.expect("stateless tool call succeeds");
+    assert_eq!("3", text(&result));
+}
 
-    let status = response.status();
-    let body = response.text().await.expect("stateless tool response body is read");
-    assert!(status.is_success(), "stateless tool call failed with status {status}: {body}");
-    let messages = sse_data_values(&body);
-    let result = messages
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_tool_error_round_trips() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+    let error = service.call_tool(CallToolRequestParams::new("missing_tool")).await.unwrap_err();
+    let rmcp::service::ServiceError::McpError(error) = error else {
+        panic!("expected backend MCP error, got {error:?}");
+    };
+    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_alias_and_namespaced_tool_names_route() {
+    let gateway_port = support::create_ports(1)[0];
+    let support::ListToolsGatewaySettings { handle, gateway_url, expected_tool_names, .. } =
+        support::create_gateway_with_four_counters(TEST_USER_ID, support::plaintext_config(gateway_port))
+            .await
+            .expect("gateway starts");
+    let service = support::connect_modern_client(
+        &gateway_url,
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+    let alias = expected_tool_names
         .iter()
-        .find(|message| message.get("id").and_then(Value::as_i64) == Some(1))
-        .unwrap_or_else(|| panic!("missing response id 1 in body: {body}"));
-    assert_eq!(Some("3"), result.pointer("/result/content/0/text").and_then(Value::as_str));
+        .find(|name| std::path::Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sum")))
+        .expect("sum alias is advertised");
+    let backend_port = alias
+        .strip_prefix("backend-")
+        .and_then(|name| name.strip_suffix(".sum"))
+        .expect("alias contains the backend port");
+    let namespaced_name = format!("00000000-0000-0000-0000-{backend_port:0>12}-sum");
+    let alias_result = service.call_tool(sum_request(alias, 1, 2)).await.expect("alias routes");
+    let namespaced_result = service.call_tool(sum_request(&namespaced_name, 3, 4)).await.expect("namespace routes");
+    assert_eq!("3", text(&alias_result));
+    assert_eq!("7", text(&namespaced_result));
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stateless_concurrent_progress_calls_remain_request_scoped() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let client = RecordingClient::default();
+    let progress = Arc::clone(&client.progress);
+    let service =
+        support::connect_modern_client(gateway.gateway_url(), support::create_client(TEST_USER_ID), client).await;
+    let first = send_progress_call(&service, "progress_sum").await;
+    let first_progress_token = first.progress_token.clone();
+    let second = send_progress_call(&service, "progress_sum").await;
+    let second_progress_token = second.progress_token.clone();
+    assert_ne!(first_progress_token, second_progress_token);
+    let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        tokio::join!(first.await_response(), second.await_response())
+    })
+    .await
+    .expect("both stateless calls complete");
+    let ServerResult::CallToolResult(first) = first.expect("first call succeeds") else {
+        panic!("expected first tool result");
+    };
+    let ServerResult::CallToolResult(second) = second.expect("second call succeeds") else {
+        panic!("expected second tool result");
+    };
+    assert_eq!("completed 4 packages", text(&first));
+    assert_eq!("completed 4 packages", text(&second));
+    wait_for_event_count(&progress, 8).await;
+    let progress = progress.lock().expect("progress lock poisoned");
+    assert_eq!(4, progress.iter().filter(|event| event.progress_token == first_progress_token).count());
+    assert_eq!(4, progress.iter().filter(|event| event.progress_token == second_progress_token).count());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
