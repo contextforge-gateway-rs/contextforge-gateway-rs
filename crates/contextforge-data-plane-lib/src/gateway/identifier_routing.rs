@@ -22,7 +22,7 @@ pub(crate) fn prefixed_name(backend_name: &str, rest: &str) -> String {
 
 /// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
 /// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
-pub(super) fn resolve_tool_route<'a, N: AsRef<str>>(
+pub(crate) fn resolve_tool_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],

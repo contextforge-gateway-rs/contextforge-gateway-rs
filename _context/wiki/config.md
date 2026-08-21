@@ -130,6 +130,7 @@ BackendMCPGateway
   remove_headers: Vec<String>                     ← stripped after add
   tool_name_aliases: HashMap<String, String>      ← downstream_alias → upstream_original
   allowed_tool_names: Vec<String>                 ← model exists, NOT currently enforced
+  tool_schemas: HashMap<String, JsonObject>        ← upstream_original → input schema; published per backend
   allowed_resource_names: Vec<String>             ← model exists, NOT currently enforced
   allowed_prompt_names: Vec<String>               ← model exists, NOT currently enforced
 ```

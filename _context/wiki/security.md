@@ -95,17 +95,14 @@ For stateless requests, the RMCP service requires `MCP-Protocol-Version` and
 the matching per-request protocol metadata before handler dispatch. RMCP also
 validates `Mcp-Method` and `Mcp-Name` against the JSON-RPC body. Computed MCP
 headers are never accepted through backend pass-through/add/remove policy. The
-stateless tool client discovers schemas on its per-request backend connection,
-so RMCP regenerates annotated `Mcp-Param-*` values from the final routed tool
-arguments.
-
-Tenant-safe inbound `Mcp-Param-*` value validation is not yet enabled. RMCP
-3.1.x resolves server tool schemas by bare tool name before request extensions
-are available and caches that result globally inside the Streamable HTTP
-service. A gateway `get_tool(name)` implementation would therefore allow one
-subject or virtual host to select another tenant's schema. This requires a
-request-aware RMCP schema resolver keyed by subject, virtual host, and exposed
-tool name; do not add a bare-name cache as a workaround.
+control plane publishes each visible tool schema inside the subject-, virtual-
+host-, and backend-scoped Redis configuration. The innermost authenticated
+middleware resolves that request-scoped schema and returns HTTP `400` with
+JSON-RPC `-32020` when an annotated parameter header is missing or mismatched.
+After plugin rewrites, a per-request upstream HTTP client decorator derives
+`Mcp-Param-*` from the final arguments and the same backend-scoped schema. No
+schema is cached globally by bare tool name, and the dataplane does not call
+backend `tools/list` as part of `tools/call`.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

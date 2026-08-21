@@ -380,6 +380,7 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                         add_headers: HashMap::new(),
                         remove_headers: Vec::new(),
                         allowed_tool_names: Vec::new(),
+                        tool_schemas: HashMap::new(),
                         tool_name_aliases: HashMap::new(),
                         allowed_resource_names: Vec::new(),
                         allowed_prompt_names: Vec::new(),

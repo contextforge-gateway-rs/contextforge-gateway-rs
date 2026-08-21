@@ -42,21 +42,11 @@ pub(super) async fn call_tool(
     } else {
         ToolPreCallResult::unchanged()
     };
-    let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
-    // The per-request RMCP client starts with an empty tool-schema cache. Prime
-    // that same connection so RMCP can derive Mcp-Param-* from x-mcp-header
-    // annotations after gateway routing and plugin argument rewrites.
-    if let Err(error) = backend_service.peer().list_all_tools().await {
-        if let Err(close_error) = backend_service.close().await {
-            warn!(
-                "call_tool: backend cleanup after schema discovery failed backend_name = {service_name} error = {close_error:?}"
-            );
-        }
-        return Err(backend_forward_error("list_tools", &service_name, &error));
-    }
     let post_state = pre_result.state;
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
+    let mut backend_service =
+        connect_backend_for_request(mcp_service, (&backend_name, backend), Some(&tool_name), &cx).await?;
 
     let progress_token = cx.meta.get_progress_token();
     let handle = backend_service

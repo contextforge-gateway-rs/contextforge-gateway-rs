@@ -2,6 +2,7 @@ mod support;
 
 use std::sync::{Arc, Mutex as StdMutex};
 
+use base64::{Engine, prelude::BASE64_STANDARD};
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use cpex::cpex_core::cmf::Role;
 use cpex::cpex_core::config::CpexConfig;
@@ -113,6 +114,43 @@ fn raw_mcp_request(
         request = request.header("Mcp-Session-Id", session_id).header("MCP-Protocol-Version", "2025-11-25");
     }
     request
+}
+
+fn raw_stateless_tool_call(gateway: &RunningGateway, tool_name: &str, arguments: &Value) -> reqwest::RequestBuilder {
+    support::create_client(TEST_USER_ID)
+        .post(gateway.gateway_url())
+        .header(http::header::ACCEPT, "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", "2026-07-28")
+        .header("MCP-Method", "tools/call")
+        .header("MCP-Name", tool_name)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments,
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "strict-metadata-test",
+                        "version": "1.0.0"
+                    },
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
+            }
+        }))
+}
+
+async fn successful_tool_text(response: reqwest::Response) -> String {
+    assert_eq!(http::StatusCode::OK, response.status());
+    let body = response.text().await.expect("gateway response body");
+    let messages = sse_data_values(&body);
+    messages
+        .iter()
+        .find_map(|message| message["result"]["content"][0]["text"].as_str())
+        .expect("tool response contains text")
+        .to_owned()
 }
 
 fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Value {
@@ -375,51 +413,46 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_primes_rmcp_schema_before_forwarding() {
+async fn stateless_tool_call_uses_published_schema_without_backend_listing() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
-        gateway.gateway_url(),
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
-    )
-    .await;
-    let result = service.call_tool(sum_request("sum", 1, 2)).await.expect("stateless tool call succeeds");
-    assert_eq!("3", text(&result));
+    let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
+        .header("Mcp-Param-A", "1")
+        .header("Mcp-Param-B", "2")
+        .send()
+        .await
+        .expect("stateless tool call reaches gateway");
+
+    assert_eq!("3", successful_tool_text(response).await);
+    assert_eq!(
+        0,
+        gateway.backend_state.list_tool_calls.load(std::sync::atomic::Ordering::Relaxed),
+        "the dataplane must not call tools/list before forwarding"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_lets_rmcp_encode_unsafe_parameter_headers() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
-        gateway.gateway_url(),
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
-    )
-    .await;
     let unsafe_value = " leading snowman ☃";
-    let request = CallToolRequestParams::new("reflect_text")
-        .with_arguments(Map::from_iter([("text".to_owned(), Value::from(unsafe_value))]));
+    let encoded = format!("=?base64?{}?=", BASE64_STANDARD.encode(unsafe_value));
+    let response = raw_stateless_tool_call(&gateway, "reflect_text", &json!({ "text": unsafe_value }))
+        .header("Mcp-Param-Text", encoded)
+        .send()
+        .await
+        .expect("stateless tool call reaches gateway");
 
-    let result = service.call_tool(request).await.expect("RMCP encodes the annotated argument");
-
-    assert_eq!(unsafe_value, text(&result));
+    assert_eq!(unsafe_value, successful_tool_text(response).await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_lets_rmcp_omit_null_parameter_headers() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
-        gateway.gateway_url(),
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
-    )
-    .await;
-    let request =
-        CallToolRequestParams::new("optional_text").with_arguments(Map::from_iter([("text".to_owned(), Value::Null)]));
+    let response = raw_stateless_tool_call(&gateway, "optional_text", &json!({ "text": null }))
+        .send()
+        .await
+        .expect("stateless tool call reaches gateway");
 
-    let result = service.call_tool(request).await.expect("RMCP omits the annotated null argument");
-
-    assert_eq!("accepted", text(&result));
+    assert_eq!("accepted", successful_tool_text(response).await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -447,6 +480,22 @@ async fn stateless_tool_call_without_protocol_version_header_is_rejected_before_
                 }
             }
         }))
+        .send()
+        .await
+        .expect("request reaches gateway");
+
+    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
+    let body: serde_json::Value = response.json().await.expect("gateway returns a JSON-RPC error");
+    assert_eq!(rmcp::model::ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
+    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected_before_backend() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
+        .header("Mcp-Param-A", "9")
+        .header("Mcp-Param-B", "2")
         .send()
         .await
         .expect("request reaches gateway");
