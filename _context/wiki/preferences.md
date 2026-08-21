@@ -50,14 +50,15 @@ CI additionally runs `cargo shear --check-test-targets --deny-warnings --locked`
 - The dataplane is pure routing logic. **No IAM, UI, or metrics-storage concerns.**
 - Config access goes through `UserConfigStore` only — never push Redis details into routing code.
 - The backend prefix naming contract must not change without updating merge logic, split logic, and tests.
-- Legacy SSE transport and old `initialize`/session behavior are being **removed** — do not build on temporary shims.
+- Legacy SSE transport and stateful session behavior are being **removed**. `initialize` remains supported as a stateless compatibility method; do not use it to create affinity, persist client state, or retain backend transports between requests.
 - Prefer the right architecture over backward compatibility; this project has no external users yet.
 
 ## Protocol target
 
-- All new behavior targets MCP protocol version **`2026-07-28`** over **Streamable HTTP**.
-- New tests and examples use `server/discover`, per-request client metadata, and the `2026-07-28` version.
-- Do not add new compatibility for older MCP protocol versions.
+- The dataplane target supports MCP **`2026-07-28`** and **`2025-11-25`** over **Streamable HTTP**.
+- Every request is independent for both versions. Do not require `Mcp-Session-Id`, session affinity, or a previously retained backend transport.
+- Retain `initialize` for clients that use it, but generate its response from effective configuration and do not treat it as session establishment. `2026-07-28` tests and examples should continue to exercise `server/discover` and per-request client metadata.
+- Protocol-sensitive tests cover both same-version paths and the best-effort cross-version paths (`2026-07-28` → `2025-11-25` and the reverse). Do not add SSE or versions earlier than `2025-11-25` without a separate architecture decision.
 
 ## AI interaction preferences
 

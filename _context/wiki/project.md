@@ -54,7 +54,7 @@ flowchart LR
 ## Goals and objectives
 
 - Provide a **production-grade, low-latency routing layer** between MCP clients and backend MCP servers.
-- Target **MCP protocol version `2026-07-28`** over Streamable HTTP as the sole downstream contract.
+- Support MCP `2026-07-28` and `2025-11-25` over Streamable HTTP as stateless downstream contracts.
 - Enforce a clean **dataplane/control-plane boundary** — no IAM, UI, or metrics storage logic in this repo.
 - Keep config access behind the **`UserConfigStore` abstraction** (backed by Redis/MessagePack).
 - Remain in the right architectural shape during early development, prioritising correctness over backward compatibility.
@@ -63,7 +63,7 @@ flowchart LR
 
 - **Platform teams** — deploy and operate the gateway as infrastructure.
 - **AI application developers** — use the gateway as the MCP proxy layer for their applications.
-- **Internal contributors** — engineers evolving the dataplane toward the `2026-07-28` protocol target.
+- **Internal contributors** — engineers evolving the dataplane toward stateless `2026-07-28` and `2025-11-25` protocol support.
 
 ## Key modules and architecture
 
@@ -94,9 +94,9 @@ Architecture context lives in the wiki. Key pages:
 
 ## Active work (near-term)
 
-- **Protocol migration**: replacing all remaining legacy MCP paths (SSE transport, `initialize`/session shims) with `2026-07-28` equivalents over Streamable HTTP.
-- Legacy SSE transport and old session behavior are **being removed**, not maintained. Do not build new behavior on temporary shims.
-- New tests and examples should use `server/discover`, per-request client metadata, and protocol version `2026-07-28`.
+- **Protocol migration**: support same-version `2026-07-28` and `2025-11-25` paths over Streamable HTTP, provide best-effort translation in either cross-version direction, and replace stateful session paths with request-scoped handling.
+- Legacy SSE transport and session affinity are **being removed**. `initialize` is retained as a stateless compatibility request and must not create persistent dataplane or backend session state.
+- Protocol-sensitive tests must cover the two direct and two best-effort cross-version combinations. Modern examples should continue to use `server/discover` and per-request client metadata; compatibility examples may use `initialize` without relying on later session reuse.
 
 ## Control-Plane Integration Contract
 
@@ -105,7 +105,7 @@ Architecture context lives in the wiki. Key pages:
 | Agreement | Value today |
 | --- | --- |
 | Client-facing route | `/servers/{virtual_host_id}/mcp`. Front door rewrites modern MCP `2026-07-28` Streamable HTTP traffic to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the dataplane. |
-| Protocol compatibility | Dataplane target is MCP `2026-07-28` only. Control plane serves older versions, legacy session init, and SSE on its own routes. |
+| Protocol compatibility | Today the dataplane route accepts MCP `2026-07-28`; the control plane serves `2025-11-25`, session-based initialization, and SSE on its own routes. The target moves both supported Streamable HTTP versions to stateless dataplane handling, with cross-version adaptation on a best-effort basis. |
 | Unknown virtual host | `404` with body `{"detail":"Server not found"}`, matching the control-plane response shape. |
 | Token issuer and audience | `iss = mcpgateway`, `aud = mcpgateway-api`. |
 | Claims shape | `sub`, `jti`, `iss`, `aud`, `exp`, and `user` required. `token_use`, `iat`, `teams`, `scopes`, and `user.full_name` optional. Dataplane routes on `sub` only. |

@@ -25,7 +25,7 @@ then follow only the links that are relevant.
 
 - **Repo**: `contextforge-data-plane` — the Rust dataplane for ContextForge.
 - **Core invariant**: this crate is pure routing logic. No IAM, UI, or metrics storage.
-- **Protocol target**: MCP `2026-07-28` over Streamable HTTP. Legacy SSE paths are being removed.
+- **Protocol target**: MCP `2026-07-28` and `2025-11-25` over Streamable HTTP. Both use stateless request handling; `initialize` remains supported but does not establish dataplane session state. Legacy SSE paths are being removed.
 - **Status convention**: project, architecture, routing, and operations pages
   describe the current implementation. The page under **Upcoming** describes
   the tentative ContextForge 2.0 target and migration roadmap.

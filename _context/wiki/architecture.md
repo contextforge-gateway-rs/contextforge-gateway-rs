@@ -234,7 +234,7 @@ Changing a load-bearing choice requires updating more than one file:
 
 | Change | Required follow-through |
 | --- | --- |
-| Downstream MCP version | Coordinate with control plane; update protocol tests and examples; keep legacy traffic on control-plane routes. |
+| Downstream MCP version | Coordinate with the control plane and update the `2026-07-28`/`2025-11-25` compatibility matrix, protocol tests, examples, and front-door routing. During migration the current legacy route split may remain, but the target sends both supported Streamable HTTP versions to the stateless Rust dataplane. |
 | Backend namespace / prefix contract | Update merge logic, split logic, tests, docs, and control-plane integration if client-facing surface moves. |
 | Session state moves external | Update `SessionManager`, cleanup behavior, load-balancing docs, and failure-mode tests. |
 | Config transport changes | Keep `UserConfigStore` as the boundary; update adapter tests. |

@@ -19,7 +19,7 @@ cargo nextest run --locked --workspace
 
 Use `cargo test` when nextest is unavailable. For wiki changes, also run `mdbook build _context/wiki` and `mdbook test _context/wiki`.
 
-Protocol tests and fixtures should target MCP `2026-07-28`, use `server/discover`, and include the required per-request client metadata. Do not add new dataplane coverage for older protocol versions, legacy session initialization, or SSE; those paths belong in control-plane tests. Existing legacy-shaped tests are migration inventory and should be replaced as the modern implementation lands.
+Protocol-sensitive tests and fixtures must cover MCP `2026-07-28` and `2025-11-25` in all four incoming-client/selected-backend combinations. The same-version paths are supported directly; the two cross-version paths are best effort and tests must cover both successful adaptation and explicit failure for semantics that cannot be translated without state. Every case must prove request independence: no required `Mcp-Session-Id`, session affinity, or retained backend transport. Keep `2026-07-28` coverage for `server/discover` and required per-request client metadata, and retain `initialize` coverage as a stateless compatibility request. SSE remains outside the dataplane contract.
 
 ## In-Repo Integration Tests
 
