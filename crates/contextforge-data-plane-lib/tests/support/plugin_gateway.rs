@@ -105,11 +105,19 @@ fn optional_text_tool() -> Tool {
     Tool::new("optional_text", "Accept optional text", input_schema)
 }
 
+fn tools() -> Vec<Tool> {
+    vec![
+        sum_tool(),
+        reflect_text_tool(),
+        optional_text_tool(),
+        Tool::new("progress_sum", "Report progress", Map::new()),
+        Tool::new("progress_counter_tokens", "Report progress with generated tokens", Map::new()),
+        Tool::new("wait_for_cancellation", "Wait for cancellation", Map::new()),
+    ]
+}
+
 fn published_tool_schemas() -> HashMap<String, Map<String, Value>> {
-    [sum_tool(), reflect_text_tool(), optional_text_tool()]
-        .into_iter()
-        .map(|tool| (tool.name.to_string(), tool.input_schema.as_ref().clone()))
-        .collect()
+    tools().into_iter().map(|tool| (tool.name.to_string(), tool.input_schema.as_ref().clone())).collect()
 }
 
 #[allow(clippy::unused_async_trait_impl)]
@@ -162,16 +170,11 @@ impl ServerHandler for TestBackend {
         _cx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         self.state.list_tool_calls.fetch_add(1, Ordering::Relaxed);
-        Ok(ListToolsResult::with_all_items(vec![sum_tool(), reflect_text_tool(), optional_text_tool()]))
+        Ok(ListToolsResult::with_all_items(tools()))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        match name {
-            "sum" => Some(sum_tool()),
-            "reflect_text" => Some(reflect_text_tool()),
-            "optional_text" => Some(optional_text_tool()),
-            _ => None,
-        }
+        tools().into_iter().find(|tool| tool.name == name)
     }
 
     async fn call_tool(

@@ -157,7 +157,7 @@ pub(super) async fn initialize(
 pub(super) async fn connect_backend_for_request(
     mcp_service: &McpService,
     backend: (&str, &BackendMCPGateway),
-    tool_name: Option<&str>,
+    tool_schema: Option<&JsonObject>,
     cx: &RequestContext<RoleServer>,
 ) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData> {
     let (backend_name, backend) = backend;
@@ -178,7 +178,7 @@ pub(super) async fn connect_backend_for_request(
     apply_header_config(&mut headers, backend, downstream_headers);
     crate::telemetry::inject_current_context(&mut headers);
 
-    let tool_schema = tool_name.and_then(|tool_name| backend.tool_schemas.get(tool_name)).cloned().map(Arc::new);
+    let tool_schema = tool_schema.cloned().map(Arc::new);
     let config = StreamableHttpClientTransportConfig::with_uri(backend.url.to_string()).custom_headers(headers);
     let client = McpParamHttpClient::new(mcp_service.http_client.clone(), tool_schema);
     let transport = StreamableHttpClientTransport::with_client(client, config);

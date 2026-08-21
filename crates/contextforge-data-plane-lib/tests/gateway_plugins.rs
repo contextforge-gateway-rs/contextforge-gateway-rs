@@ -507,19 +507,15 @@ async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected_before
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_error_round_trips() {
+async fn stateless_tool_call_without_published_schema_is_rejected_before_backend() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
-        gateway.gateway_url(),
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
-    )
-    .await;
-    let error = service.call_tool(CallToolRequestParams::new("missing_tool")).await.unwrap_err();
-    let rmcp::service::ServiceError::McpError(error) = error else {
-        panic!("expected backend MCP error, got {error:?}");
-    };
-    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+    let response =
+        raw_stateless_tool_call(&gateway, "missing_tool", &json!({})).send().await.expect("request reaches gateway");
+
+    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
+    let body: serde_json::Value = response.json().await.expect("gateway returns a JSON-RPC error");
+    assert_eq!(ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
+    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

@@ -98,7 +98,8 @@ headers are never accepted through backend pass-through/add/remove policy. The
 control plane publishes each visible tool schema inside the subject-, virtual-
 host-, and backend-scoped Redis configuration. The innermost authenticated
 middleware resolves that request-scoped schema and returns HTTP `400` with
-JSON-RPC `-32020` when an annotated parameter header is missing or mismatched.
+JSON-RPC `-32020` when the routed tool schema is absent or an annotated
+parameter header is missing or mismatched.
 After plugin rewrites, a per-request upstream HTTP client decorator derives
 `Mcp-Param-*` from the final arguments and the same backend-scoped schema. No
 schema is cached globally by bare tool name, and the dataplane does not call

@@ -47,10 +47,14 @@ fn validation_error(parts: &http::request::Parts, body: &[u8]) -> Option<Respons
     let virtual_host = user_config.virtual_hosts.get(virtual_host_id.value())?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
     let (backend_name, tool_name) = resolve_tool_route(virtual_host, &tool_call.params.name, &backend_names)?;
-    let tool_schema = virtual_host.backends.get(backend_name)?.tool_schemas.get(tool_name)?;
-    let reason =
-        mcp_standard_headers::validate_tool_params(&parts.headers, tool_call.params.arguments.as_ref(), tool_schema)
-            .err()?;
+    let backend = virtual_host.backends.get(backend_name)?;
+    let reason = match backend.tool_schemas.get(tool_name) {
+        Some(tool_schema) => {
+            mcp_standard_headers::validate_tool_params(&parts.headers, tool_call.params.arguments.as_ref(), tool_schema)
+                .err()?
+        },
+        None => format!("Missing published schema for tool '{tool_name}'"),
+    };
 
     let error = JsonRpcError::new(Some(request.id), ErrorData::header_mismatch(reason, None));
     let body = serde_json::to_vec(&error).expect("JSON-RPC header mismatch serializes");
