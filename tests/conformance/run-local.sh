@@ -78,10 +78,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [ "${MCP_CONFORMANCE_SKIP_PULL:-false}" != "true" ]; then
-  MCP_CONFORMANCE_TOKEN=pull-only \
-    docker compose -f "${compose_file}" pull redis fixture-proxy control-plane nginx
-fi
+MCP_CONFORMANCE_TOKEN=pull-only \
+  docker compose -f "${compose_file}" pull redis fixture-proxy control-plane nginx
 echo "Starting the fixture and control plane."
 MCP_CONFORMANCE_TOKEN=bootstrap-only \
   "${script_dir}/start-fixture-and-control-plane.sh"

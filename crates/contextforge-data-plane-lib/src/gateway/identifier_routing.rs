@@ -152,6 +152,7 @@ mod tests {
                     "url": "http://upstream:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats", "echo"],
+                    "tool_schemas": {},
                     "tool_name_aliases": {
                         "Public.Tool": "get_stats",
                         "Echo_Tool": "echo"
@@ -183,6 +184,7 @@ mod tests {
                     "url": "http://upstream:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats"],
+                    "tool_schemas": {},
                     "allowed_resource_names": [],
                     "allowed_prompt_names": []
                 },
@@ -191,6 +193,7 @@ mod tests {
                     "url": "http://other:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": [],
+                    "tool_schemas": {},
                     "allowed_resource_names": [],
                     "allowed_prompt_names": []
                 }

@@ -57,7 +57,6 @@ export MCP_CONFORMANCE_CONTEXT='{
 "${script_dir}/client-under-test.sh" "http://localhost:43123/mcp"
 
 grep --fixed-strings --quiet -- 'http://host.docker.internal:43123/mcp' "${docker_args}"
-grep --fixed-strings --quiet -- '["first","second"]' "${docker_args}"
 grep --fixed-strings --quiet -- 'Mcp-Param-Region: west' "${curl_args}"
 grep --fixed-strings --quiet -- 'Mcp-Param-EmptyVal;' "${curl_args}"
 test "$(wc -l < "${curl_bodies}" | tr -d '[:space:]')" -eq 2

@@ -431,7 +431,7 @@ async fn stateless_tool_call_uses_published_schema_without_backend_listing() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_lets_rmcp_encode_unsafe_parameter_headers() {
+async fn stateless_tool_call_encodes_unsafe_parameter_headers() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let unsafe_value = " leading snowman ☃";
     let encoded = format!("=?base64?{}?=", BASE64_STANDARD.encode(unsafe_value));
@@ -445,7 +445,7 @@ async fn stateless_tool_call_lets_rmcp_encode_unsafe_parameter_headers() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_lets_rmcp_omit_null_parameter_headers() {
+async fn stateless_tool_call_omits_null_parameter_headers() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let response = raw_stateless_tool_call(&gateway, "optional_text", &json!({ "text": null }))
         .send()
@@ -716,7 +716,7 @@ async fn secrets_detection_pre_hook_respects_field_allowlist() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
+async fn pre_hook_rewrites_arguments_and_derived_parameter_headers_without_rerouting_tool() {
     let plugin = Arc::new(TestPlugin::new("pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
     let observations = plugin.observations();
     let runtime = runtime_with_pre(plugin).await;
@@ -725,6 +725,9 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
     let service = gateway.connect(TEST_USER_ID).await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
+    // The backend RMCP service validates Mcp-Param-A/B against its tool schema
+    // before invoking the handler, so success proves the derived headers use
+    // the post-plugin arguments.
     assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), text(&result));
     let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
     assert_eq!("sum", backend_calls[0].tool_name);

@@ -132,7 +132,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("subject")
     parser.add_argument("virtual_host_id")
     parser.add_argument("backend_url")
-    parser.add_argument("tool_names_json")
     parser.add_argument("tool_calls_json")
     return parser.parse_args()
 
@@ -147,13 +146,6 @@ def main() -> None:
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
         raise SystemExit("backend_url must be an absolute HTTP(S) URL")
 
-    tool_names = json.loads(args.tool_names_json)
-    if (
-        not isinstance(tool_names, list)
-        or not tool_names
-        or not all(isinstance(name, str) and name for name in tool_names)
-    ):
-        raise SystemExit("tool_names_json must be a non-empty JSON string array")
     tool_calls = json.loads(args.tool_calls_json)
     if (
         not isinstance(tool_calls, list)
@@ -161,11 +153,13 @@ def main() -> None:
         or not all(
             isinstance(tool_call, dict)
             and isinstance(tool_call.get("name"), str)
+            and bool(tool_call["name"])
             and isinstance(tool_call.get("arguments"), dict)
             for tool_call in tool_calls
         )
     ):
         raise SystemExit("tool_calls_json must be a non-empty tool-call array")
+    tool_names = sorted({tool_call["name"] for tool_call in tool_calls})
 
     backend_name = "conformance-backend"
     tool_schemas = fetch_tool_schemas(args.backend_url, tool_names)

@@ -42,14 +42,12 @@ case "${MCP_CONFORMANCE_SCENARIO}" in
     ;;
 esac
 
-tool_names="$(jq --exit-status --compact-output '[.[].name] | unique' <<< "${tool_calls}")"
 prepared_tool_calls="$(docker compose -f "${compose_file}" run --rm --no-deps \
   --entrypoint python3 control-plane \
   /opt/contextforge-conformance/write_client_config.py \
   "${MCP_CONFORMANCE_SUBJECT}" \
   "${virtual_host_id}" \
   "${backend_url}" \
-  "${tool_names}" \
   "${tool_calls}")"
 
 endpoint="http://127.0.0.1:${conformance_port}/servers/${virtual_host_id}/mcp"

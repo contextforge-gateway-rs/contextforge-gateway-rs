@@ -113,8 +113,7 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": true
-          },
-          "default": {}
+          }
         }
       },
       "required": [
@@ -123,7 +122,8 @@
         "passthrough_headers",
         "allowed_resource_names",
         "allowed_prompt_names",
-        "allowed_tool_names"
+        "allowed_tool_names",
+        "tool_schemas"
       ]
     }
   }
