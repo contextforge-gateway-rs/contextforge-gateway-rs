@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Downstream client | Untrusted. Every request must present a valid bearer JWT; session id alone grants nothing without matching principal state. | `claims_layer`, validators, and principal-scoped backend session keys. |
 | JWT verification material | Trust anchor. The RSA public key or HMAC secret in process config decides which tokens are accepted. | Process config; loaded at startup. |
-| Redis | Control-plane trust boundary. Whoever can write Redis controls routing (`UserConfig`) and, when runtime plugins are enabled, which registered hooks execute (`ContextForgeGatewayRuntimePluginConfig`). | Redis TLS/mTLS connection modes; the dataplane never writes user config in production builds. |
+| Redis | Control-plane trust boundary. Whoever can write Redis controls routing (`UserConfig`) and, when runtime plugins are enabled, which registered hooks execute (`ContextForgeGatewayRuntimePluginConfig`). | Redis TLS/mTLS connection modes; the external dataplane never writes user config in production builds. |
 | Backend MCP servers | Trusted per configured URL. The gateway forwards caller traffic to them and merges their responses. | `UserConfig` backend URLs plus the upstream connection mode. |
 | Plugins | Fully trusted code. Hooks run in-process and can read and mutate tool payloads. | Compiled-in factories only; Redis config activates registered factories, it cannot load new code. |
 
@@ -14,14 +14,15 @@
 
 | Plane | Current responsibility |
 | --- | --- |
-| Control plane | Owns login/SSO, users, teams, IAM, API-token issuance and revocation, and legacy routes. `dataplane_publisher.py` writes visibility-filtered `UserConfig` snapshots to Redis by user email. |
-| Data plane | Has no IAM or user database. It verifies modern MCP bearer JWTs locally, loads `UserConfig` by `sub`, and requires the requested virtual host to exist. No runtime control-plane call occurs. |
+| ContextForge control plane | Owns login/SSO, users, teams, IAM, API-token issuance and revocation, and external-dataplane configuration publication. `dataplane_publisher.py` writes visibility-filtered `UserConfig` snapshots to Redis by user email. |
+| ContextForge built-in dataplane | Owns the Python repository's MCP request routes, including old/new protocol and stateful/stateless behavior. |
+| ContextForge external dataplane | Has no IAM or user database. It currently verifies modern MCP bearer JWTs locally, loads `UserConfig` by `sub`, and requires the requested virtual host to exist. No runtime control-plane call occurs. |
 
-Request path: control-plane API token (`sub` = email) → Origin check →
+External-dataplane request path: control-plane API token (`sub` = email) → Origin check →
 `claims_layer` → Redis config lookup → virtual-host check → RMCP Host check →
 MCP routing.
 Browser/login session tokens are management-plane credentials, not the
-dataplane contract.
+external-dataplane contract.
 
 - JWT validation accepts `RS256/384/512` or `HS256/384/512` and requires a valid
   signature, `iss=mcpgateway`, `aud=mcpgateway-api`, and `exp`. `jti` and `user`
@@ -35,8 +36,8 @@ dataplane contract.
   target requires principal- and isolation-bound snapshots, per-request scope
   and compiled-RBAC enforcement, and default denial for missing or unauthorized
   entries. See [Target Authorization Invariants](mcp-capability-allocation.md#target-authorization-invariants).
-- Dataplane requests do not consult the control-plane token blocklist. Revoked
-  tokens pass JWT validation until `exp` or signing-key rotation/restart.
+- External-dataplane requests do not consult the control-plane token blocklist.
+  Revoked tokens pass JWT validation until `exp` or signing-key rotation/restart.
   Removing a subject's config eventually blocks all its tokens after publisher
   and cache expiry.
 

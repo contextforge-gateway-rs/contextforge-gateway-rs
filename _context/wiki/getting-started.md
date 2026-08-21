@@ -4,7 +4,7 @@
 
 ```bash
 make docker-prod    # build contextforge-data-plane:latest from docker/Dockerfile
-make compose-up    # start nginx, control-plane, redis, postgres, dataplane, fast_time_server
+make compose-up    # start nginx, Python control/built-in components, Redis, Postgres, external dataplane, fast_time_server
 ```
 
 Wait for `register_fast_time` to finish, then allow ~60s config propagation:
@@ -20,14 +20,16 @@ docker compose -f docker/docker-compose.yml logs -f register_fast_time
 | Bearer token | `GET http://localhost:8080/contextforge-rs/admin/tokens/admin@example.com` |
 | fast_time_server virtual host id | `b8e3f1a2c4d5e6f7a1b2c3d4e5f6a7b8` |
 
-> **Critical**: `/contextforge-rs` prefix → dataplane. Without it → control-plane (you'll get `{"detail":"..."}` from mcpgateway, not a dataplane response).
+> **Critical**: `/contextforge-rs` prefix → ContextForge external dataplane.
+> Without it, MCP routes reach the ContextForge built-in dataplane (you'll get
+> `{"detail":"..."}` from mcpgateway, not an external-dataplane response).
 
 Teardown: `make compose-down` (stops containers; volumes kept).
 
 ## cf-integration Harness (full end-to-end)
 
 ```bash
-scripts/cf-integration.sh up        # checkout control-plane, pull dataplane image, start full stack
+scripts/cf-integration.sh up        # checkout Python control/built-in repo, pull external-dataplane image, start full stack
 scripts/cf-integration.sh probe     # smoke: 401 check → initialize → tools/list → tools/call
 scripts/cf-integration.sh test-all  # all lanes: live-mcp, live-rbac, live-protocol
 scripts/cf-integration.sh down

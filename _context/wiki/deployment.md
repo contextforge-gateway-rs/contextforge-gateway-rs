@@ -7,7 +7,7 @@
 
 ## Checklist
 
-1. Front door routes only `/contextforge-rs` to the dataplane.
+1. Front door routes only `/contextforge-rs` to the ContextForge external dataplane.
 2. JWT verification key/secret matches the control plane's signing material; clients use control-plane API tokens whose `sub` matches the published user-config key.
 3. Redis reachable; TLS/mTLS across trust zones; write access restricted to the control plane; `DATAPLANE_PUBLISHER=true` on the control plane.
 4. Upstream connection mode matches backend URL schemes.
@@ -23,8 +23,9 @@
 ## nginx Front-Door Routing
 
 Reference `docker/nginx.conf` split:
-- `location ^~ /contextforge-rs` → proxies to the gateway.
-- All other traffic (UI, management, SSE, legacy MCP) → control-plane.
+- `location ^~ /contextforge-rs` → proxies to the ContextForge external dataplane.
+- UI and management traffic → ContextForge control plane.
+- Other MCP routes, including stateful and legacy/SSE compatibility routes → ContextForge built-in dataplane.
 - Upstream retries on `error timeout http_502/503/504`: 2 tries, 10-second window. Non-idempotent MCP `POST` bodies are not re-sent after they reached an upstream — only connection-stage failures retry.
 
 ## Session Affinity And Failover

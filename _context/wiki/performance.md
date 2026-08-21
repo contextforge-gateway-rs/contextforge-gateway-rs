@@ -2,12 +2,12 @@
 
 ## Two Load Paths
 
-- **Dataplane-only:** `contextforge-load-test` measures the Rust dataplane in isolation.
-- **Full-stack:** `cf-integration` harness measures the full nginx → control-plane → dataplane path with Locust.
+- **External-dataplane-only:** `contextforge-load-test` measures the ContextForge external dataplane in isolation.
+- **Full-stack:** `cf-integration` measures the nginx → external dataplane → backend request path with Locust while the ContextForge control plane publishes configuration.
 
 Use the first to profile gateway changes; use the second to measure what users see.
 
-## Dataplane-Only (Goose)
+## External-Dataplane-Only (Goose)
 
 `crates/contextforge-load-test` is a [Goose](https://book.goose.rs/)-based driver that speaks full streamable HTTP MCP. Start the local stack and seed user config first (see [getting-started.md](getting-started.md)), then:
 
@@ -51,9 +51,11 @@ Restore both to `60` before measuring throughput — fast publish + per-request 
 | `CF_DATAPLANE_PUBLISHER_INTERVAL_SECONDS` | `2` (fast config publish) | `60` (upstream default) |
 | `CF_DATAPLANE_USER_CONFIG_CACHE_EXPIRY_SECONDS` | `0` (cache disabled) | `60` (upstream default) |
 
-## Control-Plane Baseline
+## Built-In-Dataplane Baseline
 
-Compare against the stack without the dataplane:
+Compare against the stock Python repository, where MCP traffic uses the
+ContextForge built-in dataplane and the ContextForge external dataplane is
+absent:
 
 ```bash
 scripts/cf-integration.sh down                # free shared ports

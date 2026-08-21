@@ -4,7 +4,7 @@
 
 # The Project
 
-- [What is ContextForge Data Plane?](project.md)
+- [What is the ContextForge External Dataplane?](project.md)
 - [Getting Started](getting-started.md)
 
 # Architecture
