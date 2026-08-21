@@ -143,7 +143,7 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
 - List methods fan out to all connected backends concurrently and merge.
 - Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
-- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning.
+- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, lists the backend's tools on that same connection so RMCP can cache `x-mcp-header` annotations, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning. RMCP derives the upstream `Mcp-Param-*` headers from the final routed arguments rather than forwarding downstream computed headers.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow

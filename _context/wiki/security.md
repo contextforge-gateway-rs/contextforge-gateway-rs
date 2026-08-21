@@ -91,6 +91,22 @@ covers the legacy/RMCP transport header `Mcp-Session-Id`. It is an
 application-level guard for MCP-related headers only; non-MCP headers remain
 bounded by the HTTP transport.
 
+For stateless requests, the RMCP service requires `MCP-Protocol-Version` and
+the matching per-request protocol metadata before handler dispatch. RMCP also
+validates `Mcp-Method` and `Mcp-Name` against the JSON-RPC body. Computed MCP
+headers are never accepted through backend pass-through/add/remove policy. The
+stateless tool client discovers schemas on its per-request backend connection,
+so RMCP regenerates annotated `Mcp-Param-*` values from the final routed tool
+arguments.
+
+Tenant-safe inbound `Mcp-Param-*` value validation is not yet enabled. RMCP
+3.1.x resolves server tool schemas by bare tool name before request extensions
+are available and caches that result globally inside the Streamable HTTP
+service. A gateway `get_tool(name)` implementation would therefore allow one
+subject or virtual host to select another tenant's schema. This requires a
+request-aware RMCP schema resolver keyed by subject, virtual host, and exposed
+tool name; do not add a bare-name cache as a workaround.
+
 ## Local Bootstrap Helpers (`with_tools`)
 
 The `contextforge-data-plane-lib/with_tools` feature compiles in:

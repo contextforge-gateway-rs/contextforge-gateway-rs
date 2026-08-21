@@ -58,6 +58,11 @@ a control-plane responsibility. Server and client results are written below
 `server/` and `client/`, with separate `expected-failures.yml` and
 `client-expected-failures.yml` baselines.
 
+The client lane has no expected failures. Before each stateless upstream tool
+call, the dataplane lists tools on the same RMCP connection; this primes RMCP's
+schema cache and exercises its native `x-mcp-header` generation, including
+omission, primitive conversion, and Base64 wrapping.
+
 `make conformance` runs both legs locally, while `make conformance-bless` runs
 both and refreshes both expected-failure baselines from that run.
 

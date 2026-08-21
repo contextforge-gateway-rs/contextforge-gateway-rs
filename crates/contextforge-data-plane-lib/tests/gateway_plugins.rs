@@ -375,7 +375,7 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_reaches_backend_without_session() {
+async fn stateless_tool_call_primes_rmcp_schema_before_forwarding() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let service = support::connect_modern_client(
         gateway.gateway_url(),
@@ -385,6 +385,76 @@ async fn stateless_tool_call_reaches_backend_without_session() {
     .await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.expect("stateless tool call succeeds");
     assert_eq!("3", text(&result));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_tool_call_lets_rmcp_encode_unsafe_parameter_headers() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+    let unsafe_value = " leading snowman ☃";
+    let request = CallToolRequestParams::new("reflect_text")
+        .with_arguments(Map::from_iter([("text".to_owned(), Value::from(unsafe_value))]));
+
+    let result = service.call_tool(request).await.expect("RMCP encodes the annotated argument");
+
+    assert_eq!(unsafe_value, text(&result));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_tool_call_lets_rmcp_omit_null_parameter_headers() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+    let request =
+        CallToolRequestParams::new("optional_text").with_arguments(Map::from_iter([("text".to_owned(), Value::Null)]));
+
+    let result = service.call_tool(request).await.expect("RMCP omits the annotated null argument");
+
+    assert_eq!("accepted", text(&result));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_tool_call_without_protocol_version_header_is_rejected_before_backend() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let response = support::create_client(TEST_USER_ID)
+        .post(gateway.gateway_url())
+        .header(http::header::ACCEPT, "application/json, text/event-stream")
+        .header("MCP-Method", "tools/call")
+        .header("MCP-Name", "sum")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sum",
+                "arguments": { "a": 1, "b": 2 },
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "strict-metadata-test",
+                        "version": "1.0.0"
+                    },
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
+            }
+        }))
+        .send()
+        .await
+        .expect("request reaches gateway");
+
+    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
+    let body: serde_json::Value = response.json().await.expect("gateway returns a JSON-RPC error");
+    assert_eq!(rmcp::model::ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
+    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

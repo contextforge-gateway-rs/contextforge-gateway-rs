@@ -107,12 +107,13 @@ impl Gateway {
         // RMCP owns Host validation. Keep its Origin validator disabled because
         // mcp_origin_layer enforces exact origin tuples and returns 403 for every
         // invalid present Origin, including when no allowlist is configured.
+        let streamable_config = StreamableHttpServerConfig::default()
+            .with_stateless_protocol_metadata_required(true)
+            .disable_allowed_origins();
         let streamable_config = if let Some(ref hosts) = config.mcp_allowed_hosts {
-            StreamableHttpServerConfig::default()
-                .with_allowed_hosts(hosts.iter().map(Authority::as_str))
-                .disable_allowed_origins()
+            streamable_config.with_allowed_hosts(hosts.iter().map(Authority::as_str))
         } else {
-            StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
+            streamable_config.disable_allowed_hosts()
         };
 
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;

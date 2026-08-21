@@ -16,8 +16,9 @@ use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, GetPromptRequestParams,
-        GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, NumberOrString,
-        ProgressNotificationParam, ProgressToken, PromptMessage, ResourceContents, Role, ServerCapabilities,
+        GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, ListToolsResult,
+        NumberOrString, PaginatedRequestParams, ProgressNotificationParam, ProgressToken, PromptMessage,
+        ResourceContents, Role, ServerCapabilities, Tool,
     },
     service::{RequestContext, Service},
     transport::{
@@ -26,7 +27,7 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tokio::sync::Mutex as TokioMutex;
 
 use super::{MemoryUserConfigStore, token};
@@ -56,6 +57,48 @@ pub(crate) struct BackendState {
 #[derive(Clone)]
 struct TestBackend {
     state: BackendState,
+}
+
+fn sum_tool() -> Tool {
+    let input_schema = json!({
+        "type": "object",
+        "properties": {
+            "a": { "type": "integer", "x-mcp-header": "A" },
+            "b": { "type": "integer", "x-mcp-header": "B" }
+        },
+        "required": ["a", "b"]
+    })
+    .as_object()
+    .expect("sum input schema is an object")
+    .clone();
+    Tool::new("sum", "Add two integers", input_schema)
+}
+
+fn reflect_text_tool() -> Tool {
+    let input_schema = json!({
+        "type": "object",
+        "properties": {
+            "text": { "type": "string", "x-mcp-header": "Text" }
+        },
+        "required": ["text"]
+    })
+    .as_object()
+    .expect("reflect_text input schema is an object")
+    .clone();
+    Tool::new("reflect_text", "Reflect text", input_schema)
+}
+
+fn optional_text_tool() -> Tool {
+    let input_schema = json!({
+        "type": "object",
+        "properties": {
+            "text": { "type": "string", "x-mcp-header": "Optional-Text" }
+        }
+    })
+    .as_object()
+    .expect("optional_text input schema is an object")
+    .clone();
+    Tool::new("optional_text", "Accept optional text", input_schema)
 }
 
 #[allow(clippy::unused_async_trait_impl)]
@@ -100,6 +143,23 @@ impl ServerHandler for TestBackend {
         }
 
         Ok(GetPromptResult::new(vec![PromptMessage::new_text(Role::User, format!("review of {topic}"))]).into())
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult::with_all_items(vec![sum_tool(), reflect_text_tool(), optional_text_tool()]))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        match name {
+            "sum" => Some(sum_tool()),
+            "reflect_text" => Some(reflect_text_tool()),
+            "optional_text" => Some(optional_text_tool()),
+            _ => None,
+        }
     }
 
     async fn call_tool(
@@ -175,6 +235,7 @@ impl ServerHandler for TestBackend {
                     .ok_or_else(|| ErrorData::invalid_params("reflect_text requires text", None))?;
                 Ok(CallToolResult::success(vec![ContentBlock::text(text.to_owned())]))
             },
+            "optional_text" => Ok(CallToolResult::success(vec![ContentBlock::text("accepted")])),
             "wait_for_cancellation" => {
                 cx.ct.cancelled().await;
                 self.state
