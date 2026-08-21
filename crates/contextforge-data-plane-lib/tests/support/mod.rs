@@ -1,5 +1,3 @@
-#![allow(unknown_lints, reason = "Rust 1.96 predates unused_async_trait_impl")]
-#![allow(clippy::unused_async_trait_impl, reason = "test fixtures implement async interfaces synchronously")]
 #![allow(dead_code, unused_imports, reason = "shared CPEX test fixture is used by separate integration test targets")]
 
 mod auth;
