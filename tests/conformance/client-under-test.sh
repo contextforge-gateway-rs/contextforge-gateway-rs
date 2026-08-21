@@ -50,6 +50,12 @@ prepared_tool_calls="$(docker compose -f "${compose_file}" run --rm --no-deps \
   "${backend_url}" \
   "${tool_calls}")"
 
+# Schema discovery already exercises every request-metadata check. The scenario
+# server intentionally rejects that probe, so it exposes no callable tool schema.
+if [ "${MCP_CONFORMANCE_SCENARIO}" = "request-metadata" ]; then
+  exit 0
+fi
+
 endpoint="http://127.0.0.1:${conformance_port}/servers/${virtual_host_id}/mcp"
 while IFS= read -r tool_call; do
   tool_name="$(jq --exit-status --raw-output '.name' <<< "${tool_call}")"

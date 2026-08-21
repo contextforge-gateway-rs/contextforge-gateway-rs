@@ -100,10 +100,12 @@ host-, and backend-scoped Redis configuration. The innermost authenticated
 middleware resolves that request-scoped schema and returns HTTP `400` with
 JSON-RPC `-32020` when the routed tool schema is absent or an annotated
 parameter header is missing or mismatched.
-After plugin rewrites, a per-request upstream HTTP client decorator derives
-`Mcp-Param-*` from the final arguments and the same backend-scoped schema. No
-schema is cached globally by bare tool name, and the dataplane does not call
-backend `tools/list` as part of `tools/call`.
+Validated `Mcp-Param-*` headers are forwarded unchanged outside backend header
+configuration, while RMCP regenerates method, routed-name, and protocol-version
+headers. Plugins are trusted and must preserve arguments designated by
+`x-mcp-header`; an inconsistent plugin rewrite is rejected by the upstream MCP
+server. No schema is cached globally by bare tool name, and the dataplane does
+not call backend `tools/list` as part of `tools/call`.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use base64::{Engine, prelude::BASE64_STANDARD};
-use http::{HeaderMap, HeaderName, HeaderValue};
+use http::{HeaderMap, HeaderName};
 use rmcp::model::ProtocolVersion;
 use rmcp::transport::common::http_header::{
     BASE64_HEADER_PREFIX, BASE64_HEADER_SUFFIX, HEADER_MCP_METHOD, HEADER_MCP_NAME, HEADER_MCP_PARAM_PREFIX,
@@ -37,7 +37,7 @@ fn is_exact(name: &HeaderName, expected: &str) -> bool {
     name.as_str().eq_ignore_ascii_case(expected)
 }
 
-fn is_param(name: &HeaderName) -> bool {
+pub(crate) fn is_param(name: &HeaderName) -> bool {
     name.as_str()
         .get(..HEADER_MCP_PARAM_PREFIX.len())
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(HEADER_MCP_PARAM_PREFIX))
@@ -71,26 +71,6 @@ pub(crate) fn validate_tool_params(
                 }
             },
         }
-    }
-    Ok(())
-}
-
-/// Add SEP-2243 parameter headers for a routed upstream tool call.
-pub(crate) fn insert_tool_params(
-    headers: &mut HashMap<HeaderName, HeaderValue>,
-    arguments: Option<&JsonObject>,
-    input_schema: &JsonObject,
-) -> Result<(), String> {
-    for (property, annotation) in param_header_annotations(input_schema)? {
-        let Some(value) = arguments.and_then(|arguments| arguments.get(&property)).and_then(primitive_to_string) else {
-            continue;
-        };
-        let header_name = format!("{HEADER_MCP_PARAM_PREFIX}{annotation}");
-        let header_name = HeaderName::from_bytes(header_name.as_bytes())
-            .map_err(|error| format!("invalid parameter header name: {error}"))?;
-        let header_value = HeaderValue::from_str(&encode_header_value(&value))
-            .map_err(|error| format!("invalid parameter header value: {error}"))?;
-        headers.insert(header_name, header_value);
     }
     Ok(())
 }
@@ -155,31 +135,11 @@ fn primitive_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn encode_header_value(value: &str) -> String {
-    if requires_base64(value) {
-        format!("{BASE64_HEADER_PREFIX}{}{BASE64_HEADER_SUFFIX}", BASE64_STANDARD.encode(value))
-    } else {
-        value.to_owned()
-    }
-}
-
 fn decode_header_value(value: &str) -> Option<String> {
     match value.strip_prefix(BASE64_HEADER_PREFIX).and_then(|inner| inner.strip_suffix(BASE64_HEADER_SUFFIX)) {
         Some(inner) => String::from_utf8(BASE64_STANDARD.decode(inner).ok()?).ok(),
         None => Some(value.to_owned()),
     }
-}
-
-fn requires_base64(value: &str) -> bool {
-    if value.is_empty() {
-        return false;
-    }
-    let bytes = value.as_bytes();
-    if matches!(bytes.first(), Some(b' ' | b'\t')) || matches!(bytes.last(), Some(b' ' | b'\t')) {
-        return true;
-    }
-    value.chars().any(|character| !(0x20..=0x7e).contains(&(character as u32)))
-        || value.starts_with(BASE64_HEADER_PREFIX) && value.ends_with(BASE64_HEADER_SUFFIX)
 }
 
 fn is_tchar(character: char) -> bool {
@@ -189,6 +149,7 @@ fn is_tchar(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use http::HeaderValue;
     use serde_json::json;
 
     use super::*;
@@ -208,22 +169,17 @@ mod tests {
     }
 
     #[test]
-    fn parameter_headers_round_trip_primitives_and_unsafe_values() {
+    fn matching_parameter_headers_are_validated() {
         let arguments = json!({ "region": " leading snowman ☃", "count": 3, "dryRun": false });
         let arguments = arguments.as_object().expect("object arguments");
-        let mut headers = HashMap::new();
+        let encoded =
+            format!("{BASE64_HEADER_PREFIX}{}{BASE64_HEADER_SUFFIX}", BASE64_STANDARD.encode(" leading snowman ☃"));
+        let headers = HeaderMap::from_iter([
+            (HeaderName::from_static("mcp-param-region"), HeaderValue::from_str(&encoded).expect("encoded header")),
+            (HeaderName::from_static("mcp-param-count"), HeaderValue::from_static("3")),
+            (HeaderName::from_static("mcp-param-dry-run"), HeaderValue::from_static("false")),
+        ]);
 
-        insert_tool_params(&mut headers, Some(arguments), &schema()).expect("headers are generated");
-        let headers: HeaderMap = headers.into_iter().collect();
-
-        assert!(
-            headers
-                .get("Mcp-Param-Region")
-                .expect("region header")
-                .to_str()
-                .expect("header string")
-                .starts_with(BASE64_HEADER_PREFIX)
-        );
         validate_tool_params(&headers, Some(arguments), &schema()).expect("headers match arguments");
     }
 
@@ -231,10 +187,7 @@ mod tests {
     fn null_parameter_is_omitted_and_rejected_when_present() {
         let arguments = json!({ "region": null });
         let arguments = arguments.as_object().expect("object arguments");
-        let mut headers = HashMap::new();
-
-        insert_tool_params(&mut headers, Some(arguments), &schema()).expect("headers are generated");
-        assert!(!headers.contains_key("Mcp-Param-Region"));
+        validate_tool_params(&HeaderMap::new(), Some(arguments), &schema()).expect("null parameter needs no header");
 
         let headers = HeaderMap::from_iter([(
             HeaderName::from_static("mcp-param-region"),

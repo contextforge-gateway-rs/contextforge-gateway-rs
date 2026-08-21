@@ -50,9 +50,19 @@ def fetch_tool_schemas(backend_url: str, tool_names: list[str]) -> dict[str, dic
         with urllib.request.urlopen(request, timeout=10) as response:
             response_body = response.read().decode()
     except urllib.error.HTTPError as error:
-        if error.code in {400, 404, 405}:
-            return {}
-        raise
+        error_body = error.read().decode()
+        try:
+            error_data = json.loads(error_body).get("error", {})
+        except json.JSONDecodeError:
+            raise error
+        if (
+            error.code != 400
+            or error_data.get("code") != -32022
+            or PROTOCOL_VERSION not in error_data.get("data", {}).get("supported", [])
+        ):
+            raise error
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response_body = response.read().decode()
 
     messages = [
         json.loads(line.removeprefix("data:").strip())

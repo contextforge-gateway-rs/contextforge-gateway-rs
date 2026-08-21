@@ -1,143 +1,22 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use contextforge_data_plane_apis::user_store::BackendMCPGateway;
-use futures::stream::BoxStream;
-use http::{HeaderName, HeaderValue, request::Parts};
+use http::request::Parts;
 use rmcp::{
     ClientLifecycleMode, ErrorData, RoleClient, RoleServer,
     model::{
-        ClientCapabilities, ClientJsonRpcMessage, ClientRequest, ErrorCode, Implementation, InitializeRequestParams,
-        InitializeResult, JsonObject, ProtocolVersion, ServerCapabilities,
+        ClientCapabilities, ErrorCode, Implementation, InitializeRequestParams, InitializeResult, ProtocolVersion,
+        ServerCapabilities,
     },
     service::serve_client_with_lifecycle_and_ct,
     service::{RequestContext, RunningService},
-    transport::{
-        StreamableHttpClientTransport,
-        streamable_http_client::{
-            SseError, StreamableHttpClient, StreamableHttpClientTransportConfig, StreamableHttpError,
-            StreamableHttpPostResponse,
-        },
-    },
+    transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-use sse_stream::Sse;
 use tracing::warn;
 
 use super::McpService;
 use crate::gateway::backend_client::GatewayBackendClient;
 use crate::mcp_standard_headers;
-
-#[derive(Clone)]
-struct McpParamHttpClient {
-    inner: reqwest::Client,
-    tool_schema: Option<Arc<JsonObject>>,
-}
-
-impl McpParamHttpClient {
-    fn new(inner: reqwest::Client, tool_schema: Option<Arc<JsonObject>>) -> Self {
-        Self { inner, tool_schema }
-    }
-
-    fn insert_tool_params(
-        &self,
-        message: &ClientJsonRpcMessage,
-        headers: &mut HashMap<HeaderName, HeaderValue>,
-    ) -> Result<(), StreamableHttpError<reqwest::Error>> {
-        let Some(tool_schema) = self.tool_schema.as_deref() else {
-            return Ok(());
-        };
-        let ClientJsonRpcMessage::Request(request) = message else {
-            return Ok(());
-        };
-        let ClientRequest::CallToolRequest(request) = &request.request else {
-            return Ok(());
-        };
-        mcp_standard_headers::insert_tool_params(headers, request.params.arguments.as_ref(), tool_schema).map_err(
-            |error| {
-                StreamableHttpError::UnexpectedServerResponse(format!("invalid published tool schema: {error}").into())
-            },
-        )
-    }
-}
-
-impl StreamableHttpClient for McpParamHttpClient {
-    type Error = reqwest::Error;
-
-    async fn post_message(
-        &self,
-        uri: Arc<str>,
-        message: ClientJsonRpcMessage,
-        session_id: Option<Arc<str>>,
-        auth_header: Option<String>,
-        mut custom_headers: HashMap<HeaderName, HeaderValue>,
-    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
-        self.insert_tool_params(&message, &mut custom_headers)?;
-        self.inner.post_message(uri, message, session_id, auth_header, custom_headers).await
-    }
-
-    async fn post_message_with_max_sse_event_size(
-        &self,
-        uri: Arc<str>,
-        message: ClientJsonRpcMessage,
-        session_id: Option<Arc<str>>,
-        auth_header: Option<String>,
-        mut custom_headers: HashMap<HeaderName, HeaderValue>,
-        max_sse_event_size: usize,
-    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
-        self.insert_tool_params(&message, &mut custom_headers)?;
-        self.inner
-            .post_message_with_max_sse_event_size(
-                uri,
-                message,
-                session_id,
-                auth_header,
-                custom_headers,
-                max_sse_event_size,
-            )
-            .await
-    }
-
-    async fn delete_session(
-        &self,
-        uri: Arc<str>,
-        session_id: Arc<str>,
-        auth_header: Option<String>,
-        custom_headers: HashMap<HeaderName, HeaderValue>,
-    ) -> Result<(), StreamableHttpError<Self::Error>> {
-        self.inner.delete_session(uri, session_id, auth_header, custom_headers).await
-    }
-
-    async fn get_stream(
-        &self,
-        uri: Arc<str>,
-        session_id: Option<Arc<str>>,
-        last_event_id: Option<String>,
-        auth_header: Option<String>,
-        custom_headers: HashMap<HeaderName, HeaderValue>,
-    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
-        self.inner.get_stream(uri, session_id, last_event_id, auth_header, custom_headers).await
-    }
-
-    async fn get_stream_with_max_sse_event_size(
-        &self,
-        uri: Arc<str>,
-        session_id: Option<Arc<str>>,
-        last_event_id: Option<String>,
-        auth_header: Option<String>,
-        custom_headers: HashMap<HeaderName, HeaderValue>,
-        max_sse_event_size: usize,
-    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
-        self.inner
-            .get_stream_with_max_sse_event_size(
-                uri,
-                session_id,
-                last_event_id,
-                auth_header,
-                custom_headers,
-                max_sse_event_size,
-            )
-            .await
-    }
-}
 
 #[allow(clippy::unused_async)]
 pub(super) async fn initialize(
@@ -157,7 +36,6 @@ pub(super) async fn initialize(
 pub(super) async fn connect_backend_for_request(
     mcp_service: &McpService,
     backend: (&str, &BackendMCPGateway),
-    tool_schema: Option<&JsonObject>,
     cx: &RequestContext<RoleServer>,
 ) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData> {
     let (backend_name, backend) = backend;
@@ -176,12 +54,11 @@ pub(super) async fn connect_backend_for_request(
     }
 
     apply_header_config(&mut headers, backend, downstream_headers);
+    forward_mcp_param_headers(&mut headers, downstream_headers);
     crate::telemetry::inject_current_context(&mut headers);
 
-    let tool_schema = tool_schema.cloned().map(Arc::new);
     let config = StreamableHttpClientTransportConfig::with_uri(backend.url.to_string()).custom_headers(headers);
-    let client = McpParamHttpClient::new(mcp_service.http_client.clone(), tool_schema);
-    let transport = StreamableHttpClientTransport::with_client(client, config);
+    let transport = StreamableHttpClientTransport::with_client(mcp_service.http_client.clone(), config);
     let client_info = InitializeRequestParams::new(
         ClientCapabilities::default(),
         Implementation::new("contextforge-data-plane", env!("CARGO_PKG_VERSION")),
@@ -207,6 +84,19 @@ pub(super) async fn connect_backend_for_request(
             data: None,
         }
     })
+}
+
+fn forward_mcp_param_headers(
+    headers: &mut HashMap<http::HeaderName, http::HeaderValue>,
+    downstream: Option<&http::HeaderMap>,
+) {
+    let Some(downstream) = downstream else { return };
+    headers.extend(
+        downstream
+            .iter()
+            .filter(|(name, _)| mcp_standard_headers::is_param(name))
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
 }
 
 /// Apply a backend's header config to the upstream header map.
@@ -252,6 +142,8 @@ fn apply_header_config(
 /// - Non-standard hop-by-hop: `Proxy-Connection` (must not cross gateway boundary)
 /// - RMCP transport-reserved: `Mcp-Session-Id`, `Accept`, `Last-Event-Id`
 /// - MCP standard computed headers: `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`, `Mcp-Param-*`
+///
+/// Validated downstream `Mcp-Param-*` headers are forwarded separately and cannot be changed by backend config.
 fn is_protected_header(name: &http::HeaderName) -> bool {
     const PROTECTED: &[&str] = &[
         "host",
@@ -402,15 +294,14 @@ mod tests {
     }
 
     #[test]
-    fn computed_mcp_headers_cannot_be_passed_through_added_or_removed() {
+    fn validated_mcp_param_headers_are_forwarded_but_cannot_be_changed_by_backend_config() {
         let mut headers = HashMap::new();
         headers.insert(http::HeaderName::from_static("mcp-method"), http::HeaderValue::from_static("tools/call"));
-        headers.insert(http::HeaderName::from_static("mcp-param-user"), http::HeaderValue::from_static("computed"));
         let ds = downstream(&[
             ("Mcp-Method", "wrong/method"),
             ("Mcp-Name", "wrong-tool"),
             ("Mcp-Protocol-Version", "2020-01-01"),
-            ("Mcp-Param-User", "wrong-user"),
+            ("Mcp-Param-User", "client-user"),
         ]);
         let cfg = backend(
             &["mcp-method", "mcp-name", "mcp-protocol-version", "mcp-param-user"],
@@ -424,9 +315,10 @@ mod tests {
         );
 
         apply_header_config(&mut headers, &cfg, Some(&ds));
+        forward_mcp_param_headers(&mut headers, Some(&ds));
 
         assert_eq!(headers[&http::HeaderName::from_static("mcp-method")], "tools/call");
-        assert_eq!(headers[&http::HeaderName::from_static("mcp-param-user")], "computed");
+        assert_eq!(headers[&http::HeaderName::from_static("mcp-param-user")], "client-user");
         assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-name")));
         assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-protocol-version")));
     }

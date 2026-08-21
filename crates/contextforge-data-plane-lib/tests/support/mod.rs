@@ -27,12 +27,12 @@ pub(crate) use list_tools_gateway::{
 };
 pub(crate) use plugin::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior,
-    PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A,
-    REWRITTEN_SUM_B, TestPlugin, TestPluginFactory,
+    PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, TestPlugin,
+    TestPluginFactory,
 };
 pub(crate) use plugin_gateway::{
     BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, RunningGateway, start_gateway, start_gateway_with_events,
-    start_gateway_with_json_backend_responses,
+    start_gateway_with_json_backend_responses, start_gateway_with_parameter_headers,
 };
 pub(crate) use runtime::{runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin};
 pub(crate) use tool::{error_code, error_parts, sum_request, text};

@@ -56,6 +56,7 @@ pub(crate) struct BackendState {
     pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
     pub(crate) events: Arc<StdMutex<Vec<&'static str>>>,
+    parameter_headers: bool,
 }
 
 #[derive(Clone)]
@@ -105,19 +106,33 @@ fn optional_text_tool() -> Tool {
     Tool::new("optional_text", "Accept optional text", input_schema)
 }
 
-fn tools() -> Vec<Tool> {
-    vec![
+fn tools(parameter_headers: bool) -> Vec<Tool> {
+    let mut tools = vec![
         sum_tool(),
         reflect_text_tool(),
         optional_text_tool(),
         Tool::new("progress_sum", "Report progress", Map::new()),
         Tool::new("progress_counter_tokens", "Report progress with generated tokens", Map::new()),
         Tool::new("wait_for_cancellation", "Wait for cancellation", Map::new()),
-    ]
+    ];
+    if !parameter_headers {
+        for tool in &mut tools {
+            let schema = Arc::make_mut(&mut tool.input_schema);
+            if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                for property in properties.values_mut().filter_map(Value::as_object_mut) {
+                    property.remove("x-mcp-header");
+                }
+            }
+        }
+    }
+    tools
 }
 
-fn published_tool_schemas() -> HashMap<String, Map<String, Value>> {
-    tools().into_iter().map(|tool| (tool.name.to_string(), tool.input_schema.as_ref().clone())).collect()
+fn published_tool_schemas(parameter_headers: bool) -> HashMap<String, Map<String, Value>> {
+    tools(parameter_headers)
+        .into_iter()
+        .map(|tool| (tool.name.to_string(), tool.input_schema.as_ref().clone()))
+        .collect()
 }
 
 #[allow(clippy::unused_async_trait_impl)]
@@ -170,11 +185,11 @@ impl ServerHandler for TestBackend {
         _cx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         self.state.list_tool_calls.fetch_add(1, Ordering::Relaxed);
-        Ok(ListToolsResult::with_all_items(tools()))
+        Ok(ListToolsResult::with_all_items(tools(self.state.parameter_headers)))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        tools().into_iter().find(|tool| tool.name == name)
+        tools(self.state.parameter_headers).into_iter().find(|tool| tool.name == name)
     }
 
     async fn call_tool(
@@ -337,6 +352,21 @@ pub(crate) async fn start_gateway(
     start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, false).await
 }
 
+pub(crate) async fn start_gateway_with_parameter_headers(
+    user: &str,
+    runtime_plugins_enabled: bool,
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+) -> RunningGateway {
+    start_gateway_with_state(
+        user,
+        runtime_plugins_enabled,
+        plugin_runtime,
+        false,
+        BackendState { parameter_headers: true, ..BackendState::default() },
+    )
+    .await
+}
+
 pub(crate) async fn start_gateway_with_events(
     user: &str,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
@@ -384,6 +414,7 @@ async fn start_gateway_with_state(
     let backend_port = backend_listener.local_addr().expect("backend address").port();
     let backend_name = format!("backend-{backend_port}");
     let virtual_host_id = "vh-cpex-test";
+    let parameter_headers = backend_state.parameter_headers;
 
     let backend_service = StreamableHttpService::new(
         {
@@ -412,7 +443,7 @@ async fn start_gateway_with_state(
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),
                                 allowed_tool_names: Vec::new(),
-                                tool_schemas: published_tool_schemas(),
+                                tool_schemas: published_tool_schemas(parameter_headers),
                                 tool_name_aliases: HashMap::new(),
                                 allowed_resource_names: Vec::new(),
                                 allowed_prompt_names: Vec::new(),

@@ -625,7 +625,6 @@ dependencies = [
  "secret-string",
  "serde",
  "serde_json",
- "sse-stream",
  "test-log",
  "thiserror 2.0.19",
  "tokio",
