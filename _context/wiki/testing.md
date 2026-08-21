@@ -65,6 +65,10 @@ Base64 wrapping for `x-mcp-header` annotations.
 
 `make conformance` runs both legs locally, while `make conformance-bless` runs
 both and refreshes both expected-failure baselines from that run.
+To exercise unpublished cross-repository changes, build both images locally and
+run `tests/conformance/run-local.sh` with `CF_CONTROLPLANE_IMAGE`,
+`CF_DATAPLANE_IMAGE`, and `MCP_CONFORMANCE_SKIP_PULL=true` so Compose does not
+replace the local tags.
 
 Because this conformance CLI cannot set a bearer header, nginx adds an
 ephemeral control-plane token when one is absent; there is no auth proxy or

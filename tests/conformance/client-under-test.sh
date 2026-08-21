@@ -57,9 +57,14 @@ while IFS= read -r tool_call; do
   tool_name="$(jq --exit-status --raw-output '.name' <<< "${tool_call}")"
   arguments="$(jq --exit-status --compact-output '.arguments' <<< "${tool_call}")"
   header_args=()
-  while IFS= read -r header; do
-    header_args+=(--header "${header}")
-  done < <(jq --exit-status --raw-output '.headers | to_entries[] | "\(.key): \(.value)"' <<< "${tool_call}")
+  while IFS=$'\t' read -r header_name header_value; do
+    if [ -z "${header_value}" ]; then
+      # curl's `Header:` form removes a header; `Header;` sends an empty value.
+      header_args+=(--header "${header_name};")
+    else
+      header_args+=(--header "${header_name}: ${header_value}")
+    fi
+  done < <(jq --exit-status --raw-output '.headers | to_entries[] | [.key, .value] | @tsv' <<< "${tool_call}")
   request="$(jq --null-input --compact-output \
     --arg name "${tool_name}" \
     --argjson arguments "${arguments}" \
@@ -82,16 +87,20 @@ while IFS= read -r tool_call; do
       }
     }')"
 
-  response="$(curl --silent --show-error --fail-with-body \
-    --request POST \
-    --header 'Content-Type: application/json' \
-    --header 'Accept: application/json, text/event-stream' \
-    --header "MCP-Protocol-Version: ${MCP_CONFORMANCE_PROTOCOL_VERSION}" \
-    --header 'MCP-Method: tools/call' \
-    --header "MCP-Name: ${tool_name}" \
-    "${header_args[@]}" \
-    --data "${request}" \
-    "${endpoint}")"
+  if ! response="$(curl --silent --show-error --fail-with-body \
+      --request POST \
+      --header 'Content-Type: application/json' \
+      --header 'Accept: application/json, text/event-stream' \
+      --header "MCP-Protocol-Version: ${MCP_CONFORMANCE_PROTOCOL_VERSION}" \
+      --header 'MCP-Method: tools/call' \
+      --header "MCP-Name: ${tool_name}" \
+      "${header_args[@]}" \
+      --data "${request}" \
+      "${endpoint}")"; then
+    echo "Dataplane HTTP request failed for client conformance tool call ${tool_name}:" >&2
+    echo "${response}" >&2
+    exit 1
+  fi
 
   response_json="$(sed -n 's/^data: //p' <<< "${response}" | head -n 1)"
   if [ -z "${response_json}" ]; then

@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
@@ -45,8 +46,13 @@ def fetch_tool_schemas(backend_url: str, tool_names: list[str]) -> dict[str, dic
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        response_body = response.read().decode()
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response_body = response.read().decode()
+    except urllib.error.HTTPError as error:
+        if error.code in {400, 404, 405}:
+            return {}
+        raise
 
     messages = [
         json.loads(line.removeprefix("data:").strip())
@@ -73,9 +79,6 @@ def fetch_tool_schemas(backend_url: str, tool_names: list[str]) -> dict[str, dic
         and tool.get("name") in tool_names
         and isinstance(tool.get("inputSchema"), dict)
     }
-    missing = sorted(set(tool_names) - schemas.keys())
-    if missing:
-        raise SystemExit(f"tools/list omitted requested tool schemas: {missing}")
     return schemas
 
 
@@ -103,7 +106,7 @@ def prepare_tool_calls(
     for tool_call in tool_calls:
         name = tool_call["name"]
         arguments = tool_call["arguments"]
-        properties = tool_schemas[name].get("properties", {})
+        properties = tool_schemas.get(name, {}).get("properties", {})
         headers = {}
         if isinstance(arguments, dict) and isinstance(properties, dict):
             for property_name, property_schema in properties.items():
