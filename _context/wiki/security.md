@@ -94,18 +94,14 @@ bounded by the HTTP transport.
 For stateless requests, the RMCP service requires `MCP-Protocol-Version` and
 the matching per-request protocol metadata before handler dispatch. RMCP also
 validates `Mcp-Method` and `Mcp-Name` against the JSON-RPC body. Computed MCP
-headers are never accepted through backend pass-through/add/remove policy. The
-control plane publishes each visible tool schema inside the subject-, virtual-
-host-, and backend-scoped Redis configuration. The innermost authenticated
-middleware resolves that request-scoped schema and returns HTTP `400` with
-JSON-RPC `-32020` when the routed tool schema is absent or an annotated
-parameter header is missing or mismatched.
-Validated `Mcp-Param-*` headers are forwarded unchanged outside backend header
+headers are never accepted through backend pass-through/add/remove policy.
+`Mcp-Param-*` headers are forwarded unchanged outside backend header
 configuration, while RMCP regenerates method, routed-name, and protocol-version
-headers. Plugins are trusted and must preserve arguments designated by
-`x-mcp-header`; an inconsistent plugin rewrite is rejected by the upstream MCP
-server. No schema is cached globally by bare tool name, and the dataplane does
-not call backend `tools/list` as part of `tools/call`.
+headers. The dataplane does not interpret parameter headers, resolve tool
+schemas, or call backend `tools/list` as part of `tools/call`. The upstream MCP
+server owns parameter-header validation. Plugins receive the full payload; if a
+plugin changes an annotated argument without changing the original request
+header, the upstream server may reject the mismatch.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

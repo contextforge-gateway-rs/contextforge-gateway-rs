@@ -39,7 +39,7 @@ pub(super) async fn read_resource(
     })?;
 
     let service_name = backend_name.clone();
-    let mut backend_service = connect_backend_for_request(mcp_service, (&backend_name, backend), &cx).await?;
+    let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
 
     let mut routed_request = request;
     routed_request.uri = resource_uri;

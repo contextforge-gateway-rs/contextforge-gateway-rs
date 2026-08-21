@@ -21,13 +21,13 @@ def fetch_tool_schemas(backend_url: str, tool_names: list[str]) -> dict[str, dic
     body = json.dumps(
         {
             "jsonrpc": "2.0",
-            "id": "control-plane-schema-discovery",
+            "id": "conformance-client-schema-discovery",
             "method": "tools/list",
             "params": {
                 "_meta": {
                     "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
                     "io.modelcontextprotocol/clientInfo": {
-                        "name": "contextforge-conformance-control-plane",
+                        "name": "contextforge-conformance-client-driver",
                         "version": "1.0.0",
                     },
                     "io.modelcontextprotocol/clientCapabilities": {},
@@ -184,7 +184,6 @@ def main() -> None:
                         "add_headers": {},
                         "remove_headers": [],
                         "allowed_tool_names": tool_names,
-                        "tool_schemas": tool_schemas,
                         "tool_name_aliases": {},
                         "allowed_resource_names": [],
                         "allowed_prompt_names": [],

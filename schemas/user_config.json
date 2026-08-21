@@ -106,14 +106,6 @@
           "items": {
             "type": "string"
           }
-        },
-        "tool_schemas": {
-          "description": "Input schemas keyed by the original upstream tool name.",
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": true
-          }
         }
       },
       "required": [
@@ -122,8 +114,7 @@
         "passthrough_headers",
         "allowed_resource_names",
         "allowed_prompt_names",
-        "allowed_tool_names",
-        "tool_schemas"
+        "allowed_tool_names"
       ]
     }
   }

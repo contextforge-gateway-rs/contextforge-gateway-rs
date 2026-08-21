@@ -8,11 +8,8 @@ use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
 };
 use futures::{FutureExt, future::BoxFuture};
-use rmcp::{
-    ServerHandler,
-    transport::{
-        StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
-    },
+use rmcp::transport::{
+    StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
 use tracing::warn;
 
@@ -234,7 +231,6 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),
                     allowed_tool_names: Vec::new(),
-                    tool_schemas: counter_tool_schemas(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
                         .map(|tool_name| (format!("backend-{port}.{tool_name}"), (*tool_name).to_owned()))
@@ -246,17 +242,6 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     completion: HashMap::new(),
                 },
             )
-        })
-        .collect()
-}
-
-fn counter_tool_schemas() -> HashMap<String, rmcp::model::JsonObject> {
-    let counter = mock_counter::Counter::new();
-    MOCK_COUNTER_TOOL_NAMES
-        .iter()
-        .map(|name| {
-            let tool = counter.get_tool(name).expect("mock counter tool exists");
-            ((*name).to_owned(), tool.input_schema.as_ref().clone())
         })
         .collect()
 }

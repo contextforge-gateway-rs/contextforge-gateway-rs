@@ -2,7 +2,6 @@ mod support;
 
 use std::sync::{Arc, Mutex as StdMutex};
 
-use base64::{Engine, prelude::BASE64_STANDARD};
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use cpex::cpex_core::cmf::Role;
 use cpex::cpex_core::config::CpexConfig;
@@ -21,9 +20,9 @@ use serde_json::{Map, Value, json};
 use support::{
     BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE,
     PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT,
-    REWRITTEN_PROMPT_TOPIC, RunningGateway, TEST_USER_ID, TestPlugin, error_code, error_parts, runtime_with_post,
-    runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin, start_gateway, start_gateway_with_events,
-    start_gateway_with_json_backend_responses, start_gateway_with_parameter_headers, sum_request, text, token,
+    REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID, TestPlugin, error_code,
+    error_parts, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin,
+    start_gateway, start_gateway_with_events, start_gateway_with_json_backend_responses, sum_request, text, token,
 };
 
 type Recorded<T> = Arc<StdMutex<Vec<T>>>;
@@ -151,6 +150,17 @@ async fn successful_tool_text(response: reqwest::Response) -> String {
         .find_map(|message| message["result"]["content"][0]["text"].as_str())
         .expect("tool response contains text")
         .to_owned()
+}
+
+fn last_backend_request_headers(gateway: &RunningGateway) -> http::HeaderMap {
+    gateway
+        .backend_state
+        .request_headers
+        .lock()
+        .expect("backend request headers lock poisoned")
+        .last()
+        .cloned()
+        .expect("backend received a request")
 }
 
 fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Value {
@@ -413,9 +423,8 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_forwards_validated_parameter_headers_without_backend_listing() {
-    let gateway =
-        start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+async fn stateless_tool_call_forwards_parameter_headers_without_backend_listing() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
         .header("Mcp-Param-A", "1")
         .header("Mcp-Param-B", "2")
@@ -424,19 +433,16 @@ async fn stateless_tool_call_forwards_validated_parameter_headers_without_backen
         .expect("stateless tool call reaches gateway");
 
     assert_eq!("3", successful_tool_text(response).await);
-    assert_eq!(
-        0,
-        gateway.backend_state.list_tool_calls.load(std::sync::atomic::Ordering::Relaxed),
-        "the dataplane must not call tools/list before forwarding"
-    );
+    let headers = last_backend_request_headers(&gateway);
+    assert_eq!("1", headers["Mcp-Param-A"]);
+    assert_eq!("2", headers["Mcp-Param-B"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_forwards_encoded_parameter_headers() {
-    let gateway =
-        start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let unsafe_value = " leading snowman ☃";
-    let encoded = format!("=?base64?{}?=", BASE64_STANDARD.encode(unsafe_value));
+    let encoded = "=?base64?IGxlYWRpbmcgc25vd21hbiDimIM=?=";
     let response = raw_stateless_tool_call(&gateway, "reflect_text", &json!({ "text": unsafe_value }))
         .header("Mcp-Param-Text", encoded)
         .send()
@@ -444,24 +450,24 @@ async fn stateless_tool_call_forwards_encoded_parameter_headers() {
         .expect("stateless tool call reaches gateway");
 
     assert_eq!(unsafe_value, successful_tool_text(response).await);
+    assert_eq!(encoded, last_backend_request_headers(&gateway)["Mcp-Param-Text"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_omits_null_parameter_headers() {
-    let gateway =
-        start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let response = raw_stateless_tool_call(&gateway, "optional_text", &json!({ "text": null }))
         .send()
         .await
         .expect("stateless tool call reaches gateway");
 
     assert_eq!("accepted", successful_tool_text(response).await);
+    assert!(!last_backend_request_headers(&gateway).contains_key("Mcp-Param-Optional-Text"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_without_protocol_version_header_is_rejected_before_backend() {
-    let gateway =
-        start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let response = support::create_client(TEST_USER_ID)
         .post(gateway.gateway_url())
         .header(http::header::ACCEPT, "application/json, text/event-stream")
@@ -495,9 +501,8 @@ async fn stateless_tool_call_without_protocol_version_header_is_rejected_before_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected_before_backend() {
-    let gateway =
-        start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+async fn stateless_tool_call_forwards_mismatched_parameter_header_to_backend() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
         .header("Mcp-Param-A", "9")
         .header("Mcp-Param-B", "2")
@@ -505,22 +510,24 @@ async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected_before
         .await
         .expect("request reaches gateway");
 
-    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
-    let body: serde_json::Value = response.json().await.expect("gateway returns a JSON-RPC error");
-    assert_eq!(rmcp::model::ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+    assert_eq!("3", successful_tool_text(response).await);
+    assert_eq!("9", last_backend_request_headers(&gateway)["Mcp-Param-A"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_without_published_schema_is_rejected_before_backend() {
+async fn stateless_tool_error_round_trips() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response =
-        raw_stateless_tool_call(&gateway, "missing_tool", &json!({})).send().await.expect("request reaches gateway");
-
-    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
-    let body: serde_json::Value = response.json().await.expect("gateway returns a JSON-RPC error");
-    assert_eq!(ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+    let error = service.call_tool(CallToolRequestParams::new("missing_tool")).await.unwrap_err();
+    let rmcp::service::ServiceError::McpError(error) = error else {
+        panic!("expected backend MCP error, got {error:?}");
+    };
+    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -717,12 +724,12 @@ async fn secrets_detection_pre_hook_respects_field_allowlist() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn pre_hook_that_rewrites_header_designated_arguments_is_rejected_by_backend() {
+async fn pre_hook_rewrites_payload_without_changing_forwarded_parameter_headers() {
     let plugin = Arc::new(TestPlugin::new("pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
     let observations = plugin.observations();
     let runtime = runtime_with_pre(plugin).await;
 
-    let gateway = start_gateway_with_parameter_headers(TEST_USER_ID, true, runtime).await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
     let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
         .header("Mcp-Param-A", "1")
         .header("Mcp-Param-B", "2")
@@ -730,14 +737,10 @@ async fn pre_hook_that_rewrites_header_designated_arguments_is_rejected_by_backe
         .await
         .expect("plugin-modified request reaches backend");
 
-    assert_eq!(http::StatusCode::OK, response.status());
-    let body = response.text().await.expect("gateway response body");
-    let messages = sse_data_values(&body);
-    assert_eq!(
-        Some(i64::from(ErrorCode::HEADER_MISMATCH.0)),
-        messages.iter().find_map(|message| message["error"]["code"].as_i64())
-    );
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+    assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), successful_tool_text(response).await);
+    assert_eq!("1", last_backend_request_headers(&gateway)["Mcp-Param-A"]);
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!(Some(&Value::from(REWRITTEN_SUM_A)), backend_calls[0].args.as_ref().and_then(|args| args.get("a")));
 
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(1, observations.pre_calls);
