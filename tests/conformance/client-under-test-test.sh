@@ -16,6 +16,7 @@ mkdir -p "${fake_bin}"
 cat > "${fake_bin}/docker" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "${FAKE_DOCKER_ARGS}"
+printf '%s\n' "${FAKE_PREPARED_TOOL_CALLS}"
 EOF
 cat > "${fake_bin}/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -33,6 +34,10 @@ chmod +x "${fake_bin}/docker" "${fake_bin}/curl"
 export PATH="${fake_bin}:${PATH}"
 export FAKE_DOCKER_ARGS="${docker_args}"
 export FAKE_CURL_BODIES="${curl_bodies}"
+export FAKE_PREPARED_TOOL_CALLS='[
+  {"name":"first","arguments":{"region":"west"},"headers":{"Mcp-Param-Region":"west"}},
+  {"name":"second","arguments":{"verbose":null},"headers":{}}
+]'
 export MCP_CONFORMANCE_PROTOCOL_VERSION=2026-07-28
 export MCP_CONFORMANCE_SUBJECT=test-subject
 export MCP_CONFORMANCE_CLIENT_SERVER_ID=test-client-server

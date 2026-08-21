@@ -43,19 +43,23 @@ case "${MCP_CONFORMANCE_SCENARIO}" in
 esac
 
 tool_names="$(jq --exit-status --compact-output '[.[].name] | unique' <<< "${tool_calls}")"
-docker compose -f "${compose_file}" run --rm --no-deps \
+prepared_tool_calls="$(docker compose -f "${compose_file}" run --rm --no-deps \
   --entrypoint python3 control-plane \
   /opt/contextforge-conformance/write_client_config.py \
   "${MCP_CONFORMANCE_SUBJECT}" \
   "${virtual_host_id}" \
   "${backend_url}" \
   "${tool_names}" \
-  > /dev/null
+  "${tool_calls}")"
 
 endpoint="http://127.0.0.1:${conformance_port}/servers/${virtual_host_id}/mcp"
 while IFS= read -r tool_call; do
   tool_name="$(jq --exit-status --raw-output '.name' <<< "${tool_call}")"
   arguments="$(jq --exit-status --compact-output '.arguments' <<< "${tool_call}")"
+  header_args=()
+  while IFS= read -r header; do
+    header_args+=(--header "${header}")
+  done < <(jq --exit-status --raw-output '.headers | to_entries[] | "\(.key): \(.value)"' <<< "${tool_call}")
   request="$(jq --null-input --compact-output \
     --arg name "${tool_name}" \
     --argjson arguments "${arguments}" \
@@ -85,6 +89,7 @@ while IFS= read -r tool_call; do
     --header "MCP-Protocol-Version: ${MCP_CONFORMANCE_PROTOCOL_VERSION}" \
     --header 'MCP-Method: tools/call' \
     --header "MCP-Name: ${tool_name}" \
+    "${header_args[@]}" \
     --data "${request}" \
     "${endpoint}")"
 
@@ -97,4 +102,4 @@ while IFS= read -r tool_call; do
     echo "${response}" >&2
     exit 1
   fi
-done < <(jq --compact-output '.[]' <<< "${tool_calls}")
+done < <(jq --compact-output '.[]' <<< "${prepared_tool_calls}")

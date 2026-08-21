@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import urllib.request
@@ -78,12 +79,58 @@ def fetch_tool_schemas(backend_url: str, tool_names: list[str]) -> dict[str, dic
     return schemas
 
 
+def encode_header_value(value: str) -> str:
+    needs_base64 = (
+        bool(value)
+        and (
+            value[0] in {" ", "\t"}
+            or value[-1] in {" ", "\t"}
+            or any(ord(character) < 0x20 or ord(character) > 0x7E for character in value)
+            or (value.startswith("=?base64?") and value.endswith("?="))
+        )
+    )
+    if not needs_base64:
+        return value
+    encoded = base64.b64encode(value.encode()).decode()
+    return f"=?base64?{encoded}?="
+
+
+def prepare_tool_calls(
+    tool_calls: list[dict[str, object]],
+    tool_schemas: dict[str, dict[str, object]],
+) -> list[dict[str, object]]:
+    prepared = []
+    for tool_call in tool_calls:
+        name = tool_call["name"]
+        arguments = tool_call["arguments"]
+        properties = tool_schemas[name].get("properties", {})
+        headers = {}
+        if isinstance(arguments, dict) and isinstance(properties, dict):
+            for property_name, property_schema in properties.items():
+                if not isinstance(property_schema, dict):
+                    continue
+                annotation = property_schema.get("x-mcp-header")
+                value = arguments.get(property_name)
+                if not isinstance(annotation, str) or not annotation or value is None:
+                    continue
+                if isinstance(value, bool):
+                    value = str(value).lower()
+                elif isinstance(value, (str, int, float)):
+                    value = str(value)
+                else:
+                    continue
+                headers[f"Mcp-Param-{annotation}"] = encode_header_value(value)
+        prepared.append({"name": name, "arguments": arguments, "headers": headers})
+    return prepared
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("subject")
     parser.add_argument("virtual_host_id")
     parser.add_argument("backend_url")
     parser.add_argument("tool_names_json")
+    parser.add_argument("tool_calls_json")
     return parser.parse_args()
 
 
@@ -104,6 +151,18 @@ def main() -> None:
         or not all(isinstance(name, str) and name for name in tool_names)
     ):
         raise SystemExit("tool_names_json must be a non-empty JSON string array")
+    tool_calls = json.loads(args.tool_calls_json)
+    if (
+        not isinstance(tool_calls, list)
+        or not tool_calls
+        or not all(
+            isinstance(tool_call, dict)
+            and isinstance(tool_call.get("name"), str)
+            and isinstance(tool_call.get("arguments"), dict)
+            for tool_call in tool_calls
+        )
+    ):
+        raise SystemExit("tool_calls_json must be a non-empty tool-call array")
 
     backend_name = "conformance-backend"
     tool_schemas = fetch_tool_schemas(args.backend_url, tool_names)
@@ -132,6 +191,7 @@ def main() -> None:
     value = msgpack.dumps(config, use_bin_type=True)
     client = redis.Redis.from_url(redis_url, decode_responses=False)
     client.set(key, value, ex=600)
+    print(json.dumps(prepare_tool_calls(tool_calls, tool_schemas), separators=(",", ":")))
 
 
 if __name__ == "__main__":
