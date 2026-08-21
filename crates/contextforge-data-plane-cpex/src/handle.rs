@@ -331,6 +331,9 @@ fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unknown_lints, reason = "Rust 1.96 predates unused_async_trait_impl")]
+    #![allow(clippy::unused_async_trait_impl, reason = "test plugins implement async interfaces synchronously")]
+
     use std::{
         collections::HashMap,
         sync::{
