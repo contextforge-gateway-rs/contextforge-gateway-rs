@@ -58,12 +58,6 @@ a control-plane responsibility. Server and client results are written below
 `server/` and `client/`, with separate `expected-failures.yml` and
 `client-expected-failures.yml` baselines.
 
-The client lane has no expected failures. Its driver discovers the fixture tool
-schemas to construct the same `Mcp-Param-*` headers as a normal MCP client, then
-asserts that the dataplane forwards them without interpretation. The lane covers
-omission, primitive conversion, and Base64 wrapping for `x-mcp-header`
-annotations.
-
 `make conformance` runs both legs locally, while `make conformance-bless` runs
 both and refreshes both expected-failure baselines from that run.
 

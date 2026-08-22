@@ -91,17 +91,13 @@ covers the legacy/RMCP transport header `Mcp-Session-Id`. It is an
 application-level guard for MCP-related headers only; non-MCP headers remain
 bounded by the HTTP transport.
 
-For stateless requests, the RMCP service requires `MCP-Protocol-Version` and
-the matching per-request protocol metadata before handler dispatch. RMCP also
-validates `Mcp-Method` and `Mcp-Name` against the JSON-RPC body. Computed MCP
-headers are never accepted through backend pass-through/add/remove policy.
-`Mcp-Param-*` headers are forwarded unchanged outside backend header
-configuration, while RMCP regenerates method, routed-name, and protocol-version
-headers. The dataplane does not interpret parameter headers, resolve tool
-schemas, or call backend `tools/list` as part of `tools/call`. The upstream MCP
-server owns parameter-header validation. Plugins receive the full payload; if a
-plugin changes an annotated argument without changing the original request
-header, the upstream server may reject the mismatch.
+Backend header policy cannot add, remove, or replace MCP standard or parameter
+headers. Downstream `Mcp-Param-*` values are forwarded unchanged, while RMCP
+regenerates method, routed-name, and protocol-version headers. The dataplane
+does not interpret parameter headers, resolve tool schemas, or call backend
+`tools/list` as part of `tools/call`; the upstream MCP server owns validation.
+If a plugin changes an annotated argument, the original header remains and the
+upstream server may reject the mismatch.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

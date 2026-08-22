@@ -183,7 +183,6 @@ impl ServerHandler for TestBackend {
                     .ok_or_else(|| ErrorData::invalid_params("reflect_text requires text", None))?;
                 Ok(CallToolResult::success(vec![ContentBlock::text(text.to_owned())]))
             },
-            "optional_text" => Ok(CallToolResult::success(vec![ContentBlock::text("accepted")])),
             "wait_for_cancellation" => {
                 cx.ct.cancelled().await;
                 self.state

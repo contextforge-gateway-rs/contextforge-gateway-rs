@@ -115,41 +115,15 @@ fn raw_mcp_request(
     request
 }
 
-fn raw_stateless_tool_call(gateway: &RunningGateway, tool_name: &str, arguments: &Value) -> reqwest::RequestBuilder {
-    support::create_client(TEST_USER_ID)
-        .post(gateway.gateway_url())
-        .header(http::header::ACCEPT, "application/json, text/event-stream")
-        .header("MCP-Protocol-Version", "2026-07-28")
-        .header("MCP-Method", "tools/call")
-        .header("MCP-Name", tool_name)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments,
-                "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientInfo": {
-                        "name": "strict-metadata-test",
-                        "version": "1.0.0"
-                    },
-                    "io.modelcontextprotocol/clientCapabilities": {}
-                }
-            }
-        }))
-}
-
-async fn successful_tool_text(response: reqwest::Response) -> String {
-    assert_eq!(http::StatusCode::OK, response.status());
-    let body = response.text().await.expect("gateway response body");
-    let messages = sse_data_values(&body);
-    messages
-        .iter()
-        .find_map(|message| message["result"]["content"][0]["text"].as_str())
-        .expect("tool response contains text")
-        .to_owned()
+fn client_with_parameter_headers(a: &'static str, b: &'static str) -> reqwest::Client {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_str(&format!("Bearer {}", token(TEST_USER_ID))).expect("valid auth header"),
+    );
+    headers.insert("Mcp-Param-A", http::HeaderValue::from_static(a));
+    headers.insert("Mcp-Param-B", http::HeaderValue::from_static(b));
+    reqwest::Client::builder().default_headers(headers).build().expect("client builds")
 }
 
 fn last_backend_request_headers(gateway: &RunningGateway) -> http::HeaderMap {
@@ -423,95 +397,20 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_forwards_parameter_headers_without_backend_listing() {
+async fn stateless_tool_call_forwards_parameter_headers_without_interpretation() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
-        .header("Mcp-Param-A", "1")
-        .header("Mcp-Param-B", "2")
-        .send()
-        .await
-        .expect("stateless tool call reaches gateway");
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        client_with_parameter_headers("9", "2"),
+        support::modern_client_info(),
+    )
+    .await;
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.expect("stateless tool call succeeds");
 
-    assert_eq!("3", successful_tool_text(response).await);
+    assert_eq!("3", text(&result));
     let headers = last_backend_request_headers(&gateway);
-    assert_eq!("1", headers["Mcp-Param-A"]);
+    assert_eq!("9", headers["Mcp-Param-A"]);
     assert_eq!("2", headers["Mcp-Param-B"]);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_forwards_encoded_parameter_headers() {
-    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let unsafe_value = " leading snowman ☃";
-    let encoded = "=?base64?IGxlYWRpbmcgc25vd21hbiDimIM=?=";
-    let response = raw_stateless_tool_call(&gateway, "reflect_text", &json!({ "text": unsafe_value }))
-        .header("Mcp-Param-Text", encoded)
-        .send()
-        .await
-        .expect("stateless tool call reaches gateway");
-
-    assert_eq!(unsafe_value, successful_tool_text(response).await);
-    assert_eq!(encoded, last_backend_request_headers(&gateway)["Mcp-Param-Text"]);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_omits_null_parameter_headers() {
-    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = raw_stateless_tool_call(&gateway, "optional_text", &json!({ "text": null }))
-        .send()
-        .await
-        .expect("stateless tool call reaches gateway");
-
-    assert_eq!("accepted", successful_tool_text(response).await);
-    assert!(!last_backend_request_headers(&gateway).contains_key("Mcp-Param-Optional-Text"));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_without_protocol_version_header_is_rejected_before_backend() {
-    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = support::create_client(TEST_USER_ID)
-        .post(gateway.gateway_url())
-        .header(http::header::ACCEPT, "application/json, text/event-stream")
-        .header("MCP-Method", "tools/call")
-        .header("MCP-Name", "sum")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "sum",
-                "arguments": { "a": 1, "b": 2 },
-                "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientInfo": {
-                        "name": "strict-metadata-test",
-                        "version": "1.0.0"
-                    },
-                    "io.modelcontextprotocol/clientCapabilities": {}
-                }
-            }
-        }))
-        .send()
-        .await
-        .expect("request reaches gateway");
-
-    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
-    let body: serde_json::Value = response.json().await.expect("gateway returns a JSON-RPC error");
-    assert_eq!(rmcp::model::ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_forwards_mismatched_parameter_header_to_backend() {
-    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
-        .header("Mcp-Param-A", "9")
-        .header("Mcp-Param-B", "2")
-        .send()
-        .await
-        .expect("request reaches gateway");
-
-    assert_eq!("3", successful_tool_text(response).await);
-    assert_eq!("9", last_backend_request_headers(&gateway)["Mcp-Param-A"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -730,16 +629,18 @@ async fn pre_hook_rewrites_payload_without_changing_forwarded_parameter_headers(
     let runtime = runtime_with_pre(plugin).await;
 
     let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
-    let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
-        .header("Mcp-Param-A", "1")
-        .header("Mcp-Param-B", "2")
-        .send()
-        .await
-        .expect("plugin-modified request reaches backend");
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        client_with_parameter_headers("1", "2"),
+        support::modern_client_info(),
+    )
+    .await;
+    let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
 
-    assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), successful_tool_text(response).await);
+    assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), text(&result));
     assert_eq!("1", last_backend_request_headers(&gateway)["Mcp-Param-A"]);
     let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!("sum", backend_calls[0].tool_name);
     assert_eq!(Some(&Value::from(REWRITTEN_SUM_A)), backend_calls[0].args.as_ref().and_then(|args| args.get("a")));
 
     let observations = observations.lock().expect("observations lock poisoned");

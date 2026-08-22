@@ -6,7 +6,6 @@ state_dir="$(mktemp -d "${TMPDIR:-/tmp}/contextforge-client-adapter-test.XXXXXX"
 fake_bin="${state_dir}/bin"
 docker_args="${state_dir}/docker-args"
 curl_bodies="${state_dir}/curl-bodies"
-curl_args="${state_dir}/curl-args"
 
 cleanup() {
   rm -rf -- "${state_dir}"
@@ -17,11 +16,9 @@ mkdir -p "${fake_bin}"
 cat > "${fake_bin}/docker" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "${FAKE_DOCKER_ARGS}"
-printf '%s\n' "${FAKE_PREPARED_TOOL_CALLS}"
 EOF
 cat > "${fake_bin}/curl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "${FAKE_CURL_ARGS}"
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--data" ]; then
     shift
@@ -36,11 +33,6 @@ chmod +x "${fake_bin}/docker" "${fake_bin}/curl"
 export PATH="${fake_bin}:${PATH}"
 export FAKE_DOCKER_ARGS="${docker_args}"
 export FAKE_CURL_BODIES="${curl_bodies}"
-export FAKE_CURL_ARGS="${curl_args}"
-export FAKE_PREPARED_TOOL_CALLS='[
-  {"name":"first","arguments":{"region":"west","empty_val":""},"headers":{"Mcp-Param-Region":"west","Mcp-Param-EmptyVal":""}},
-  {"name":"second","arguments":{"verbose":null},"headers":{}}
-]'
 export MCP_CONFORMANCE_PROTOCOL_VERSION=2026-07-28
 export MCP_CONFORMANCE_SUBJECT=test-subject
 export MCP_CONFORMANCE_CLIENT_SERVER_ID=test-client-server
@@ -57,8 +49,7 @@ export MCP_CONFORMANCE_CONTEXT='{
 "${script_dir}/client-under-test.sh" "http://localhost:43123/mcp"
 
 grep --fixed-strings --quiet -- 'http://host.docker.internal:43123/mcp' "${docker_args}"
-grep --fixed-strings --quiet -- 'Mcp-Param-Region: west' "${curl_args}"
-grep --fixed-strings --quiet -- 'Mcp-Param-EmptyVal;' "${curl_args}"
+grep --fixed-strings --quiet -- '["first","second"]' "${docker_args}"
 test "$(wc -l < "${curl_bodies}" | tr -d '[:space:]')" -eq 2
 jq --exit-status --slurp '
   length == 2 and

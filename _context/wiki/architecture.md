@@ -143,7 +143,7 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
 - List methods fan out to all connected backends concurrently and merge.
 - Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
-- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, forwards downstream `Mcp-Param-*` headers unchanged, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning. RMCP regenerates the method, routed name, and protocol-version headers. The dataplane does not interpret parameter headers or fetch tool schemas; the upstream MCP server owns their validation. Plugins can modify the full payload without the gateway rewriting headers.
+- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, forwards downstream `Mcp-Param-*` headers unchanged, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning. Plugins can rewrite the payload but not the forwarded headers; RMCP regenerates the method, routed name, and protocol-version headers.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow
