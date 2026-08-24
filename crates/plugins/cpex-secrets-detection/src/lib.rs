@@ -80,12 +80,12 @@ impl Plugin for StageHandler {
 }
 
 impl HookHandler<CmfHook> for StageHandler {
-    async fn handle(
+    fn handle(
         &self,
         payload: &MessagePayload,
         extensions: &Extensions,
         _ctx: &mut PluginContext,
-    ) -> PluginResult<MessagePayload> {
+    ) -> impl std::future::Future<Output = PluginResult<MessagePayload>> {
         let scan = self.scan_payload(payload);
 
         if self.core.should_block(scan.count) {
@@ -93,20 +93,20 @@ impl HookHandler<CmfHook> for StageHandler {
             let mut result = PluginResult::deny(violation);
             result.modified_payload = scan.modified_payload.or_else(|| Some(payload.clone()));
             attach_metrics(&mut result, extensions, scan.count, &scan.findings, DetectionOutcome::Blocked);
-            return result;
+            return std::future::ready(result);
         }
 
         if let Some(modified_payload) = scan.modified_payload {
             let mut result = PluginResult::modify_payload(modified_payload);
             attach_metrics(&mut result, extensions, scan.count, &scan.findings, DetectionOutcome::Masked);
-            return result;
+            return std::future::ready(result);
         }
 
         let mut result = PluginResult::allow();
         if scan.count > 0 {
             attach_metrics(&mut result, extensions, scan.count, &scan.findings, DetectionOutcome::None);
         }
-        result
+        std::future::ready(result)
     }
 }
 

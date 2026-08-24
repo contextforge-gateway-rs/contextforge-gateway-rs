@@ -59,20 +59,20 @@ struct TestBackend {
 }
 
 impl ServerHandler for TestBackend {
-    async fn initialize(
+    fn initialize(
         &self,
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("secrets-e2e-backend", "0.1.0")))
+    ) -> impl std::future::Future<Output = Result<InitializeResult, ErrorData>> {
+        std::future::ready(Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("secrets-e2e-backend", "0.1.0"))))
     }
 
-    async fn call_tool(
+    fn call_tool(
         &self,
         request: CallToolRequestParams,
         _cx: RequestContext<RoleServer>,
-    ) -> Result<CallToolResponse, ErrorData> {
+    ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>> {
         self.state
             .calls
             .lock()
@@ -81,27 +81,22 @@ impl ServerHandler for TestBackend {
 
         let result = match request.name.as_ref() {
             "sum" => {
-                let args = request
-                    .arguments
-                    .as_ref()
-                    .ok_or_else(|| ErrorData::invalid_params("sum requires arguments", None))?;
-                let a = args
-                    .get("a")
-                    .and_then(Value::as_i64)
-                    .ok_or_else(|| ErrorData::invalid_params("sum requires numeric a", None))?;
-                let b = args
-                    .get("b")
-                    .and_then(Value::as_i64)
-                    .ok_or_else(|| ErrorData::invalid_params("sum requires numeric b", None))?;
+                let Some(args) = request.arguments.as_ref() else {
+                    return std::future::ready(Err(ErrorData::invalid_params("sum requires arguments", None)));
+                };
+                let Some(a) = args.get("a").and_then(Value::as_i64) else {
+                    return std::future::ready(Err(ErrorData::invalid_params("sum requires numeric a", None)));
+                };
+                let Some(b) = args.get("b").and_then(Value::as_i64) else {
+                    return std::future::ready(Err(ErrorData::invalid_params("sum requires numeric b", None)));
+                };
                 Ok(CallToolResult::success(vec![ContentBlock::text((a + b).to_string())]))
             },
             "reflect_text" => {
-                let text = request
-                    .arguments
-                    .as_ref()
-                    .and_then(|args| args.get("text"))
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| ErrorData::invalid_params("reflect_text requires text", None))?;
+                let Some(text) = request.arguments.as_ref().and_then(|args| args.get("text")).and_then(Value::as_str)
+                else {
+                    return std::future::ready(Err(ErrorData::invalid_params("reflect_text requires text", None)));
+                };
                 Ok(CallToolResult::success(vec![ContentBlock::text(text.to_owned())]))
             },
             _ => Err(ErrorData {
@@ -109,9 +104,9 @@ impl ServerHandler for TestBackend {
                 message: format!("unknown tool {}", request.name).into(),
                 data: None,
             }),
-        }?;
+        };
 
-        Ok(result.into())
+        std::future::ready(result.map(Into::into))
     }
 }
 

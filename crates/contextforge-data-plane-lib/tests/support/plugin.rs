@@ -154,12 +154,12 @@ impl Plugin for TestPlugin {
 }
 
 impl HookHandler<CmfHook> for TestPlugin {
-    async fn handle(
+    fn handle(
         &self,
         payload: &MessagePayload,
         _extensions: &Extensions,
         ctx: &mut PluginContext,
-    ) -> PluginResult<MessagePayload> {
+    ) -> impl std::future::Future<Output = PluginResult<MessagePayload>> {
         let is_post = payload.message.role == Role::Tool;
         let mut observations = self.observations.lock().expect("observations lock poisoned");
         if is_post {
@@ -180,7 +180,7 @@ impl HookHandler<CmfHook> for TestPlugin {
         }
         drop(observations);
 
-        if is_post {
+        std::future::ready(if is_post {
             match self.post_behavior {
                 PostBehavior::Allow => PluginResult::allow(),
                 PostBehavior::Rewrite => {
@@ -190,7 +190,7 @@ impl HookHandler<CmfHook> for TestPlugin {
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
                         if !is_tool_result_content(&content.content) {
-                            return PluginResult::allow();
+                            return std::future::ready(PluginResult::allow());
                         }
                         content.content = serde_json::to_value(CallToolResult::success(vec![ContentBlock::text(
                             format!("post:{result_text}"),
@@ -205,7 +205,7 @@ impl HookHandler<CmfHook> for TestPlugin {
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
                     {
                         if !is_tool_result_content(&content.content) {
-                            return PluginResult::allow();
+                            return std::future::ready(PluginResult::allow());
                         }
                         content.content = json!("raw-post");
                     }
@@ -220,7 +220,7 @@ impl HookHandler<CmfHook> for TestPlugin {
                     {
                         progress.message = progress.message.map(|message| format!("plugin:{message}"));
                         content.content = serde_json::to_value(progress).expect("progress serializes");
-                        return PluginResult::modify_payload(modified);
+                        return std::future::ready(PluginResult::modify_payload(modified));
                     }
                     PluginResult::allow()
                 },
@@ -279,7 +279,7 @@ impl HookHandler<CmfHook> for TestPlugin {
                     PluginResult::allow()
                 },
             }
-        }
+        })
     }
 }
 
@@ -492,17 +492,17 @@ impl Plugin for PromptTestPlugin {
 }
 
 impl HookHandler<CmfHook> for PromptTestPlugin {
-    async fn handle(
+    fn handle(
         &self,
         payload: &MessagePayload,
         _extensions: &Extensions,
         ctx: &mut PluginContext,
-    ) -> PluginResult<MessagePayload> {
-        if payload.message.get_prompt_results().is_empty() {
+    ) -> impl std::future::Future<Output = PluginResult<MessagePayload>> {
+        std::future::ready(if payload.message.get_prompt_results().is_empty() {
             self.handle_pre(payload, ctx)
         } else {
             self.handle_post(payload, ctx)
-        }
+        })
     }
 }
 

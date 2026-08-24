@@ -510,12 +510,12 @@ mod tests {
     }
 
     impl HookHandler<CmfHook> for TestPlugin {
-        async fn handle(
+        fn handle(
             &self,
             payload: &MessagePayload,
             _extensions: &Extensions,
             ctx: &mut PluginContext,
-        ) -> PluginResult<MessagePayload> {
+        ) -> impl std::future::Future<Output = PluginResult<MessagePayload>> {
             let is_post = payload.message.role == Role::Tool;
             let mut observations = self.observations.lock().expect("observations lock poisoned");
             if is_post {
@@ -529,7 +529,7 @@ mod tests {
             }
             drop(observations);
 
-            if is_post {
+            std::future::ready(if is_post {
                 match self.post_behavior {
                     PostBehavior::Allow => PluginResult::allow(),
                     PostBehavior::Rewrite => PluginResult::modify_payload(payload.clone()),
@@ -604,7 +604,7 @@ mod tests {
                         PluginResult::allow()
                     },
                 }
-            }
+            })
         }
     }
 
