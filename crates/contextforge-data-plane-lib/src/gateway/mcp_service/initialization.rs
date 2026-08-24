@@ -174,6 +174,7 @@ mod tests {
             add_headers: add.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
             remove_headers: remove.iter().map(|s| (*s).to_owned()).collect(),
             allowed_tool_names: vec![],
+            tool_schemas: HashMap::new(),
             tool_name_aliases: HashMap::new(),
             allowed_resource_names: vec![],
             allowed_prompt_names: vec![],

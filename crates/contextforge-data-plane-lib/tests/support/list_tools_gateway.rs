@@ -231,6 +231,10 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),
                     allowed_tool_names: Vec::new(),
+                    tool_schemas: MOCK_COUNTER_TOOL_NAMES
+                        .iter()
+                        .map(|name| ((*name).to_owned(), serde_json::Map::new()))
+                        .collect(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
                         .map(|tool_name| (format!("backend-{port}.{tool_name}"), (*tool_name).to_owned()))

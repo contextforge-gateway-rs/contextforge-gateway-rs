@@ -22,7 +22,7 @@ pub(crate) fn prefixed_name(backend_name: &str, rest: &str) -> String {
 
 /// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
 /// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
-pub(super) fn resolve_tool_route<'a, N: AsRef<str>>(
+pub(crate) fn resolve_tool_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
@@ -152,6 +152,7 @@ mod tests {
                     "url": "http://upstream:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats", "echo"],
+                    "tool_schemas": {},
                     "tool_name_aliases": {
                         "Public.Tool": "get_stats",
                         "Echo_Tool": "echo"
@@ -183,6 +184,7 @@ mod tests {
                     "url": "http://upstream:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats"],
+                    "tool_schemas": {},
                     "allowed_resource_names": [],
                     "allowed_prompt_names": []
                 },
@@ -191,6 +193,7 @@ mod tests {
                     "url": "http://other:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": [],
+                    "tool_schemas": {},
                     "allowed_resource_names": [],
                     "allowed_prompt_names": []
                 }

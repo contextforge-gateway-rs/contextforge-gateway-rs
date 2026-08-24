@@ -36,6 +36,8 @@ pub struct BackendMCPGateway {
     pub allowed_resource_names: Vec<String>,
     pub allowed_prompt_names: Vec<String>,
     pub allowed_tool_names: Vec<String>,
+    /// Input schemas keyed by the original upstream tool name.
+    pub tool_schemas: HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

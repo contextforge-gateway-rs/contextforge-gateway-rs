@@ -92,12 +92,14 @@ application-level guard for MCP-related headers only; non-MCP headers remain
 bounded by the HTTP transport.
 
 Backend header policy cannot add, remove, or replace MCP standard or parameter
-headers. Downstream `Mcp-Param-*` values are forwarded unchanged, while RMCP
-regenerates method, routed-name, and protocol-version headers. The dataplane
-does not interpret parameter headers, resolve tool schemas, or call backend
-`tools/list` as part of `tools/call`; the upstream MCP server owns validation.
-If a plugin changes an annotated argument, the original header remains and the
-upstream server may reject the mismatch.
+headers. For modern `tools/call`, the dataplane resolves the authenticated
+user, virtual host, backend, and original tool name before validating
+`Mcp-Param-*` against the control-plane-published input schema. A missing schema
+or header/body mismatch fails closed with HTTP `400` and JSON-RPC `-32020`.
+Validation does not call backend `tools/list`. Validated values are forwarded
+unchanged, while RMCP regenerates method, routed-name, and protocol-version
+headers. If a plugin later changes an annotated argument, the original header
+remains and the upstream server may reject the mismatch.
 
 ## Local Bootstrap Helpers (`with_tools`)
 

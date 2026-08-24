@@ -22,6 +22,7 @@ TCP/TLS listener
   -> session_id_layer            → inserts SessionId if present
   -> user_config_store_layer     → inserts UserConfig              (400 no config, 500 store error)
   -> virtual_host_config_layer   → rejects unknown vhost           (404 "Server not found")
+  -> mcp_param_validation_layer  → validates tools/call params      (400/-32020 on mismatch)
   -> /servers/{virtual_host_name}/mcp RMCP service → validates Host, then dispatches MCP
 ```
 
@@ -40,7 +41,7 @@ MCP handlers read typed extensions — they never parse headers, paths, or Redis
 ```text
 downstream request
   -> Origin validation → MCP header limits → virtual host extraction → JWT validation → session extraction
-  -> user config lookup → RMCP Host validation → MCP handler validation
+  -> user config lookup → parameter-header validation → RMCP Host validation → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)
 
@@ -66,7 +67,7 @@ flowchart TD
 flowchart TD
     D(["downstream request"])
     A["virtual host · JWT\nsession extract"]
-    C["user config lookup\nMCP validate"]
+    C["user config lookup\nparameter headers · MCP validate"]
     P1["request plugins\ntool_pre_invoke"]
     B["backend MCP call\njoin_all for init/list"]
     P2["response plugins\ntool_post_invoke"]
@@ -76,6 +77,13 @@ flowchart TD
     D --> A --> C --> P1 --> B --> P2 --> M --> T --> U
 ```
 
+
+For modern `tools/call`, the parameter-header layer resolves the request's
+backend and original tool name, then validates `Mcp-Param-*` against the input
+schema published in `UserConfig`. It does not call backend `tools/list`.
+Validated headers are forwarded unchanged; request plugins run afterward, so a
+plugin that changes an annotated argument also owns the resulting upstream
+mismatch.
 
 Order is invariant: auth/config before backend selection; request plugins before upstream; response plugins before returning.
 
@@ -143,7 +151,7 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
 - List methods fan out to all connected backends concurrently and merge.
 - Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
-- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, forwards downstream `Mcp-Param-*` headers unchanged, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning. Plugins can rewrite the payload but not the forwarded headers; RMCP regenerates the method, routed name, and protocol-version headers.
+- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow
