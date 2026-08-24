@@ -8,6 +8,7 @@ keywords.workspace = true
 homepage.workspace = true
 readme.workspace = true
 repository.workspace = true
+default-run = "contextforge-data-plane"
 
 
 [dependencies]

@@ -7,7 +7,6 @@ members = [
     "crates/contextforge-load-test",
     "crates/plugins/cpex-secrets-detection",
 ]
-default-members = ["crates/contextforge-data-plane"]
 resolver = "3"
 
 [workspace.package]
@@ -19,6 +18,7 @@ keywords = ["mcp", "gateway", "rust", "contextforge", "a2a", "ai", "llm"]
 homepage = "https://github.com/contextforge-org/contextforge-data-plane"
 readme = "./README.md"
 repository = "https://github.com/contextforge-org/contextforge-data-plane"
+
 
 
 [workspace.dependencies]
