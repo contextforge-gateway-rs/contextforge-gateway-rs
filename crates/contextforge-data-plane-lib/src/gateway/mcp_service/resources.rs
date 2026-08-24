@@ -15,17 +15,13 @@ use crate::gateway::{
     mcp_call_validator::AuthorizedCallValidator,
     mcp_service::initialization::connect_backend_for_request,
     session_manager::SessionManager,
-    session_store::UserSessionStore,
 };
 
-pub(super) async fn list_resources<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_resources(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
-) -> Result<ListResourcesResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<ListResourcesResult, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("list_resources", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let namespace_identifiers = virtual_host.backends.len() > 1;
@@ -68,14 +64,11 @@ where
     Ok(result)
 }
 
-pub(super) async fn read_resource<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn read_resource(
+    mcp_service: &McpService,
     request: ReadResourceRequestParams,
     cx: RequestContext<RoleServer>,
-) -> Result<ReadResourceResponse, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<ReadResourceResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
@@ -113,14 +106,11 @@ where
     Ok(response.into())
 }
 
-pub(super) async fn list_resource_templates<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_resource_templates(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
-) -> Result<ListResourceTemplatesResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<ListResourceTemplatesResult, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("list_resource_templates", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let namespace_identifiers = virtual_host.backends.len() > 1;
@@ -166,14 +156,11 @@ where
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
-pub(super) async fn subscribe<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn subscribe(
+    mcp_service: &McpService,
     request: SubscribeRequestParams,
     cx: RequestContext<RoleServer>,
-) -> Result<(), ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<(), ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("subscribe", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
@@ -199,14 +186,11 @@ where
 }
 
 #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
-pub(super) async fn unsubscribe<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn unsubscribe(
+    mcp_service: &McpService,
     request: UnsubscribeRequestParams,
     cx: RequestContext<RoleServer>,
-) -> Result<(), ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<(), ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("unsubscribe", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);

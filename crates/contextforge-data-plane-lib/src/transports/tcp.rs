@@ -32,10 +32,7 @@ impl TryFrom<&Config> for Option<Tcp> {
     type Error = crate::Error;
 
     fn try_from(config: &Config) -> Result<Self, Self::Error> {
-        match config.address {
-            Some(address) => Ok(Some(Tcp { address })),
-            None => Ok(None),
-        }
+        Ok(Some(Tcp { address: config.address }))
     }
 }
 

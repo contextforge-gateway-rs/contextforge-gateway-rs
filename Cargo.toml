@@ -7,6 +7,7 @@ members = [
     "crates/contextforge-load-test",
     "crates/plugins/cpex-secrets-detection",
 ]
+default-members = ["crates/contextforge-data-plane"]
 resolver = "3"
 
 [workspace.package]

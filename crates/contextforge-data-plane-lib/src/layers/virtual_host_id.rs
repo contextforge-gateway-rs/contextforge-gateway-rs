@@ -20,8 +20,8 @@ impl VirtualHostId {
 pub async fn virtual_host_id_layer(mut request: http::Request<axum::body::Body>, next: Next) -> Response {
     let path = request.uri().path().to_owned();
 
-    debug!("virtual_host_id_layer - extracting virtual host from path path = {path}");
     if let Some(virtual_host_id) = extract_virtual_host_id(&path) {
+        debug!("virtual_host_id_layer - extracted virtual host from path path = {path}");
         request.extensions_mut().insert(virtual_host_id);
         next.run(request).await
     } else {

@@ -116,19 +116,17 @@ impl Gateway {
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service
-        let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
-            StreamableHttpService::new(
-                move || {
-                    Ok(McpService::builder()
-                        .with_user_session_store(user_session_store.clone())
-                        .with_http_client(reqwest_backend_client.clone())
-                        .with_transports(backend_transports.clone())
-                        .with_plugin_runtime(plugin_runtime.clone())
-                        .build())
-                },
-                session_manager,
-                streamable_config,
-            );
+        let mcp_service: StreamableHttpService<McpService, LocalSessionManager> = StreamableHttpService::new(
+            move || {
+                Ok(McpService::builder()
+                    .with_http_client(reqwest_backend_client.clone())
+                    .with_transports(backend_transports.clone())
+                    .with_plugin_runtime(plugin_runtime.clone())
+                    .build())
+            },
+            session_manager,
+            streamable_config,
+        );
 
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 

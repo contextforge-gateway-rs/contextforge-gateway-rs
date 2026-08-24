@@ -13,17 +13,13 @@ use crate::gateway::{
     mcp_call_validator::AuthorizedCallValidator,
     mcp_service::initialization::connect_backend_for_request,
     session_manager::SessionManager,
-    session_store::UserSessionStore,
 };
 
-pub(super) async fn list_prompts<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_prompts(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
-) -> Result<ListPromptsResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<ListPromptsResult, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("list_prompts", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let namespace_identifiers = virtual_host.backends.len() > 1;
@@ -66,14 +62,11 @@ where
     Ok(result)
 }
 
-pub(super) async fn get_prompt<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn get_prompt(
+    mcp_service: &McpService,
     request: GetPromptRequestParams,
     cx: RequestContext<RoleServer>,
-) -> Result<GetPromptResponse, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<GetPromptResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();

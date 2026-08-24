@@ -33,7 +33,7 @@ pub(crate) struct ListToolsGatewaySettings {
 /// Gateway config for plaintext-upstream tests, shared by the integration test binaries.
 pub(crate) fn plaintext_config(gateway_port: u16) -> Config {
     Config {
-        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+        address: format!("127.0.0.1:{gateway_port}").parse().expect("This should work"),
         token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         ..Default::default()
@@ -53,7 +53,7 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
 
 pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<ListToolsGatewaySettings> {
     let mocked_user_config_store = MemoryUserConfigStore::default();
-    let gateway_port = config.address.ok_or("Invalid configuration")?.port();
+    let gateway_port = config.address.port();
 
     let service = StreamableHttpService::new(
         || Ok(mock_counter::Counter::new()),
@@ -107,23 +107,20 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     }
     .boxed();
 
-    if let Some(address) = config.address.as_ref() {
-        let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
+    let address = config.address;
+    let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
-        let handle =
-            tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
+    let handle =
+        tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
-        Ok(ListToolsGatewaySettings {
-            handle,
-            gateway_url,
-            expected_tool_names: virtual_host_one_tool_names,
-            expected_prompt_names: virtual_host_one_prompt_names,
-            expected_resource_template_names: virtual_host_one_resource_template_names,
-            expected_resource_template_uris: virtual_host_one_resource_template_uris,
-        })
-    } else {
-        Err("Invalid configuration".into())
-    }
+    Ok(ListToolsGatewaySettings {
+        handle,
+        gateway_url,
+        expected_tool_names: virtual_host_one_tool_names,
+        expected_prompt_names: virtual_host_one_prompt_names,
+        expected_resource_template_names: virtual_host_one_resource_template_names,
+        expected_resource_template_uris: virtual_host_one_resource_template_uris,
+    })
 }
 
 pub(crate) async fn create_tls_gateway_with_four_tls_counters(

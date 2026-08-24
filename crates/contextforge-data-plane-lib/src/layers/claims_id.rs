@@ -1,5 +1,4 @@
 use axum::{
-    body::Body,
     extract::{Request, State},
     middleware::Next,
     response::Response,
@@ -12,11 +11,11 @@ use crate::{
     const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
 };
 
-fn unauthorized_response() -> Response {
+fn unauthorized_response(message: &str) -> Response {
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
         .header(header::CONTENT_TYPE, "text/plain")
-        .body(Body::empty())
+        .body(message.to_owned().into())
         .expect("Expecting this to work")
 }
 
@@ -28,41 +27,47 @@ pub async fn claims_layer(
     let decoding_keys = state.jwt_token_decoding_keys;
     let (mut parts, body) = request.into_parts();
 
-    let Some(authorization) = parts.headers.get("Authorization") else { return unauthorized_response() };
+    let Some(authorization) = parts.headers.get("Authorization") else { return unauthorized_response("No header") };
 
-    let Some(token) = authorization.as_bytes().strip_prefix(b"Bearer ") else { return unauthorized_response() };
+    let Some(token) = authorization.as_bytes().strip_prefix(b"Bearer ") else {
+        return unauthorized_response("Invalid token");
+    };
 
-    let Ok(raw_token) = str::from_utf8(token) else { return unauthorized_response() };
+    let Ok(raw_token) = str::from_utf8(token) else { return unauthorized_response("Invalid token encoding") };
 
-    let Ok(header) = jsonwebtoken::decode_header(raw_token) else { return unauthorized_response() };
+    let Ok(header) = jsonwebtoken::decode_header(raw_token) else { return unauthorized_response("Invalid header") };
 
     let mut validation = Validation::new(header.alg);
     validation.set_audience(&[CONTEXT_FORGE_GATEWAY_AUDIENCE]);
     validation.set_issuer(&[CONTEXT_FORGE_GATEWAY_ISSUER]);
-    validation.validate_exp = true;
-
     let claims = match header.alg {
         jsonwebtoken::Algorithm::RS256 | jsonwebtoken::Algorithm::RS384 | jsonwebtoken::Algorithm::RS512 => {
             let Some(decoding_key) = decoding_keys.rs.as_ref() else {
                 return Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
                     .header(header::CONTENT_TYPE, "text/plain")
-                    .body(Body::empty())
+                    .body("Invalid key".into())
                     .expect("Expecting this to work");
             };
             let maybe_valid = jsonwebtoken::decode::<ContextForgeClaims>(raw_token, decoding_key, &validation);
-            let Ok(claims) = maybe_valid else { return unauthorized_response() };
+            let Ok(claims) = maybe_valid else {
+                return unauthorized_response(&format!("Invalid claims {maybe_valid:?}"));
+            };
             claims
         },
         jsonwebtoken::Algorithm::HS256 | jsonwebtoken::Algorithm::HS384 | jsonwebtoken::Algorithm::HS512 => {
-            let Some(decoding_key) = decoding_keys.hmac_sha.as_ref() else { return unauthorized_response() };
+            let Some(decoding_key) = decoding_keys.hmac_sha.as_ref() else {
+                return unauthorized_response("Invalid decoding key");
+            };
             let maybe_valid = jsonwebtoken::decode::<ContextForgeClaims>(raw_token, decoding_key, &validation);
-            let Ok(claims) = maybe_valid else { return unauthorized_response() };
+            let Ok(claims) = maybe_valid else { return unauthorized_response("Invalid claims") };
 
             claims
         },
 
-        _ => return unauthorized_response(),
+        _ => {
+            return unauthorized_response("Invalid algorithm");
+        },
     };
 
     let claims: ContextForgeClaims = claims.claims;

@@ -17,28 +17,19 @@ use rmcp::{
 };
 use typed_builder::TypedBuilder;
 
-use crate::gateway::UserSessionStore;
-
 use super::backend_transports::BackendTransports;
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
-pub struct McpService<T>
-where
-    T: UserSessionStore,
-{
+pub struct McpService {
     #[builder(default = BackendTransports::default())]
     transports: BackendTransports,
     http_client: reqwest::Client,
-    user_session_store: T,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
 }
 
-impl<T> ServerHandler for McpService<T>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+impl ServerHandler for McpService {
     async fn initialize(
         &self,
         request: InitializeRequestParams,

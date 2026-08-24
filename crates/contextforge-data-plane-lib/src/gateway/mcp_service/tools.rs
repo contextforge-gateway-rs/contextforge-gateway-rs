@@ -14,17 +14,13 @@ use crate::gateway::{
     mcp_call_validator::AuthorizedCallValidator,
     mcp_service::initialization::connect_backend_for_request,
     session_manager::SessionManager,
-    session_store::UserSessionStore,
 };
 
-pub(super) async fn list_tools<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn list_tools(
+    mcp_service: &McpService,
     request: Option<PaginatedRequestParams>,
     cx: RequestContext<RoleServer>,
-) -> Result<ListToolsResult, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<ListToolsResult, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("list_tools", &cx);
     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
@@ -68,14 +64,11 @@ where
     Ok(result)
 }
 
-pub(super) async fn call_tool<T>(
-    mcp_service: &McpService<T>,
+pub(super) async fn call_tool(
+    mcp_service: &McpService,
     request: CallToolRequestParams,
     cx: RequestContext<RoleServer>,
-) -> Result<CallToolResponse, ErrorData>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+) -> Result<CallToolResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
