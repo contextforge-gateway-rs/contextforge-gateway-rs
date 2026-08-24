@@ -8,10 +8,10 @@ use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, GetPromptRequestParams,
-        GetPromptResponse, InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
-        SubscribeRequestParams, UnsubscribeRequestParams,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResponse, InitializeRequestParams, InitializeResult, ListPromptsResult,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ReadResourceRequestParams, ReadResourceResponse, SubscribeRequestParams, UnsubscribeRequestParams,
     },
     service::RequestContext,
 };
@@ -40,10 +40,15 @@ impl ServerHandler for McpService {
 
     async fn list_tools(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        tools::list_tools(self, request, cx).await
+        async {}.await;
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn call_tool(
@@ -56,10 +61,15 @@ impl ServerHandler for McpService {
 
     async fn list_resources(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        resources::list_resources(self, request, cx).await
+        async {}.await;
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn read_resource(
@@ -72,10 +82,15 @@ impl ServerHandler for McpService {
 
     async fn list_resource_templates(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        resources::list_resource_templates(self, request, cx).await
+        async {}.await;
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn subscribe(
@@ -96,10 +111,15 @@ impl ServerHandler for McpService {
 
     async fn list_prompts(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        prompts::list_prompts(self, request, cx).await
+        async {}.await;
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn get_prompt(

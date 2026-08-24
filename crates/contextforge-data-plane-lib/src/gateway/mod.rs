@@ -1,7 +1,7 @@
 mod backend_client;
 mod backend_transports;
 mod identifier_routing;
-mod list_aggregation;
+
 mod mcp_call_validator;
 mod mcp_service;
 mod session_manager;

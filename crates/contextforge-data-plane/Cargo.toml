@@ -12,7 +12,7 @@ repository.workspace = true
 
 [dependencies]
 contextforge-data-plane-cpex.workspace = true
-contextforge-data-plane-lib = { path = "../contextforge-data-plane-lib", features=["with_tools"]}
+contextforge-data-plane-lib = { path = "../contextforge-data-plane-lib"}
 # These demo plugins remain in their independently hosted legacy repository.
 cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
 cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
@@ -36,7 +36,6 @@ rustls.workspace = true
 [features]
 plugins = ["dep:cpex-secrets-detection"]
 test-plugins = ["dep:cpex-payload-marker", "dep:cpex-text-prefixer", "dep:cpex-tool-namespace"]
-with_tools = []
 
 [dev-dependencies]
 axum.workspace = true
