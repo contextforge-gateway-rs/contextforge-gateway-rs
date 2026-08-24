@@ -59,20 +59,22 @@ struct TestBackend {
 }
 
 impl ServerHandler for TestBackend {
-    async fn initialize(
+    fn initialize(
         &self,
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
-            .with_server_info(Implementation::new("test-backend", "0.1.0")))
+    ) -> impl std::future::Future<Output = Result<InitializeResult, ErrorData>> {
+        std::future::ready(Ok(InitializeResult::new(
+            ServerCapabilities::builder().enable_tools().enable_prompts().build(),
+        )
+        .with_server_info(Implementation::new("test-backend", "0.1.0"))))
     }
 
-    async fn get_prompt(
+    fn get_prompt(
         &self,
         request: GetPromptRequestParams,
         _cx: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResponse, ErrorData> {
+    ) -> impl std::future::Future<Output = Result<GetPromptResponse, ErrorData>> {
         self.state
             .prompts
             .lock()
@@ -87,7 +89,7 @@ impl ServerHandler for TestBackend {
             .and_then(Value::as_str)
             .unwrap_or("nothing");
         if request.name == "review_bundle" {
-            return Ok(GetPromptResult::new(vec![
+            return std::future::ready(Ok(GetPromptResult::new(vec![
                 PromptMessage::new_text(Role::User, format!("review of {topic}")),
                 PromptMessage::new(
                     Role::User,
@@ -95,10 +97,14 @@ impl ServerHandler for TestBackend {
                 ),
                 PromptMessage::new(Role::Assistant, ContentBlock::image(BACKEND_PROMPT_IMAGE, "image/png")),
             ])
-            .into());
+            .into()));
         }
 
-        Ok(GetPromptResult::new(vec![PromptMessage::new_text(Role::User, format!("review of {topic}"))]).into())
+        std::future::ready(Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+            Role::User,
+            format!("review of {topic}"),
+        )])
+        .into()))
     }
 
     async fn call_tool(
