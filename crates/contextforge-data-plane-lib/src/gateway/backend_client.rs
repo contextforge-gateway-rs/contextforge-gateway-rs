@@ -91,18 +91,6 @@ impl GatewayBackendClient {
         calls.get(progress_token).cloned()
     }
 
-    pub(crate) async fn track_resource_subscription(&self, resource_uri: &str, downstream: Peer<RoleServer>) {
-        debug!("track_resource_subscription backend {} uri {resource_uri}", self.backend_name);
-        let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.insert(resource_uri.to_owned(), downstream);
-    }
-
-    pub(crate) async fn stop_tracking_resource_subscription(&self, resource_uri: &str) {
-        debug!("stop_tracking_resource_subscription backend {} uri {resource_uri}", self.backend_name);
-        let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.remove(resource_uri);
-    }
-
     async fn resource_subscription(&self, resource_uri: &str) -> Option<Peer<RoleServer>> {
         let subscriptions = self.resource_subscriptions.lock().await;
         subscriptions.get(resource_uri).cloned()

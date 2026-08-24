@@ -175,6 +175,9 @@ mod tests {
             tool_name_aliases: HashMap::new(),
             allowed_resource_names: vec![],
             allowed_prompt_names: vec![],
+            resource_name_aliases: HashMap::new(),
+            prompt_name_aliases: HashMap::new(),
+            completion: HashMap::new(),
         }
     }
 

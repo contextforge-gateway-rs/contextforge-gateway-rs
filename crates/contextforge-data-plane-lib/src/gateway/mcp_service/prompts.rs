@@ -8,7 +8,7 @@ use tracing::info;
 
 use super::McpService;
 use crate::gateway::{
-    identifier_routing::{backend_forward_error, resolve_tool_route},
+    identifier_routing::{backend_forward_error, resolve_prompt_route},
     mcp_call_validator::AuthorizedCallValidator,
     mcp_service::initialization::connect_backend_for_request,
 };
@@ -21,7 +21,7 @@ pub(super) async fn get_prompt(
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
-    let Some((backend_name, prompt_name)) = resolve_tool_route(virtual_host, &request.name, &backend_names) else {
+    let Some((backend_name, prompt_name)) = resolve_prompt_route(virtual_host, &request.name, &backend_names) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... promtp not found".into(),

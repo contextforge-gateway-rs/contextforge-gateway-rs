@@ -27,6 +27,12 @@ pub struct BackendMCPGateway {
     pub allowed_tool_names: Vec<String>,
     #[serde(default)]
     pub tool_name_aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub resource_name_aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub prompt_name_aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub completion: HashMap<String, String>,
     pub allowed_resource_names: Vec<String>,
     pub allowed_prompt_names: Vec<String>,
 }

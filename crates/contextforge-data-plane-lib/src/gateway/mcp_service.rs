@@ -17,18 +17,15 @@ use rmcp::{
 };
 use typed_builder::TypedBuilder;
 
-use super::backend_transports::BackendTransports;
-
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
 pub struct McpService {
-    #[builder(default = BackendTransports::default())]
-    transports: BackendTransports,
     http_client: reqwest::Client,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 impl ServerHandler for McpService {
     async fn initialize(
         &self,
@@ -43,7 +40,6 @@ impl ServerHandler for McpService {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        async {}.await;
         Err(ErrorData {
             code: ErrorCode::INVALID_REQUEST,
             message: "Fan out not supported at the moment. Go to control plane".into(),
@@ -85,7 +81,6 @@ impl ServerHandler for McpService {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        async {}.await;
         Err(ErrorData {
             code: ErrorCode::INVALID_REQUEST,
             message: "Fan out not supported at the moment. Go to control plane".into(),
@@ -93,20 +88,20 @@ impl ServerHandler for McpService {
         })
     }
 
-    async fn subscribe(
-        &self,
-        request: SubscribeRequestParams,
-        cx: RequestContext<RoleServer>,
-    ) -> Result<(), ErrorData> {
-        resources::subscribe(self, request, cx).await
+    async fn subscribe(&self, _: SubscribeRequestParams, _: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
-    async fn unsubscribe(
-        &self,
-        request: UnsubscribeRequestParams,
-        cx: RequestContext<RoleServer>,
-    ) -> Result<(), ErrorData> {
-        resources::unsubscribe(self, request, cx).await
+    async fn unsubscribe(&self, _: UnsubscribeRequestParams, _: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn list_prompts(
@@ -114,7 +109,6 @@ impl ServerHandler for McpService {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        async {}.await;
         Err(ErrorData {
             code: ErrorCode::INVALID_REQUEST,
             message: "Fan out not supported at the moment. Go to control plane".into(),
@@ -132,9 +126,13 @@ impl ServerHandler for McpService {
 
     async fn complete(
         &self,
-        request: CompleteRequestParams,
-        cx: RequestContext<RoleServer>,
+        _: CompleteRequestParams,
+        _: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
-        completion::complete(self, request, cx).await
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 }

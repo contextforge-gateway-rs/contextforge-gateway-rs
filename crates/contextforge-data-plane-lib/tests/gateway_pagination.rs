@@ -31,6 +31,9 @@ fn paginating_backend(port: u16) -> BackendMCPGateway {
         tool_name_aliases: HashMap::new(),
         allowed_resource_names: Vec::new(),
         allowed_prompt_names: Vec::new(),
+        resource_name_aliases: HashMap::new(),
+        prompt_name_aliases: HashMap::new(),
+        completion: HashMap::new(),
     }
 }
 

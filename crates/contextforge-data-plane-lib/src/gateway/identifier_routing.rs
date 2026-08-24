@@ -1,11 +1,6 @@
 use contextforge_data_plane_apis::user_store::VirtualHost;
 use rmcp::{ErrorData, model::ErrorCode, service::ServiceError};
-use tracing::{debug, warn};
-
-use super::{
-    backend_transports::{McpClientService, ServiceHolder},
-    session_manager::SessionManager,
-};
+use tracing::warn;
 
 /// Preserves identifiers for a single backend. For multiple backends, splits a
 /// `{backend}-{identifier}` namespace so duplicate identifiers remain routable.
@@ -35,6 +30,40 @@ pub(super) fn resolve_tool_route<'a, N: AsRef<str>>(
     let mut aliases = backend_names.iter().filter_map(|backend_name| {
         let backend_name = backend_name.as_ref();
         let original_name = virtual_host.backends.get(backend_name)?.tool_name_aliases.get(name)?;
+        Some((backend_name, original_name.as_str()))
+    });
+    let alias = aliases.next();
+    if aliases.next().is_some() {
+        return None;
+    }
+    alias.or_else(|| route_identifier(name, backend_names))
+}
+
+pub(super) fn resolve_resources_route<'a, N: AsRef<str>>(
+    virtual_host: &'a VirtualHost,
+    name: &'a str,
+    backend_names: &'a [N],
+) -> Option<(&'a str, &'a str)> {
+    let mut aliases = backend_names.iter().filter_map(|backend_name| {
+        let backend_name = backend_name.as_ref();
+        let original_name = virtual_host.backends.get(backend_name)?.resource_name_aliases.get(name)?;
+        Some((backend_name, original_name.as_str()))
+    });
+    let alias = aliases.next();
+    if aliases.next().is_some() {
+        return None;
+    }
+    alias.or_else(|| route_identifier(name, backend_names))
+}
+
+pub(super) fn resolve_prompt_route<'a, N: AsRef<str>>(
+    virtual_host: &'a VirtualHost,
+    name: &'a str,
+    backend_names: &'a [N],
+) -> Option<(&'a str, &'a str)> {
+    let mut aliases = backend_names.iter().filter_map(|backend_name| {
+        let backend_name = backend_name.as_ref();
+        let original_name = virtual_host.backends.get(backend_name)?.prompt_name_aliases.get(name)?;
         Some((backend_name, original_name.as_str()))
     });
     let alias = aliases.next();
@@ -76,68 +105,6 @@ pub(super) fn backend_forward_error(op: &str, backend_name: &str, error: &Servic
             data: None,
         },
     }
-}
-
-/// Routes an identifier to its backend, preserving it for a single backend and splitting the
-/// namespace for multiple backends. Returns `(backend_name, service, backend_local_identifier)`.
-pub(super) async fn route_identifier_to_backend(
-    session_manager: &SessionManager<'_>,
-    op: &str,
-    identifier: &str,
-    no_route_message: &'static str,
-) -> Result<(String, McpClientService, String), ErrorData> {
-    let backend_names = session_manager.get_backend_names();
-    let Some((backend_name, routed_identifier)) = route_identifier(identifier, &backend_names) else {
-        return Err(ErrorData { code: ErrorCode::INVALID_PARAMS, message: no_route_message.into(), data: None });
-    };
-    let routed_identifier = routed_identifier.to_owned();
-    let (backend_name, service) = resolve_backend(session_manager, op, backend_name).await?;
-    Ok((backend_name, service, routed_identifier))
-}
-
-/// Resolves the single connected backend named `backend_name` and takes its running service.
-/// Shared by tool, resource, and prompt routing so they reject duplicate or missing backends
-/// the same way; a duplicate match means the session is invalid, so it is cleaned up.
-pub(super) async fn resolve_backend(
-    session_manager: &SessionManager<'_>,
-    op: &str,
-    backend_name: &str,
-) -> Result<(String, McpClientService), ErrorData> {
-    let backend_transports = session_manager.borrow_transports().await;
-    debug!("{op}: resolving backend {backend_name} from {backend_transports:?}");
-
-    let mut target = None;
-    for service_holder in backend_transports {
-        if service_holder.name == backend_name {
-            if target.is_some() {
-                warn!("{op}: more than one backend matching {backend_name}");
-                session_manager.cleanup_backends("invalid session.. duplicate backends detected").await;
-                return Err(ErrorData {
-                    code: ErrorCode::INVALID_REQUEST,
-                    message: "Routing problem... multiple matching backends".into(),
-                    data: None,
-                });
-            }
-            target = Some(service_holder);
-        }
-    }
-
-    let Some(ServiceHolder { name, running_service }) = target else {
-        return Err(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Routing problem... got no responses from backends".into(),
-            data: None,
-        });
-    };
-    let Some(service) = running_service else {
-        warn!("{op}: no running backend for {backend_name}");
-        return Err(ErrorData {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: "Routing problem... got no responses from backends".into(),
-            data: None,
-        });
-    };
-    Ok((name, service))
 }
 
 #[cfg(test)]
