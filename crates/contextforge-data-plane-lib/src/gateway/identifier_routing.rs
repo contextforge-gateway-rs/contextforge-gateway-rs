@@ -75,6 +75,7 @@ pub(super) fn resolve_prompt_route<'a, N: AsRef<str>>(
 
 /// Returns the control-plane alias for an upstream tool when configured. Without an alias,
 /// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
+#[allow(dead_code)]
 pub(super) fn exposed_tool_name(virtual_host: &VirtualHost, backend_name: &str, original_name: &str) -> String {
     virtual_host
         .backends
