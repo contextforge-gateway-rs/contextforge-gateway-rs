@@ -46,6 +46,7 @@ pub(super) async fn call_tool(
     let post_state = pre_result.state;
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
+
     let progress_token = cx.meta.get_progress_token();
     let handle = backend_service
         .service()

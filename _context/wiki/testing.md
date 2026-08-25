@@ -39,9 +39,9 @@ These run in `cargo nextest run` with no Docker dependencies.
 `.github/workflows/mcp_conformance.yml` runs the pinned official conformance
 suite `0.2.0-alpha.11` for MCP `2026-07-28` in both directions. The server leg
 is official client → nginx → checked-out external dataplane → fixture proxy
-→ official server, with the published `latest` Python image's control plane
-registering and publishing the fixture through Redis. The backend-only proxy
-rewrites `Host` to
+→ official server, with the newest available image built from the control plane's `main`
+branch registering and publishing the fixture through Redis. The backend-only
+proxy rewrites `Host` to
 `localhost:3000`, which the official fixture's DNS-rebinding protection
 requires, while leaving external-dataplane header protections unchanged. The
 control plane uses ephemeral SQLite, so PostgreSQL is unnecessary. The harness lives
@@ -57,6 +57,11 @@ scenario route or probe the observation backend. OAuth client scenarios remain
 a control-plane responsibility. Server and client results are written below
 `server/` and `client/`, with separate `expected-failures.yml` and
 `client-expected-failures.yml` baselines.
+
+The official fixture keeps some diagnostic tools out of `tools/list`. Because
+the external dataplane fails closed unless the control plane publishes a tool
+schema, checks that require those hidden tools remain explicit server-leg
+baseline entries rather than bypassing schema validation in the harness.
 
 `make conformance` runs both legs locally, while `make conformance-bless` runs
 both and refreshes both expected-failure baselines from that run.

@@ -10,7 +10,6 @@ export MCP_CONFORMANCE_SOURCE_SHA="${MCP_CONFORMANCE_SOURCE_SHA:-c321dd32035556e
 export MCP_CONFORMANCE_SPEC_VERSION="${MCP_CONFORMANCE_SPEC_VERSION:-2026-07-28}"
 export MCP_CONFORMANCE_SERVER_ID="${MCP_CONFORMANCE_SERVER_ID:-3f33286667d34b65a31c3bafd30e4c21}"
 export MCP_CONFORMANCE_SUITE_DIR="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
-export CF_CONTROLPLANE_IMAGE="${CF_CONTROLPLANE_IMAGE:-ghcr.io/ibm/mcp-context-forge:latest}"
 export CF_DATAPLANE_IMAGE="${CF_DATAPLANE_IMAGE:-contextforge-data-plane:conformance}"
 export MCP_CONFORMANCE_COLOR="${MCP_CONFORMANCE_COLOR:-auto}"
 
@@ -21,6 +20,11 @@ for command in curl docker git jq node npm; do
   fi
 done
 docker compose version > /dev/null
+
+if [ -z "${CF_CONTROLPLANE_IMAGE:-}" ]; then
+  CF_CONTROLPLANE_IMAGE="$("${script_dir}/resolve-control-plane-image.sh")"
+  export CF_CONTROLPLANE_IMAGE
+fi
 
 if [ -e "${MCP_CONFORMANCE_SUITE_DIR}" ] && [ ! -d "${MCP_CONFORMANCE_SUITE_DIR}/.git" ]; then
   echo "MCP_CONFORMANCE_SUITE_DIR is not a git checkout: ${MCP_CONFORMANCE_SUITE_DIR}" >&2
