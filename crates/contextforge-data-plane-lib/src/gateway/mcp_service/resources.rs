@@ -1,6 +1,8 @@
 use rmcp::{
     ErrorData, RoleServer,
-    model::{ErrorCode, ReadResourceRequestParams, ReadResourceResponse},
+    model::{
+        ErrorCode, ReadResourceRequestParams, ReadResourceResponse, SubscribeRequestParams, UnsubscribeRequestParams,
+    },
     service::RequestContext,
 };
 use tracing::info;
@@ -54,61 +56,28 @@ pub(super) async fn read_resource(
     Ok(response.into())
 }
 
-// #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
-// pub(super) async fn subscribe(
-//     mcp_service: &McpService,
-//     request: SubscribeRequestParams,
-//     cx: RequestContext<RoleServer>,
-// ) -> Result<(), ErrorData> {
-//     let mcp_call_validator = AuthorizedCallValidator::new("subscribe", &cx);
-//     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
-//     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
+#[allow(clippy::unused_async)]
+pub(super) async fn subscribe(
+    _: &McpService,
+    _: SubscribeRequestParams,
+    _: RequestContext<RoleServer>,
+) -> Result<(), ErrorData> {
+    Err(ErrorData {
+        code: ErrorCode::INVALID_REQUEST,
+        message: "Fan out not supported at the moment. Go to control plane".into(),
+        data: None,
+    })
+}
 
-//     let (service_name, service, resource_uri) = route_identifier_to_backend(
-//         &session_manager,
-//         "subscribe",
-//         &request.uri,
-//         "Routing problem... wrong resource name",
-//     )
-//     .await?;
-
-//     let mut routed_request = request;
-//     routed_request.uri = resource_uri.clone();
-//     service.service().track_resource_subscription(&resource_uri, cx.peer.clone()).await;
-
-//     if let Err(error) = service.subscribe(routed_request).await {
-//         service.service().stop_tracking_resource_subscription(&resource_uri).await;
-//         return Err(backend_forward_error("subscribe", &service_name, &error));
-//     }
-//     info!("subscribe: backend {service_name} completed");
-//     Ok(())
-// }
-
-// #[expect(deprecated, reason = "temporary RMCP v3 compatibility; subscriptions/listen migration is deferred")]
-// pub(super) async fn unsubscribe(
-//     mcp_service: &McpService,
-//     request: UnsubscribeRequestParams,
-//     cx: RequestContext<RoleServer>,
-// ) -> Result<(), ErrorData> {
-//     let mcp_call_validator = AuthorizedCallValidator::new("unsubscribe", &cx);
-//     let (virtual_host, session_id, claims) = mcp_call_validator.validate()?;
-//     let session_manager = SessionManager::new(virtual_host, session_id, claims.sub.as_str(), &mcp_service.transports);
-
-//     let (service_name, service, resource_uri) = route_identifier_to_backend(
-//         &session_manager,
-//         "unsubscribe",
-//         &request.uri,
-//         "Routing problem... wrong resource name",
-//     )
-//     .await?;
-
-//     let mut routed_request = request;
-//     routed_request.uri = resource_uri.clone();
-//     service
-//         .unsubscribe(routed_request)
-//         .await
-//         .map_err(|error| backend_forward_error("unsubscribe", &service_name, &error))?;
-//     service.service().stop_tracking_resource_subscription(&resource_uri).await;
-//     info!("unsubscribe: backend {service_name} completed");
-//     Ok(())
-// }
+#[allow(clippy::unused_async)]
+pub(super) async fn unsubscribe(
+    _: &McpService,
+    _: UnsubscribeRequestParams,
+    _: RequestContext<RoleServer>,
+) -> Result<(), ErrorData> {
+    Err(ErrorData {
+        code: ErrorCode::INVALID_REQUEST,
+        message: "Fan out not supported at the moment. Go to control plane".into(),
+        data: None,
+    })
+}

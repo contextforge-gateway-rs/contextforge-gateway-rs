@@ -60,7 +60,6 @@ impl ServerHandler for McpService {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        async {}.await;
         Err(ErrorData {
             code: ErrorCode::INVALID_REQUEST,
             message: "Fan out not supported at the moment. Go to control plane".into(),
@@ -88,20 +87,20 @@ impl ServerHandler for McpService {
         })
     }
 
-    async fn subscribe(&self, _: SubscribeRequestParams, _: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        Err(ErrorData {
-            code: ErrorCode::INVALID_REQUEST,
-            message: "Fan out not supported at the moment. Go to control plane".into(),
-            data: None,
-        })
+    async fn subscribe(
+        &self,
+        params: SubscribeRequestParams,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        resources::subscribe(self, params, ctx).await
     }
 
-    async fn unsubscribe(&self, _: UnsubscribeRequestParams, _: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        Err(ErrorData {
-            code: ErrorCode::INVALID_REQUEST,
-            message: "Fan out not supported at the moment. Go to control plane".into(),
-            data: None,
-        })
+    async fn unsubscribe(
+        &self,
+        params: UnsubscribeRequestParams,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        resources::unsubscribe(self, params, ctx).await
     }
 
     async fn list_prompts(
@@ -126,13 +125,9 @@ impl ServerHandler for McpService {
 
     async fn complete(
         &self,
-        _: CompleteRequestParams,
-        _: RequestContext<RoleServer>,
+        request: CompleteRequestParams,
+        cx: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
-        Err(ErrorData {
-            code: ErrorCode::INVALID_REQUEST,
-            message: "Fan out not supported at the moment. Go to control plane".into(),
-            data: None,
-        })
+        completion::complete(self, request, cx).await
     }
 }
