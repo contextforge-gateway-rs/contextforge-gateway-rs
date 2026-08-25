@@ -42,8 +42,7 @@ pub(super) async fn call_tool(
     } else {
         ToolPreCallResult::unchanged()
     };
-    let mut backend_service =
-        connect_backend_for_request(mcp_service, &backend_name, backend, virtual_host.backends.len() > 1, &cx).await?;
+    let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
     let post_state = pre_result.state;
     let mut routed_request = request;
     pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);

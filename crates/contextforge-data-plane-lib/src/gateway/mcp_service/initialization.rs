@@ -37,7 +37,6 @@ pub(super) async fn connect_backend_for_request(
     mcp_service: &McpService,
     backend_name: &str,
     backend: &BackendMCPGateway,
-    namespace_identifiers: bool,
     cx: &RequestContext<RoleServer>,
 ) -> Result<RunningService<RoleClient, GatewayBackendClient>, ErrorData> {
     let mut headers = HashMap::new();
@@ -65,12 +64,7 @@ pub(super) async fn connect_backend_for_request(
     )
     .with_protocol_version(ProtocolVersion::V_2026_07_28);
 
-    let backend_client = GatewayBackendClient::new(
-        backend_name.to_owned(),
-        namespace_identifiers,
-        client_info,
-        mcp_service.plugin_runtime.clone(),
-    );
+    let backend_client = GatewayBackendClient::new(client_info, mcp_service.plugin_runtime.clone());
 
     serve_client_with_lifecycle_and_ct(
         backend_client,
