@@ -72,12 +72,23 @@ impl Gateway {
 
         let mut handlers = vec![];
 
-        if let Some(tcp) = Option::<Tcp>::try_from(&config)? {
-            handlers.push(tcp.handle_tcp(app.clone()).boxed());
-        }
+        match (Option::<Tcp>::try_from(&config), Option::<DownstreamTls>::try_from(&config)) {
+            (Ok(Some(tcp)), Ok(Some(tls))) => {
+                handlers.push(tcp.handle_tcp(app.clone()).boxed());
+                handlers.push(tls.handle_tls(app.clone()).boxed());
+            },
+            (Ok(Some(tcp)), Ok(None)) => {
+                handlers.push(tcp.handle_tcp(app.clone()).boxed());
+            },
 
-        if let Some(tls) = Option::<DownstreamTls>::try_from(&config)? {
-            handlers.push(tls.handle_tls(app.clone()).boxed());
+            (Ok(None), Ok(Some(tls))) => {
+                handlers.push(tls.handle_tls(app.clone()).boxed());
+            },
+
+            (Ok(None), Ok(None)) => return Err("At least one listening address has to be provided ".into()),
+
+            (Ok(_), Err(e)) => return Err(format!("TLS is miconfigured {e:?}").into()),
+            _ => return Err("Listening address(es) misconfigured".into()),
         }
 
         let _ = futures::future::join_all(handlers).await;

@@ -16,7 +16,7 @@ async fn plaintext_lists_prefixed_backend_resource_templates() -> Result<()> {
     let gateway_port = create_ports(1)[0];
 
     let config = Config {
-        address: format!("127.0.0.1:{gateway_port}").parse().expect("This should work"),
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
         token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         ..Default::default()
@@ -54,7 +54,7 @@ async fn plaintext_reads_resource_from_prefixed_template() -> Result<()> {
     let gateway_port = create_ports(1)[0];
 
     let config = Config {
-        address: format!("127.0.0.1:{gateway_port}").parse().expect("This should work"),
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
         token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         ..Default::default()

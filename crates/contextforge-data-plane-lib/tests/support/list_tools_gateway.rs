@@ -35,7 +35,7 @@ pub(crate) struct ListToolsGatewaySettings {
 /// Gateway config for plaintext-upstream tests, shared by the integration test binaries.
 pub(crate) fn plaintext_config(gateway_port: u16) -> Config {
     Config {
-        address: format!("127.0.0.1:{gateway_port}").parse().expect("This should work"),
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
         token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         ..Default::default()
@@ -55,7 +55,9 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
 
 pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<ListToolsGatewaySettings> {
     let mocked_user_config_store = MemoryUserConfigStore::default();
-    let gateway_port = config.address.port();
+
+    let config_address = config.address.expect("This must be set");
+    let gateway_port = config_address.port();
 
     let service = StreamableHttpService::new(
         || Ok(mock_counter::Counter::new()),
@@ -111,7 +113,7 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     }
     .boxed();
 
-    let address = config.address;
+    let address = config_address;
     let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
     let handle =

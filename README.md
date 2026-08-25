@@ -68,7 +68,7 @@ Example run command:
 ```bash
 cargo run --release \
   --features contextforge-data-plane/plugins \
-  --bin contextforge-data-plane -- \
+  -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \
@@ -78,6 +78,23 @@ cargo run --release \
   --redis-mode=plain-text \
   --upstream-connection-mode=plain-text-or-tls \
   --runtime-plugins-enabled true
+```
+
+
+```bash
+cargo run --features contextforge-data-plane-lib/with_tools \
+-- \
+--address 0.0.0.0:8080 \
+--redis-address 127.0.0.1 \ 
+--redis-port 6379 \ 
+--redis-mode plain-text \
+--token-verification-private-key ./assets/jwt.key \
+--token-verification-public-key ./assets/jwt.key.pub \
+--upstream-connection-mode plain-text-or-tls \ 
+--tls-address 0.0.0.0:8443 \
+--server-private-key ./assets/tls_key.pem \
+--server-certificate ./assets/tls_certificate.pem
+--runtime-plugins-enabled true
 ```
 
 ## Tracing and Metrics

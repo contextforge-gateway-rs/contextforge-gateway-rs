@@ -63,7 +63,7 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
     let store = MemoryUserConfigStore::default();
     store.set_config(&User::new(TEST_USER_ID), &user_config).await.expect("set config");
 
-    let address = config.address;
+    let address = config.address.expect("This should be set");
     let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_id}/mcp");
 
     let gateway = Gateway::builder()

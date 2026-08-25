@@ -353,7 +353,7 @@ async fn start_gateway_with_state(
 
     let gateway = Gateway::builder()
         .with_config(Config {
-            address: format!("127.0.0.1:{gateway_port}").parse().expect("gateway address"),
+            address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
             token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
             upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
             runtime_plugins_enabled: Some(runtime_plugins_enabled),

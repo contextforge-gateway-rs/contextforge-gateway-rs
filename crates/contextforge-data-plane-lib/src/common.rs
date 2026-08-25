@@ -10,7 +10,6 @@ use std::{
     io::{Cursor, Read},
     net::SocketAddr,
     path::PathBuf,
-    str::FromStr,
     sync::Arc,
 };
 use thiserror::Error;
@@ -140,12 +139,12 @@ pub enum OtlpProtocol {
     HttpProtobuf,
 }
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Debug, Clone, Parser, Default)]
 #[command(name = "contextforge-data-plane")]
 #[command(about = "Minimal, fast, experimental data plane for ContextForge")]
 pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_ADDRESS")]
-    pub address: SocketAddr,
+    pub address: Option<SocketAddr>,
 
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PUBLIC_KEY")]
     pub token_verification_public_key: Option<PathBuf>,
@@ -287,50 +286,6 @@ pub struct Config {
         num_args = 1..
     )]
     pub mcp_allowed_hosts: Option<Vec<Authority>>,
-}
-
-#[allow(clippy::default_trait_access)]
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            address: SocketAddr::from_str("127.0.0.1:8080").expect("should work"),
-            token_verification_public_key: Default::default(),
-            #[cfg(feature = "with_tools")]
-            token_verification_private_key: Default::default(),
-            token_verification_secret: Default::default(),
-            enable_open_telemetry: Default::default(),
-            otlp_endpoint: Default::default(),
-            otlp_protocol: Default::default(),
-            otlp_headers: Default::default(),
-            otlp_service_name: Default::default(),
-            enable_otel_metrics: Default::default(),
-            otlp_metrics_endpoint: Default::default(),
-            mcp_standard_header_max_count: Default::default(),
-            mcp_standard_header_max_value_bytes: Default::default(),
-            mcp_standard_header_max_total_bytes: Default::default(),
-            number_of_cpus: Default::default(),
-            single_runtime: Default::default(),
-            runtime_plugins_enabled: Default::default(),
-            tls_address: Default::default(),
-            server_private_key: Default::default(),
-            server_certificate: Default::default(),
-            upstream_connection_mode: Default::default(),
-            upstream_private_key: Default::default(),
-            upstream_certificate: Default::default(),
-            upstream_trust_bundle: Default::default(),
-            user_config_cache_expiry_seconds: Default::default(),
-            redis_address: Default::default(),
-            redis_port: Default::default(),
-            redis_mode: Default::default(),
-            redis_tls_trust_bundle: Default::default(),
-            redis_tls_client_private_key: Default::default(),
-            redis_tls_client_certificate: Default::default(),
-            log_name: Default::default(),
-            log_rotation: Default::default(),
-            mcp_allowed_origins: Default::default(),
-            mcp_allowed_hosts: Default::default(),
-        }
-    }
 }
 
 pub const DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT: usize = 32;
