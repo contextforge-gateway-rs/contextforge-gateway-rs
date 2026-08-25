@@ -184,7 +184,7 @@ Flow checkpoints — each must exist before the next dependency runs:
 
 | Checkpoint | Fact established | Next dependency |
 | --- | --- | --- |
-| Listener | Request reached Rust dataplane over TCP/TLS. | Metrics, tracing, nested routing. |
+| Listener | Request reached the ContextForge external dataplane over TCP/TLS. | Metrics, tracing, nested routing. |
 | Path extraction | Inner path matched `/servers/{virtual_host_id}/mcp`. | MCP handlers can resolve a `VirtualHost`. |
 | Claims validation | Bearer token accepted; `ContextForgeClaims` exists. | Config lookup can use `claims.sub`. |
 | User config lookup | `UserConfig` exists for the authenticated subject. | Virtual host check can run. |
@@ -234,7 +234,7 @@ Changing a load-bearing choice requires updating more than one file:
 
 | Change | Required follow-through |
 | --- | --- |
-| Downstream MCP version | Coordinate with control plane; update protocol tests and examples; keep legacy traffic on control-plane routes. |
+| Downstream MCP version | Coordinate with the ContextForge control plane and built-in dataplane; update the `2026-07-28`/`2025-11-25` compatibility matrix, protocol tests, examples, and front-door routing. The ContextForge built-in dataplane handles both stateful and stateless traffic; the ContextForge external dataplane handles both supported Streamable HTTP versions statelessly. |
 | Backend namespace / prefix contract | Update merge logic, split logic, tests, docs, and control-plane integration if client-facing surface moves. |
 | Session state moves external | Update `SessionManager`, cleanup behavior, load-balancing docs, and failure-mode tests. |
 | Config transport changes | Keep `UserConfigStore` as the boundary; update adapter tests. |

@@ -6,26 +6,58 @@
 
 ## What this project is
 
-`contextforge-data-plane` is a Rust-based MCP (Model Context Protocol) gateway — the **dataplane** component of ContextForge. It acts as a scalable, secure proxy layer that routes AI tool calls from MCP clients to one or more backend MCP servers.
+`contextforge-data-plane` is the Rust-based **ContextForge external dataplane**.
+It is a scalable, separately deployable MCP (Model Context Protocol) gateway
+that routes AI tool calls from MCP clients to backend MCP servers.
 
-It is paired with the external ContextForge control plane at [`IBM/mcp-context-forge`](https://github.com/IBM/mcp-context-forge). The two components have a strict division of responsibility:
+The [`IBM/mcp-context-forge`](https://github.com/IBM/mcp-context-forge)
+Python repository contains two different product components: the ContextForge
+control plane and the ContextForge built-in dataplane. This Rust repository is
+the third component:
 
 | Layer | Owns today |
 | --- | --- |
-| **This repo (dataplane)** | Request routing, auth enforcement, backend fan-out, session ownership |
-| **Control plane** | IAM, UI, metrics storage, legacy MCP client compatibility |
+| **ContextForge control plane** (Python) | IAM, UI, management APIs, durable administrative state, policy/catalog compilation, metrics storage, and external-dataplane configuration publishing. |
+| **ContextForge built-in dataplane** (Python) | MCP request handling shipped in the same repository as the control plane. Supports `2026-07-28` and `2025-11-25`, including stateful and stateless behavior. |
+| **ContextForge external dataplane** (Rust, this repo) | Separately deployed MCP request routing and authorization enforcement. The target supports both protocol versions without session state; cross-version adaptation is best effort. |
 
-The dataplane must never take on control-plane concerns.
+The ContextForge external dataplane must never take on control-plane concerns.
+
+## Terminology
+
+Use the full component names in product-wide architecture and deployment
+documentation:
+
+- **ContextForge control plane** means the Python management plane in
+  `IBM/mcp-context-forge`. It owns administrative workflows and publishes
+  effective runtime configuration; it is not the name for every process or MCP
+  route in that repository.
+- **ContextForge built-in dataplane** means the Python MCP request path in the
+  same `IBM/mcp-context-forge` repository. “Built-in” describes where it ships,
+  not a legacy-only or slow-path role. It handles the old and new protocol
+  versions and can serve stateful or stateless clients.
+- **ContextForge external dataplane** means this independently deployable Rust
+  repository. “External” means external to the Python repository/deployment,
+  not untrusted or third-party. Its target request path is stateless for both
+  supported protocol versions.
+- **Stateful** means later MCP requests can depend on session context established
+  by `initialize` or a session identifier. **Stateless** means every request is
+  independently authenticated, authorized, resolved, and completed without
+  reusable MCP session state.
+
+Always use one of the three canonical names. Do not use unqualified
+“dataplane,” “local dataplane,” “slow dataplane,” or “fast dataplane” as a
+product component name.
 
 ```mermaid
 flowchart LR
-    C(["MCP Client\nprotocol 2026-07-28\nStreamable HTTP"])
+    C(["MCP Client\nold/new · stateful/stateless"])
 
     subgraph Infra["Infrastructure"]
         N["nginx\nTLS termination\nrouting fan-out"]
     end
 
-    subgraph DP["ContextForge Data Plane  (this repo)"]
+    subgraph EDP["ContextForge External Dataplane  (Rust, this repo)"]
         direction TB
         MW["Middleware stack\nvirtual host · JWT · session · user config"]
         RT["MCP Routing\nfan-out · prefix namespace\nlist merge · capability merge"]
@@ -33,29 +65,33 @@ flowchart LR
         MW --> RT --> PL
     end
 
-    subgraph CP["Control Plane  (IBM/mcp-context-forge)"]
+    subgraph PythonRepo["IBM/mcp-context-forge  (Python repo)"]
         direction TB
-        IAM["IAM · UI\nmetrics storage"]
+        CP["ContextForge control plane\nIAM · UI · management"]
+        BDP["ContextForge built-in dataplane\nold/new · stateful/stateless"]
         PUB["dataplane_publisher.py\nwrites UserConfig to Redis"]
+        CP --> PUB
     end
 
     R[("Redis\nUserConfig store\nMessagePack")]
     BE["Backend MCP Servers"]
 
     C --> N
-    N -->|"/contextforge-rs/*"| DP
-    N -->|"UI / IAM / legacy MCP / SSE"| CP
-    CP --> R
-    DP -->|"read-only UserConfig"| R
-    DP -->|"MCP calls"| BE
+    N -->|"external route - currently 2026-07-28"| EDP
+    N -->|"UI / IAM / management"| CP
+    N -->|"built-in MCP routes"| BDP
+    PUB --> R
+    EDP -->|"read-only UserConfig"| R
+    EDP -->|"MCP calls"| BE
+    BDP -->|"MCP calls"| BE
 ```
 
 
 ## Goals and objectives
 
 - Provide a **production-grade, low-latency routing layer** between MCP clients and backend MCP servers.
-- Target **MCP protocol version `2026-07-28`** over Streamable HTTP as the sole downstream contract.
-- Enforce a clean **dataplane/control-plane boundary** — no IAM, UI, or metrics storage logic in this repo.
+- Support MCP `2026-07-28` and `2025-11-25` over Streamable HTTP as stateless downstream contracts.
+- Enforce a clean **ContextForge external dataplane/control plane boundary** — no IAM, UI, or metrics storage logic in this repo.
 - Keep config access behind the **`UserConfigStore` abstraction** (backed by Redis/MessagePack).
 - Remain in the right architectural shape during early development, prioritising correctness over backward compatibility.
 
@@ -63,7 +99,7 @@ flowchart LR
 
 - **Platform teams** — deploy and operate the gateway as infrastructure.
 - **AI application developers** — use the gateway as the MCP proxy layer for their applications.
-- **Internal contributors** — engineers evolving the dataplane toward the `2026-07-28` protocol target.
+- **Internal contributors** — engineers evolving the ContextForge external dataplane toward stateless `2026-07-28` and `2025-11-25` protocol support.
 
 ## Key modules and architecture
 
@@ -81,8 +117,8 @@ Architecture context lives in the wiki. Key pages:
 
 | Crate | Purpose |
 | --- | --- |
-| `contextforge-data-plane-lib` | All dataplane behavior: routing, middleware, sessions, transports. Almost everything goes here. |
-| `contextforge-data-plane` (binary) | Process shell only: CLI flags, logging, runtime shape. No dataplane logic. |
+| `contextforge-data-plane-lib` | All ContextForge external-dataplane behavior: routing, middleware, sessions, transports. Almost everything goes here. |
+| `contextforge-data-plane` (binary) | Process shell only: CLI flags, logging, runtime shape. No ContextForge external-dataplane logic. |
 | `contextforge-data-plane-apis` | Shared config shapes (`UserConfig`, `User`, plugin config). Regenerate JSON schemas after any change: `cargo run -p contextforge-data-plane-apis`. |
 | `contextforge-data-plane-cpex` | Plugin integration (CPEX hook factories). |
 | `contextforge-load-test` | Performance harness: end-to-end MCP traffic driver. |
@@ -94,27 +130,27 @@ Architecture context lives in the wiki. Key pages:
 
 ## Active work (near-term)
 
-- **Protocol migration**: replacing all remaining legacy MCP paths (SSE transport, `initialize`/session shims) with `2026-07-28` equivalents over Streamable HTTP.
-- Legacy SSE transport and old session behavior are **being removed**, not maintained. Do not build new behavior on temporary shims.
-- New tests and examples should use `server/discover`, per-request client metadata, and protocol version `2026-07-28`.
+- **Protocol migration**: support same-version `2026-07-28` and `2025-11-25` paths over Streamable HTTP, provide best-effort translation in either cross-version direction, and replace stateful session paths with request-scoped handling.
+- Legacy SSE transport and session affinity are **being removed** from the ContextForge external dataplane. `initialize` is retained as a stateless compatibility request and must not create persistent external-dataplane or backend session state.
+- Protocol-sensitive tests must cover the two direct and two best-effort cross-version combinations. Modern examples should continue to use `server/discover` and per-request client metadata; compatibility examples may use `initialize` without relying on later session reuse.
 
-## Control-Plane Integration Contract
+## ContextForge Integration Contract
 
 > **Provisional.** No formal contract has been stipulated yet. This section documents the current de-facto integration surface with [IBM/mcp-context-forge](https://github.com/IBM/mcp-context-forge). Any row may change while the project is early; when a proper contract is agreed, update this section to track it.
 
 | Agreement | Value today |
 | --- | --- |
-| Client-facing route | `/servers/{virtual_host_id}/mcp`. Front door rewrites modern MCP `2026-07-28` Streamable HTTP traffic to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the dataplane. |
-| Protocol compatibility | Dataplane target is MCP `2026-07-28` only. Control plane serves older versions, legacy session init, and SSE on its own routes. |
+| Client-facing route | `/servers/{virtual_host_id}/mcp`. Front door rewrites modern MCP `2026-07-28` Streamable HTTP traffic to `/contextforge-rs/servers/{virtual_host_id}/mcp` on the ContextForge external dataplane. |
+| Protocol compatibility | Today the external-dataplane route accepts MCP `2026-07-28`; the built-in dataplane handles `2026-07-28` and `2025-11-25`, including stateful and stateless behavior and legacy SSE compatibility. The external-dataplane target handles both supported Streamable HTTP versions statelessly, with cross-version adaptation on a best-effort basis. |
 | Unknown virtual host | `404` with body `{"detail":"Server not found"}`, matching the control-plane response shape. |
 | Token issuer and audience | `iss = mcpgateway`, `aud = mcpgateway-api`. |
-| Claims shape | `sub`, `jti`, `iss`, `aud`, `exp`, and `user` required. `token_use`, `iat`, `teams`, `scopes`, and `user.full_name` optional. Dataplane routes on `sub` only. |
+| Claims shape | `sub`, `jti`, `iss`, `aud`, `exp`, and `user` required. `token_use`, `iat`, `teams`, `scopes`, and `user.full_name` optional. The ContextForge external dataplane routes on `sub` only. |
 | User config Redis key | `MessagePack(User::new(jwt_subject))` — key type plus subject, not the raw subject string. |
 | User config Redis value | `MessagePack(UserConfig)`. JSON schema at `schemas/user_config.json`. |
 | User key Redis schema | `schemas/user.json`. |
 | Plugin config key | `ContextForgeGatewayRuntimePluginConfig`, JSON or MessagePack, `version: 1` with a `cpex` section. |
 
-**Coordination rule:** changing any row above is a cross-repo change. The dataplane, the control-plane publisher (`dataplane_publisher.py`), and the `cf-integration` harness all need updating together.
+**Coordination rule:** changing any row above is a cross-repo change. The external dataplane, the control-plane publisher (`dataplane_publisher.py`), and the `cf-integration` harness all need updating together.
 
 Regenerate both schemas after any struct change to `UserConfig`, `VirtualHost`, `BackendMCPGateway`, or the `User` key type:
 ```bash
@@ -123,45 +159,51 @@ cargo run -p contextforge-data-plane-apis
 
 ## System topology (current)
 
-All external traffic enters through **nginx**, which fans out to either the dataplane or the control plane:
+All external traffic enters through **nginx**, which routes management traffic
+to the control plane and MCP traffic to either the built-in or external
+dataplane:
 
 ```mermaid
 flowchart LR
     client(["client"]) --> nginx["nginx"]
-    nginx --> dataplane["data-plane"]
-    nginx --> controlplane["control-plane"]
-    dataplane --> redis["redis"]
-    controlplane --> redis
-    controlplane --> postgres["postgres\n(via pgbouncer)"]
-    dataplane --> fastts["fast_time_server"]
+    nginx --> external["external dataplane\nRust · this repo"]
+    nginx --> builtin["built-in dataplane\nPython repo"]
+    nginx --> control["control plane\nPython repo"]
+    external --> redis["redis"]
+    control --> redis
+    control --> postgres["postgres\n(via pgbouncer)"]
+    external --> fastts["fast_time_server"]
 ```
 
-### How the control plane publishes config to the dataplane
+### How the control plane publishes config to the external dataplane
 
-The control plane and dataplane do **not** communicate over HTTP. Config is exchanged exclusively through Redis:
+The control plane and external dataplane do **not** communicate over HTTP.
+Config is exchanged exclusively through Redis:
 
-1. The control plane runs **`dataplane_publisher.py`** — a publisher script that writes dataplane configuration (user config, backend definitions, etc.) into Redis.
-2. The dataplane reads that config from Redis via the **`UserConfigStore`** abstraction (MessagePack-encoded `UserConfig`).
+1. The control plane runs **`dataplane_publisher.py`** — a publisher script that writes external-dataplane configuration (user config, backend definitions, etc.) into Redis.
+2. The external dataplane reads that config from Redis via the **`UserConfigStore`** abstraction (MessagePack-encoded `UserConfig`).
 
 This means:
-- The dataplane is a **pure reader** of Redis config. It never writes back to the control-plane's Redis keys.
-- The control plane is the **sole writer** of dataplane config; the dataplane has no direct dependency on the control-plane process at runtime.
-- Config changes from the control plane are picked up by the dataplane through normal cache refresh / Redis reads — no restart or direct RPC required.
+- The external dataplane is a **pure reader** of Redis config. It never writes back to the control plane's Redis keys.
+- The control plane is the **sole writer** of external-dataplane config; the external dataplane has no direct dependency on the control-plane process at runtime.
+- Config changes from the control plane are picked up by the external dataplane through normal cache refresh / Redis reads — no restart or direct RPC required.
 
 ### Per-component responsibilities
 
 | Component | Role | Persistence |
 | --- | --- | --- |
 | **nginx** | TLS termination, routing fan-out | — |
-| **dataplane** (`contextforge-data-plane`) | MCP routing, auth enforcement, fan-out to backends | Redis (read-only for config) |
-| **control-plane** (`IBM/mcp-context-forge`) | IAM, UI, metrics, legacy MCP clients, config publishing | Redis (write) + PostgreSQL (via pgbouncer) |
+| **ContextForge external dataplane** (`contextforge-data-plane`) | MCP routing, auth enforcement, and backend calls; current session-backed paths are migration state, while the target is stateless | Redis (read-only for config) |
+| **ContextForge built-in dataplane** (`IBM/mcp-context-forge`) | Python MCP request handling for old/new protocols and stateful/stateless clients | Python repository runtime state and stores |
+| **ContextForge control plane** (`IBM/mcp-context-forge`) | IAM, UI, management APIs, metrics, and external-dataplane config publishing | Redis (write) + PostgreSQL (via pgbouncer) |
 | **redis** | Runtime config store, inter-component pub/sub channel | In-memory + persistence |
 | **postgres** (via pgbouncer) | Control-plane relational store | Durable |
-| **fast_time_server** | High-resolution time source used by the dataplane | — |
+| **fast_time_server** | High-resolution time source used by the ContextForge external dataplane | — |
 
 ## External dependencies and integration points
 
-- **Redis** — runtime config store (MessagePack-encoded `UserConfig`). Populated by `dataplane_publisher.py` on the control plane; read by the dataplane via `UserConfigStore`.
-- **Control plane** (`IBM/mcp-context-forge`) — owns legacy MCP client routes and publishes dataplane config via `dataplane_publisher.py`. Does not route through this dataplane at runtime.
-- **fast_time_server** — high-resolution time source consumed by the dataplane.
+- **Redis** — runtime config store (MessagePack-encoded `UserConfig`). Populated by `dataplane_publisher.py` on the control plane; read by the external dataplane via `UserConfigStore`.
+- **ContextForge control plane** (`IBM/mcp-context-forge`) — owns management workflows and publishes external-dataplane config via `dataplane_publisher.py`.
+- **ContextForge built-in dataplane** (`IBM/mcp-context-forge`) — owns the Python repository's MCP request paths, including old/new and stateful/stateless handling. Requests sent there do not route through the external dataplane.
+- **fast_time_server** — high-resolution time source consumed by the ContextForge external dataplane.
 - **Tokio + Axum** — fixed async runtime and web framework.

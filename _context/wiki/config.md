@@ -212,7 +212,7 @@ Start lightweight dependencies:
 docker compose -f docker/docker-compose-local.yaml up -d redis gateway-one gateway-two
 ```
 
-Register payload-marker configuration before starting the data plane:
+Register payload-marker configuration before starting the ContextForge external dataplane:
 
 ```bash
 docker compose -f docker/docker-compose-local.yaml exec -T redis \
@@ -395,7 +395,7 @@ cargo run --release --bin contextforge-data-plane -- \
 
 ## Known Telemetry Gaps
 
-Tracked upstream, not yet implemented in the dataplane:
+Tracked upstream, not yet implemented in the ContextForge external dataplane:
 
 | Gap | Issue |
 | --- | --- |
