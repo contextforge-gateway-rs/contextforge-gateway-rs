@@ -509,6 +509,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::unused_async_trait_impl)]
     impl HookHandler<CmfHook> for TestPlugin {
         async fn handle(
             &self,

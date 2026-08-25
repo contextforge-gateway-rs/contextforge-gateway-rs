@@ -58,6 +58,7 @@ struct TestBackend {
     state: BackendState,
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 impl ServerHandler for TestBackend {
     async fn initialize(
         &self,
