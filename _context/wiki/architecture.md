@@ -22,8 +22,6 @@ TCP/TLS listener
   -> session_id_layer            → inserts SessionId if present
   -> user_config_store_layer     → inserts UserConfig              (400 no config, 500 store error)
   -> virtual_host_config_layer   → rejects unknown vhost           (404 "Server not found")
-  -> DefaultBodyLimit            → configures the MCP body cap      (413 when exceeded)
-  -> mcp_param_validation_layer  → validates modern tools/call      (400/-32020 on mismatch)
   -> /servers/{virtual_host_name}/mcp RMCP service → validates Host, then dispatches MCP
 ```
 
@@ -35,14 +33,16 @@ boundary. See [Security](security.md#mcp-origin-and-host-validation).
 validation, config lookup, session creation, backend fanout, or RMCP body
 parsing.
 
-MCP handlers read typed extensions — they never parse headers, paths, or Redis keys directly.
+MCP handlers read typed extensions and never parse paths or Redis keys directly.
+`tools/call` reads the downstream header map from RMCP's request-context
+`Parts` extension for parameter-header validation.
 
 ## Pipeline Shape
 
 ```text
 downstream request
   -> Origin validation → MCP header limits → virtual host extraction → JWT validation → session extraction
-  -> user config lookup → parameter-header validation → RMCP Host validation → MCP handler validation
+  -> user config lookup → RMCP request validation → MCP handler validation
   -> request plugin hooks
   -> backend MCP call (concurrent via join_all for initialize/list)
 
@@ -68,7 +68,7 @@ flowchart TD
 flowchart TD
     D(["downstream request"])
     A["virtual host · JWT\nsession extract"]
-    C["user config lookup\nparameter headers · MCP validate"]
+    C["user config lookup\nRMCP · MCP validate"]
     P1["request plugins\ntool_pre_invoke"]
     B["backend MCP call\njoin_all for init/list"]
     P2["response plugins\ntool_post_invoke"]
@@ -79,12 +79,11 @@ flowchart TD
 ```
 
 
-For modern `tools/call`, `DefaultBodyLimit` supplies the configured body cap
-before the parameter-header layer reads the body. Non-tool requests bypass this
-layer's body processing; RMCP still validates their standard headers. The layer
-then resolves the request's backend and original tool name and validates
-`Mcp-Param-*` against the schema published in `UserConfig`; it does not call
-backend `tools/list`.
+RMCP enforces its configured request-body cap and validates modern standard
+headers before dispatch. The `tools/call` handler then resolves the request's
+backend and original tool name and validates `Mcp-Param-*` from the request
+context against the schema published in `UserConfig`; it does not call backend
+`tools/list`.
 Validated headers are forwarded unchanged; request plugins run afterward, so a
 plugin that changes an annotated argument also owns the resulting upstream
 mismatch.

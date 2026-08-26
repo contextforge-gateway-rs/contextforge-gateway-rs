@@ -116,32 +116,6 @@ fn raw_mcp_request(
     request
 }
 
-fn raw_stateless_tool_call(gateway: &RunningGateway, tool_name: &str, arguments: &Value) -> reqwest::RequestBuilder {
-    support::create_client(TEST_USER_ID)
-        .post(gateway.gateway_url())
-        .header(http::header::ACCEPT, "application/json, text/event-stream")
-        .header("MCP-Protocol-Version", "2026-07-28")
-        .header("MCP-Method", "tools/call")
-        .header("MCP-Name", tool_name)
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments,
-                "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientInfo": {
-                        "name": "parameter-header-test",
-                        "version": "1.0.0"
-                    },
-                    "io.modelcontextprotocol/clientCapabilities": {}
-                }
-            }
-        }))
-}
-
 fn client_with_parameter_headers(a: &'static str, b: &'static str) -> reqwest::Client {
     let mut headers = http::HeaderMap::new();
     headers.insert(
@@ -442,19 +416,21 @@ async fn stateless_tool_call_forwards_validated_parameter_headers_unchanged() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_with_mismatched_parameter_header_returns_http_400() {
+async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected() {
     let gateway =
         start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let response = raw_stateless_tool_call(&gateway, "sum", &json!({ "a": 1, "b": 2 }))
-        .header("Mcp-Param-A", "9")
-        .header("Mcp-Param-B", "2")
-        .send()
-        .await
-        .expect("request reaches gateway");
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        client_with_parameter_headers("9", "2"),
+        support::modern_client_info(),
+    )
+    .await;
+    let error = service.call_tool(sum_request("sum", 1, 2)).await.expect_err("mismatched header is rejected");
+    let rmcp::service::ServiceError::McpError(error) = error else {
+        panic!("expected backend MCP error, got {error:?}");
+    };
 
-    assert_eq!(http::StatusCode::BAD_REQUEST, response.status());
-    let body: Value = response.json().await.expect("gateway returns JSON-RPC error");
-    assert_eq!(ErrorCode::HEADER_MISMATCH.0, body["error"]["code"]);
+    assert_eq!(ErrorCode::HEADER_MISMATCH, error.code);
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 }
 
@@ -473,6 +449,20 @@ async fn stateless_tool_call_without_published_schema_fails_closed() {
     };
     assert_eq!(ErrorCode::HEADER_MISMATCH, error.code);
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn legacy_tool_call_without_published_schema_reaches_backend() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    let error = service.call_tool(CallToolRequestParams::new("missing_schema_tool")).await.unwrap_err();
+    let rmcp::service::ServiceError::McpError(error) = error else {
+        panic!("expected backend MCP error, got {error:?}");
+    };
+
+    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!("missing_schema_tool", backend_calls[0].tool_name);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

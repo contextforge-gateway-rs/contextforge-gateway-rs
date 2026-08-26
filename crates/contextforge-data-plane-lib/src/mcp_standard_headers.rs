@@ -1,6 +1,5 @@
 use base64::{Engine, prelude::BASE64_STANDARD};
 use http::{HeaderMap, HeaderName};
-use rmcp::model::ProtocolVersion;
 use rmcp::transport::common::http_header::{
     BASE64_HEADER_PREFIX, BASE64_HEADER_SUFFIX, HEADER_MCP_METHOD, HEADER_MCP_NAME, HEADER_MCP_PARAM_PREFIX,
     HEADER_MCP_PROTOCOL_VERSION, HEADER_SESSION_ID,
@@ -22,13 +21,6 @@ pub(crate) fn is_computed(name: &HeaderName) -> bool {
         || is_exact(name, HEADER_MCP_NAME)
         || is_exact(name, HEADER_MCP_PROTOCOL_VERSION)
         || is_param(name)
-}
-
-pub(crate) fn required_for(headers: &HeaderMap) -> bool {
-    headers
-        .get(HEADER_MCP_PROTOCOL_VERSION)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|version| version >= ProtocolVersion::STANDARD_HEADERS.as_str())
 }
 
 fn is_exact(name: &HeaderName, expected: &str) -> bool {

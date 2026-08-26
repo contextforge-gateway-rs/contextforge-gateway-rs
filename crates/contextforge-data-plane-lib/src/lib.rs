@@ -1,6 +1,6 @@
 use std::{fs, sync::Arc};
 
-use axum::{extract::DefaultBodyLimit, middleware};
+use axum::middleware;
 use axum_otel_metrics::HttpMetricsLayerBuilder;
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
@@ -43,7 +43,6 @@ use crate::{
         claims_id::claims_layer,
         mcp_header_limits::{McpStandardHeaderLimits, mcp_header_limits_layer},
         mcp_origin::mcp_origin_layer,
-        mcp_param_validation::mcp_param_validation_layer,
         user_config_store::user_config_store_layer,
         virtual_host_config::virtual_host_config_layer,
         virtual_host_id::virtual_host_id_layer,
@@ -115,8 +114,6 @@ impl Gateway {
         } else {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
         };
-        let max_request_body_bytes = streamable_config.max_request_body_bytes;
-
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service
@@ -162,8 +159,6 @@ impl Gateway {
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
-            .layer(middleware::from_fn(mcp_param_validation_layer))
-            .layer(DefaultBodyLimit::max(max_request_body_bytes))
             .layer(middleware::from_fn(virtual_host_config_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
