@@ -38,6 +38,9 @@
           "type": "string",
           "format": "uri"
         },
+        "mcp_protocol_version": {
+          "$ref": "#/$defs/ProtocolVersion"
+        },
         "passthrough_headers": {
           "description": "Header names copied from the downstream request onto the upstream connection.",
           "type": "array",
@@ -89,7 +92,16 @@
           },
           "default": {}
         },
-        "allowed_resource_names": {
+        "disable_tool_names_filtering": {
+          "type": "boolean"
+        },
+        "disable_prompt_names_filtering": {
+          "type": "boolean"
+        },
+        "disable_resource_uris_filtering": {
+          "type": "boolean"
+        },
+        "allowed_resource_uris": {
           "type": "array",
           "items": {
             "type": "string"
@@ -111,11 +123,19 @@
       "required": [
         "name",
         "url",
+        "mcp_protocol_version",
         "passthrough_headers",
-        "allowed_resource_names",
+        "disable_tool_names_filtering",
+        "disable_prompt_names_filtering",
+        "disable_resource_uris_filtering",
+        "allowed_resource_uris",
         "allowed_prompt_names",
         "allowed_tool_names"
       ]
+    },
+    "ProtocolVersion": {
+      "description": "Represents the MCP protocol version used for communication.\n\nThis ensures compatibility between clients and servers by specifying\nwhich version of the Model Context Protocol is being used.",
+      "type": "string"
     }
   }
 }
