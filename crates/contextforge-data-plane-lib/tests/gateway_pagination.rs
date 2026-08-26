@@ -68,7 +68,6 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
 
     let gateway = Gateway::builder()
         .with_config(config)
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(store)))
         .build();
 

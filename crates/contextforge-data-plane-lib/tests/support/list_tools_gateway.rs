@@ -102,7 +102,6 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 
@@ -180,7 +179,6 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 

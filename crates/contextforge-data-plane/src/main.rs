@@ -8,7 +8,6 @@ use std::sync::Arc;
 use clap::Parser;
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, RedisClient, RedisConfig, UserConfigStoreType};
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rustls::crypto;
 use tikv_jemallocator::Jemalloc;
 use tracing::info;
@@ -35,7 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let gateway = Gateway::builder()
         .with_config(config)
         .with_user_config_store_type(UserConfigStoreType::Redis)
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_plugin_runtime(plugin_runtime.clone())
         .build();
 

@@ -100,19 +100,15 @@ fn raw_mcp_request(
     client: &reqwest::Client,
     gateway: &RunningGateway,
     user: &str,
-    session_id: Option<&str>,
     body: &Value,
 ) -> reqwest::RequestBuilder {
-    let mut request = client
+    client
         .post(gateway.gateway_url())
         .bearer_auth(token(user))
         .header(http::header::CONTENT_TYPE, "application/json")
         .header(http::header::ACCEPT, "application/json, text/event-stream")
-        .json(body);
-    if let Some(session_id) = session_id {
-        request = request.header("Mcp-Session-Id", session_id).header("MCP-Protocol-Version", "2025-11-25");
-    }
-    request
+        .header("MCP-Protocol-Version", "2025-11-25")
+        .json(body)
 }
 
 fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Value {
@@ -200,12 +196,11 @@ fn assert_raw_progress_stream(body: &str, response_id: i64, progress_token: &str
     assert_eq!(Some("completed 4 packages"), result.pointer("/result/content/0/text").and_then(Value::as_str));
 }
 
-async fn start_raw_mcp_session(client: &reqwest::Client, gateway: &RunningGateway, user: &str) -> String {
+async fn initialize_raw_stateless_client(client: &reqwest::Client, gateway: &RunningGateway, user: &str) {
     let initialize = raw_mcp_request(
         client,
         gateway,
         user,
-        None,
         &serde_json::json!({
             "method": "initialize",
             "params": {
@@ -221,20 +216,13 @@ async fn start_raw_mcp_session(client: &reqwest::Client, gateway: &RunningGatewa
     .await
     .expect("initialize request is sent");
     assert!(initialize.status().is_success(), "initialize failed: {initialize:?}");
-    let session_id = initialize
-        .headers()
-        .get("mcp-session-id")
-        .expect("initialize response has MCP session id")
-        .to_str()
-        .expect("MCP session id is valid")
-        .to_owned();
+    assert!(initialize.headers().get("mcp-session-id").is_none(), "initialize must remain stateless");
     let _initialize_body = initialize.text().await.expect("initialize body is read");
 
     let initialized = raw_mcp_request(
         client,
         gateway,
         user,
-        Some(&session_id),
         &serde_json::json!({ "method": "notifications/initialized", "jsonrpc": "2.0" }),
     )
     .send()
@@ -242,8 +230,6 @@ async fn start_raw_mcp_session(client: &reqwest::Client, gateway: &RunningGatewa
     .expect("initialized notification is sent");
     assert!(initialized.status().is_success(), "initialized notification failed: {initialized:?}");
     let _initialized_body = initialized.text().await.expect("initialized body is read");
-
-    session_id
 }
 
 async fn read_concurrent_raw_progress_streams(
@@ -306,26 +292,14 @@ async fn concurrent_progress_calls_forward_each_token_without_plugins() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn raw_streamable_http_concurrent_progress_calls_complete_without_plugins() {
+async fn legacy_raw_concurrent_progress_calls_complete_without_sessions() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = reqwest::Client::new();
-    let session_id = start_raw_mcp_session(&client, &gateway, TEST_USER_ID).await;
+    initialize_raw_stateless_client(&client, &gateway, TEST_USER_ID).await;
 
     let tool_name = "progress_sum";
-    let first = raw_mcp_request(
-        &client,
-        &gateway,
-        TEST_USER_ID,
-        Some(&session_id),
-        &raw_tool_call(tool_name, 2, "downstream-first"),
-    );
-    let second = raw_mcp_request(
-        &client,
-        &gateway,
-        TEST_USER_ID,
-        Some(&session_id),
-        &raw_tool_call(tool_name, 3, "downstream-second"),
-    );
+    let first = raw_mcp_request(&client, &gateway, TEST_USER_ID, &raw_tool_call(tool_name, 2, "downstream-first"));
+    let second = raw_mcp_request(&client, &gateway, TEST_USER_ID, &raw_tool_call(tool_name, 3, "downstream-second"));
     let (first_body, second_body) = read_concurrent_raw_progress_streams(first, second).await;
 
     assert_raw_progress_stream(&first_body, 2, "downstream-first");

@@ -30,7 +30,6 @@ opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "http-proto",
 opentelemetry_sdk.workspace = true
 tonic = "0.14"
 num_cpus = "1.17.0"
-rmcp.workspace = true
 tikv-jemallocator = "0.7.0"
 rustls.workspace = true
 
@@ -46,6 +45,7 @@ jsonwebtoken.workspace = true
 openport.workspace = true
 redis.workspace = true
 reqwest.workspace = true
+rmcp.workspace = true
 rmp-serde.workspace = true
 serde_json.workspace = true
 

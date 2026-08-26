@@ -1,8 +1,7 @@
 # Deployment
 
-> This page describes **current deployment requirements**, including session
-> affinity. The tentative target removes live aggregate fan-out and durable
-> upstream-session dependence; see
+> This page describes **current deployment requirements** for the stateless
+> external dataplane; see
 > [ContextForge 2.0 Target Architecture and Roadmap](mcp-capability-allocation.md).
 
 ## Checklist
@@ -11,7 +10,7 @@
 2. JWT verification key/secret matches the control plane's signing material; clients use control-plane API tokens whose `sub` matches the published user-config key.
 3. Redis reachable; TLS/mTLS across trust zones; write access restricted to the control plane; `DATAPLANE_PUBLISHER=true` on the control plane.
 4. Upstream connection mode matches backend URL schemes.
-5. One replica per `Mcp-session-id` (single replica or sticky routing).
+5. Scale replicas without MCP session affinity; every request is independent.
 6. `with_tools` feature **disabled** in the production build.
 7. Telemetry export pointed at the collector.
 8. System limits raised: `nofile 65535`, TCP tuning (`tcp_fin_timeout=15`, widened local port range).
@@ -28,12 +27,12 @@ Reference `docker/nginx.conf` split:
 - Other MCP routes, including stateful and legacy/SSE compatibility routes → ContextForge built-in dataplane.
 - Upstream retries on `error timeout http_502/503/504`: 2 tries, 10-second window. Non-idempotent MCP `POST` bodies are not re-sent after they reached an upstream — only connection-stage failures retry.
 
-## Session Affinity And Failover
+## Stateless Failover
 
-Backend MCP sessions are **local process state** — see [routing.md](routing.md).
+The external dataplane neither issues nor requires `Mcp-Session-Id` and retains no backend transport between requests — see [routing.md](routing.md).
 
-- >1 replica requires sticky routing by `Mcp-session-id`. The reference nginx config does not provide this; safe shapes today are a single replica or a front door with stickiness.
-- On restart or failover, all sessions are lost. Design clients to treat session-not-found as "reinitialize", not "retry".
+- Replicas do not require sticky routing.
+- Restart or failover loses no MCP session state; an interrupted request may be retried only when its method is safe to retry.
 
 ## Redis Availability
 

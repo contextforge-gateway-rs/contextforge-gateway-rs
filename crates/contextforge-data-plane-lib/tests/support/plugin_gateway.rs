@@ -359,7 +359,6 @@ async fn start_gateway_with_state(
             runtime_plugins_enabled: Some(runtime_plugins_enabled),
             ..Default::default()
         })
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(user_store)))
         .with_plugin_runtime(runtime_plugins_enabled.then(|| plugin_runtime.handle()))
         .build();

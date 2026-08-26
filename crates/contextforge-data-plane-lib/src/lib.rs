@@ -8,7 +8,7 @@ use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use rmcp::transport::{
     StreamableHttpServerConfig,
-    streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
+    streamable_http_server::{session::never::NeverSessionManager, tower::StreamableHttpService},
 };
 mod common;
 mod const_values;
@@ -59,7 +59,6 @@ pub enum UserConfigStoreType {
 #[builder(field_defaults(setter(prefix = "with_")))]
 pub struct Gateway {
     config: Config,
-    session_manager: Arc<LocalSessionManager>,
     user_config_store_type: UserConfigStoreType,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
@@ -97,7 +96,7 @@ impl Gateway {
     }
 
     async fn build_app(self) -> Result<axum::Router> {
-        let Gateway { config, session_manager, user_config_store_type, plugin_runtime } = self;
+        let Gateway { config, user_config_store_type, plugin_runtime } = self;
         let user_config_store = match user_config_store_type {
             UserConfigStoreType::Redis => Arc::new(get_config_store(&config).await?),
             UserConfigStoreType::Test(store) => store,
@@ -113,19 +112,20 @@ impl Gateway {
                 .disable_allowed_origins()
         } else {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
-        };
+        }
+        .with_legacy_session_mode(false);
 
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service
-        let mcp_service: StreamableHttpService<McpService, LocalSessionManager> = StreamableHttpService::new(
+        let mcp_service: StreamableHttpService<McpService, NeverSessionManager> = StreamableHttpService::new(
             move || {
                 Ok(McpService::builder()
                     .with_http_client(reqwest_backend_client.clone())
                     .with_plugin_runtime(plugin_runtime.clone())
                     .build())
             },
-            session_manager,
+            Arc::new(NeverSessionManager::default()),
             streamable_config,
         );
 
@@ -169,7 +169,7 @@ impl Gateway {
             .layer(middleware::from_fn_with_state(mcp_standard_header_limits, mcp_header_limits_layer))
             .layer(cors_layer)
             // mcp_origin_layer is the outermost wrapper: fires before JWT auth,
-            // session creation, and backend fan-out.
+            // MCP dispatch, and backend connection setup.
             .layer(middleware::from_fn_with_state(config.clone(), mcp_origin_layer));
 
         #[cfg(feature = "with_tools")]
@@ -199,7 +199,6 @@ mod tests {
     use axum::body::Body;
     use contextforge_data_plane_apis::{User, user_store::UserConfig};
     use http::{Request, StatusCode};
-    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
     use tower::ServiceExt;
 
     use crate::{
@@ -226,7 +225,6 @@ mod tests {
         let config = Config { mcp_standard_header_max_count: 1, ..Config::default() };
         let app = Gateway::builder()
             .with_config(config)
-            .with_session_manager(Arc::new(LocalSessionManager::default()))
             .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(UnusedConfigStore)))
             .build()
             .build_app()
