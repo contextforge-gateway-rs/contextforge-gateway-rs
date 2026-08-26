@@ -332,6 +332,7 @@ async fn start_gateway_with_state(
                             BackendMCPGateway {
                                 url: format!("http://127.0.0.1:{backend_port}/mcp").parse().expect("backend URL"),
                                 name: String::new(),
+                                mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
                                 passthrough_headers: Vec::new(),
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),

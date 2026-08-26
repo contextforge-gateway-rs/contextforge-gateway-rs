@@ -16,6 +16,7 @@ pub enum IntegrationType {
 pub struct BackendMCPGateway {
     pub name: String,
     pub url: url::Url,
+    pub mcp_protocol_version: rmcp::model::ProtocolVersion,
     /// Header names copied from the downstream request onto the upstream connection.
     pub passthrough_headers: Vec<String>,
     /// Static headers injected onto the upstream connection (override passthrough).

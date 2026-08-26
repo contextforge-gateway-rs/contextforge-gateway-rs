@@ -31,8 +31,8 @@ pub(crate) use plugin_gateway::{
 pub(crate) use runtime::{runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin};
 pub(crate) use test_gateways::{
     ListToolsGatewaySettings, create_gateway_with_four_counters,
-    create_gateway_with_four_counters_and_enabled_filtering, create_ports, create_tls_gateway_with_four_tls_counters,
-    plaintext_config,
+    create_gateway_with_four_counters_and_enabled_filtering, create_gateway_with_four_legacy_counters, create_ports,
+    create_tls_gateway_with_four_tls_counters, plaintext_config,
 };
 pub(crate) use tool::{error_code, error_parts, sum_request, text};
 pub(crate) use user_config_store::MemoryUserConfigStore;

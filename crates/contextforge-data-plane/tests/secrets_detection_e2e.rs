@@ -34,6 +34,7 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
+
 use serde_json::{Map, Value, json};
 use tokio::net::TcpListener;
 
@@ -376,6 +377,7 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                     BackendMCPGateway {
                         name: "backend".to_owned(),
                         url: backend.url.parse().expect("backend URL parses"),
+                        mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
                         passthrough_headers: Vec::new(),
                         add_headers: HashMap::new(),
                         remove_headers: Vec::new(),

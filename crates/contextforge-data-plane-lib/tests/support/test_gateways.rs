@@ -11,6 +11,7 @@ use futures::{FutureExt, future::BoxFuture};
 use rmcp::transport::{
     StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
+use rustls::ProtocolVersion;
 use tracing::warn;
 
 use super::{MemoryUserConfigStore, mock_counter};
@@ -138,6 +139,13 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     create_gateway_with_four_counters_and_custom_config(user, config, create_plain_backends).await
 }
 
+pub(crate) async fn create_gateway_with_four_legacy_counters(
+    user: &str,
+    config: Config,
+) -> Result<ListToolsGatewaySettings> {
+    create_gateway_with_four_counters_and_custom_config(user, config, create_plain_legacy_backends).await
+}
+
 pub(crate) async fn create_gateway_with_four_counters_and_enabled_filtering(
     user: &str,
     config: Config,
@@ -153,7 +161,12 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     create_gateway_with_four_counters_and_custom_config(user, config, create_tls_backends).await
 }
 
-fn create_backends(ports: &[u16], with_tls: bool, test_disable_filtering: bool) -> HashMap<String, BackendMCPGateway> {
+fn create_backends(
+    ports: &[u16],
+    with_tls: bool,
+    test_disable_filtering: bool,
+    protocol_version: &rmcp::model::ProtocolVersion,
+) -> HashMap<String, BackendMCPGateway> {
     ports
         .iter()
         .map(|port| {
@@ -169,6 +182,7 @@ fn create_backends(ports: &[u16], with_tls: bool, test_disable_filtering: bool) 
                 BackendMCPGateway {
                     name: format!("backend-{port}"),
                     url,
+                    mcp_protocol_version: protocol_version.clone(),
                     passthrough_headers: Vec::new(),
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),
@@ -198,15 +212,19 @@ fn create_backends(ports: &[u16], with_tls: bool, test_disable_filtering: bool) 
 }
 
 fn create_plain_backends(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
-    create_backends(ports, false, true)
+    create_backends(ports, false, true, &rmcp::model::ProtocolVersion::V_2026_07_28)
+}
+
+fn create_plain_legacy_backends(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
+    create_backends(ports, false, true, &rmcp::model::ProtocolVersion::V_2025_11_25)
 }
 
 fn create_plain_backends_with_enabled_filtering(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
-    create_backends(ports, false, false)
+    create_backends(ports, false, false, &rmcp::model::ProtocolVersion::V_2026_07_28)
 }
 
 fn create_tls_backends(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
-    create_backends(ports, true, true)
+    create_backends(ports, true, true, &rmcp::model::ProtocolVersion::V_2026_07_28)
 }
 
 fn backend_id(port: u16) -> String {

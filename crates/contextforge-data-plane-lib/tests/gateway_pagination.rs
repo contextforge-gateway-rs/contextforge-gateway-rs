@@ -24,6 +24,7 @@ fn paginating_backend(port: u16) -> BackendMCPGateway {
     BackendMCPGateway {
         name: format!("backend-{port}"),
         url: format!("http://127.0.0.1:{port}/mcp").parse().expect("valid url"),
+        mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
         passthrough_headers: Vec::new(),
         add_headers: HashMap::new(),
         remove_headers: Vec::new(),
