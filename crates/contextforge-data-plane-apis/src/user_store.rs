@@ -35,9 +35,9 @@ pub struct BackendMCPGateway {
 
     pub disable_tool_names_filtering: bool,
     pub disable_prompt_names_filtering: bool,
-    pub disable_resource_names_filtering: bool,
+    pub disable_resource_uris_filtering: bool,
 
-    pub allowed_resource_names: Vec<String>,
+    pub allowed_resource_uris: Vec<String>,
     pub allowed_prompt_names: Vec<String>,
     pub allowed_tool_names: Vec<String>,
 }

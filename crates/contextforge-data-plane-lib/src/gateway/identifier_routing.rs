@@ -156,11 +156,11 @@ mod tests {
                         "Public.Tool": "get_stats",
                         "Echo_Tool": "echo"
                     },
-                    "allowed_resource_names": [],
+                    "allowed_resource_uris": [],
                     "allowed_prompt_names": [],
                     "disable_tool_names_filtering": true,
                     "disable_prompt_names_filtering": true,
-                    "disable_resource_names_filtering": true,
+                    "disable_resource_uris_filtering": true,
                 }
             }
         });
@@ -186,22 +186,22 @@ mod tests {
                     "url": "http://upstream:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats"],
-                    "allowed_resource_names": [],
+                    "allowed_resource_uris": [],
                     "allowed_prompt_names": [],
                     "disable_tool_names_filtering": true,
                     "disable_prompt_names_filtering": true,
-                    "disable_resource_names_filtering": true,
+                    "disable_resource_uris_filtering": true,
                 },
                 "other": {
                     "name": "other",
                     "url": "http://other:9000/mcp",
                     "passthrough_headers": [],
                     "allowed_tool_names": [],
-                    "allowed_resource_names": [],
+                    "allowed_resource_uris": [],
                     "allowed_prompt_names": [],
                     "disable_tool_names_filtering": true,
                     "disable_prompt_names_filtering": true,
-                    "disable_resource_names_filtering": true,
+                    "disable_resource_uris_filtering": true,
                 }
             }
         });

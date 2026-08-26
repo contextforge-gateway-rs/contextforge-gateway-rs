@@ -167,14 +167,14 @@ mod tests {
             remove_headers: remove.iter().map(|s| (*s).to_owned()).collect(),
             allowed_tool_names: vec![],
             tool_name_aliases: HashMap::new(),
-            allowed_resource_names: vec![],
+            allowed_resource_uris: vec![],
             allowed_prompt_names: vec![],
             resource_name_aliases: HashMap::new(),
             prompt_name_aliases: HashMap::new(),
             completion: HashMap::new(),
             disable_tool_names_filtering: false,
             disable_prompt_names_filtering: false,
-            disable_resource_names_filtering: false,
+            disable_resource_uris_filtering: false,
         }
     }
 

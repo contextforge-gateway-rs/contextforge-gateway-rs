@@ -38,10 +38,10 @@ pub(super) async fn read_resource(
         data: None,
     })?;
 
-    if !backend.disable_resource_names_filtering && !backend.allowed_resource_names.contains(&resource_uri) {
+    if !backend.disable_resource_uris_filtering && !backend.allowed_resource_uris.contains(&resource_uri) {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
-            message: "Routing problem... tool not permitted".into(),
+            message: "Routing problem... resource not permitted".into(),
             data: None,
         });
     }
