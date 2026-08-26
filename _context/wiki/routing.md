@@ -23,11 +23,11 @@ Single-backend virtual hosts: identifiers pass through **unchanged**.
 
 ## List Operations
 
-All four list methods are rejected locally and remain control-plane responsibilities:
+All four list methods are rejected locally and remain ContextForge built-in dataplane responsibilities:
 
 ```text
 list_tools / list_resources / list_prompts / list_resource_templates
-  → INVALID_REQUEST: use the control plane
+  → INVALID_REQUEST: use the ContextForge built-in dataplane
 ```
 
 Aliases and legacy prefixes remain usable for targeted calls published by the control plane.
@@ -74,10 +74,10 @@ sequenceDiagram
 | Method | Group | Behavior |
 | --- | --- | --- |
 | `initialize` | Compatibility | For `2025-11-25`, returns a local stateless compatibility result with no session id; modern clients use `server/discover`. |
-| `list_tools` / `list_resources` / `list_prompts` / `list_resource_templates` | List | Rejected locally; use the control plane. |
+| `list_tools` / `list_resources` / `list_prompts` / `list_resource_templates` | List | Rejected locally; use the ContextForge built-in dataplane. |
 | `call_tool` | Targeted | Resolves the upstream name, creates a per-request backend connection, runs pre/post hooks, executes, and closes. Forwards cancellation and request-scoped progress. |
 | `read_resource` | Targeted | Resolves alias/prefix, creates a per-request backend connection, executes, and closes. |
-| `subscribe` / `unsubscribe` | Unsupported | Rejected locally; use the control plane. |
+| `subscribe` / `unsubscribe` | Unsupported | Rejected locally; use the ContextForge built-in dataplane. |
 | `get_prompt` | Targeted | Resolves alias/prefix and runs pre/post prompt hooks around a per-request backend call. |
-| `complete` | Unsupported | Rejected locally; use the control plane. |
+| `complete` | Unsupported | Rejected locally; use the ContextForge built-in dataplane. |
 | `ping` | Local | Returns success; no backend fanout. |
