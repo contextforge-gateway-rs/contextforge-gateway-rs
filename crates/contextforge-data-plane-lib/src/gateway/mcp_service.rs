@@ -8,37 +8,25 @@ use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, GetPromptRequestParams,
-        GetPromptResponse, InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
-        SubscribeRequestParams, UnsubscribeRequestParams,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResponse, InitializeRequestParams, InitializeResult, ListPromptsResult,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ReadResourceRequestParams, ReadResourceResponse, SubscribeRequestParams, UnsubscribeRequestParams,
     },
     service::RequestContext,
 };
 use typed_builder::TypedBuilder;
 
-use crate::gateway::UserSessionStore;
-
-use super::backend_transports::BackendTransports;
-
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
-pub struct McpService<T>
-where
-    T: UserSessionStore,
-{
-    #[builder(default = BackendTransports::default())]
-    transports: BackendTransports,
+pub struct McpService {
     http_client: reqwest::Client,
-    user_session_store: T,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
 }
 
-impl<T> ServerHandler for McpService<T>
-where
-    T: UserSessionStore + Send + Sync + 'static,
-{
+#[allow(clippy::unused_async_trait_impl)]
+impl ServerHandler for McpService {
     async fn initialize(
         &self,
         request: InitializeRequestParams,
@@ -49,10 +37,14 @@ where
 
     async fn list_tools(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        tools::list_tools(self, request, cx).await
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn call_tool(
@@ -65,10 +57,14 @@ where
 
     async fn list_resources(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        resources::list_resources(self, request, cx).await
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn read_resource(
@@ -81,34 +77,42 @@ where
 
     async fn list_resource_templates(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        resources::list_resource_templates(self, request, cx).await
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn subscribe(
         &self,
-        request: SubscribeRequestParams,
-        cx: RequestContext<RoleServer>,
+        params: SubscribeRequestParams,
+        ctx: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        resources::subscribe(self, request, cx).await
+        resources::subscribe(self, params, ctx).await
     }
 
     async fn unsubscribe(
         &self,
-        request: UnsubscribeRequestParams,
-        cx: RequestContext<RoleServer>,
+        params: UnsubscribeRequestParams,
+        ctx: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        resources::unsubscribe(self, request, cx).await
+        resources::unsubscribe(self, params, ctx).await
     }
 
     async fn list_prompts(
         &self,
-        request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        prompts::list_prompts(self, request, cx).await
+        Err(ErrorData {
+            code: ErrorCode::INVALID_REQUEST,
+            message: "Fan out not supported at the moment. Go to control plane".into(),
+            data: None,
+        })
     }
 
     async fn get_prompt(

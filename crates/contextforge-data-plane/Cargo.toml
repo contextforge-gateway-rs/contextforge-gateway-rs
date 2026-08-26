@@ -8,11 +8,12 @@ keywords.workspace = true
 homepage.workspace = true
 readme.workspace = true
 repository.workspace = true
+default-run = "contextforge-data-plane"
 
 
 [dependencies]
 contextforge-data-plane-cpex.workspace = true
-contextforge-data-plane-lib = { path = "../contextforge-data-plane-lib" }
+contextforge-data-plane-lib = { path = "../contextforge-data-plane-lib"}
 # These demo plugins remain in their independently hosted legacy repository.
 cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }
 cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "ab47801daccfbba44ea07b033034a347e7b5afdd", optional = true }

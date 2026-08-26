@@ -5,25 +5,20 @@ use rmcp::{
     ClientHandler, Peer, RoleClient, RoleServer,
     model::{
         CallToolRequestParams, CallToolResult, ClientRequest, InitializeRequestParams, ProgressNotificationParam,
-        ProgressToken, Request, ResourceUpdatedNotificationParam, ServerResult,
+        ProgressToken, Request, ServerResult,
     },
     serde::{Serialize, de::DeserializeOwned},
     service::{NotificationContext, PeerRequestOptions, RequestHandle, ServiceError},
 };
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use super::identifier_routing::prefixed_name;
-
 #[derive(Clone)]
 pub(crate) struct GatewayBackendClient {
-    backend_name: String,
-    namespace_identifiers: bool,
     initialize_request: InitializeRequestParams,
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     in_flight_calls: Arc<RwLock<HashMap<ProgressToken, Arc<InFlightToolCall>>>>,
-    resource_subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
 }
 
 #[derive(Debug)]
@@ -36,19 +31,10 @@ struct InFlightToolCall {
 
 impl GatewayBackendClient {
     pub(crate) fn new(
-        backend_name: String,
-        namespace_identifiers: bool,
         initialize_request: InitializeRequestParams,
         plugin_runtime: Option<GatewayPluginRuntimeHandle>,
     ) -> Self {
-        Self {
-            backend_name,
-            namespace_identifiers,
-            initialize_request,
-            plugin_runtime,
-            in_flight_calls: Arc::default(),
-            resource_subscriptions: Arc::default(),
-        }
+        Self { initialize_request, plugin_runtime, in_flight_calls: Arc::default() }
     }
 
     /// Starts a backend tool call while preventing an immediate progress
@@ -89,23 +75,6 @@ impl GatewayBackendClient {
     async fn progress_call(&self, progress_token: &ProgressToken) -> Option<Arc<InFlightToolCall>> {
         let calls = self.in_flight_calls.read().await;
         calls.get(progress_token).cloned()
-    }
-
-    pub(crate) async fn track_resource_subscription(&self, resource_uri: &str, downstream: Peer<RoleServer>) {
-        debug!("track_resource_subscription backend {} uri {resource_uri}", self.backend_name);
-        let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.insert(resource_uri.to_owned(), downstream);
-    }
-
-    pub(crate) async fn stop_tracking_resource_subscription(&self, resource_uri: &str) {
-        debug!("stop_tracking_resource_subscription backend {} uri {resource_uri}", self.backend_name);
-        let mut subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.remove(resource_uri);
-    }
-
-    async fn resource_subscription(&self, resource_uri: &str) -> Option<Peer<RoleServer>> {
-        let subscriptions = self.resource_subscriptions.lock().await;
-        subscriptions.get(resource_uri).cloned()
     }
 
     async fn stream_event_post_hook<T>(&self, call: &InFlightToolCall, event: T) -> Option<T>
@@ -155,26 +124,6 @@ impl ClientHandler for GatewayBackendClient {
             warn!("call_tool: unable to forward backend progress notification downstream: {error:?}");
         }
     }
-
-    async fn on_resource_updated(
-        &self,
-        mut params: ResourceUpdatedNotificationParam,
-        _context: NotificationContext<RoleClient>,
-    ) {
-        let Some(downstream) = self.resource_subscription(&params.uri).await else {
-            debug!("resource_updated: dropping backend notification for unsubscribed uri {}", params.uri);
-            return;
-        };
-
-        params.uri = resource_uri_for_downstream(&self.backend_name, params.uri, self.namespace_identifiers);
-        if let Err(error) = downstream.notify_resource_updated(params).await {
-            warn!("resource_updated: unable to forward backend notification downstream: {error:?}");
-        }
-    }
-}
-
-fn resource_uri_for_downstream(backend_name: &str, uri: String, namespace_identifiers: bool) -> String {
-    if namespace_identifiers { prefixed_name(backend_name, &uri) } else { uri }
 }
 
 /// Awaits a started backend tool call while relaying downstream cancellation.
@@ -197,23 +146,5 @@ pub(crate) async fn call_backend_tool(
     match response.map_err(|_| ServiceError::TransportClosed)?? {
         ServerResult::CallToolResult(result) => Ok(result),
         _ => Err(ServiceError::UnexpectedResponse),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resource_uri_for_downstream;
-
-    #[test]
-    fn single_backend_resource_update_preserves_uri() {
-        assert_eq!("test://resource", resource_uri_for_downstream("backend-id", "test://resource".to_owned(), false));
-    }
-
-    #[test]
-    fn multi_backend_resource_update_prefixes_uri() {
-        assert_eq!(
-            "backend-id-test://resource",
-            resource_uri_for_downstream("backend-id", "test://resource".to_owned(), true)
-        );
     }
 }

@@ -153,6 +153,7 @@ impl Plugin for TestPlugin {
     }
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 impl HookHandler<CmfHook> for TestPlugin {
     async fn handle(
         &self,
@@ -491,6 +492,7 @@ impl Plugin for PromptTestPlugin {
     }
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 impl HookHandler<CmfHook> for PromptTestPlugin {
     async fn handle(
         &self,

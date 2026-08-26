@@ -58,6 +58,7 @@ struct TestBackend {
     state: BackendState,
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 impl ServerHandler for TestBackend {
     async fn initialize(
         &self,
@@ -338,6 +339,9 @@ async fn start_gateway_with_state(
                                 tool_name_aliases: HashMap::new(),
                                 allowed_resource_names: Vec::new(),
                                 allowed_prompt_names: Vec::new(),
+                                resource_name_aliases: HashMap::new(),
+                                prompt_name_aliases: HashMap::new(),
+                                completion: HashMap::new(),
                             },
                         )]),
                     },
@@ -349,7 +353,7 @@ async fn start_gateway_with_state(
 
     let gateway = Gateway::builder()
         .with_config(Config {
-            address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("gateway address")),
+            address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
             token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
             upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
             runtime_plugins_enabled: Some(runtime_plugins_enabled),

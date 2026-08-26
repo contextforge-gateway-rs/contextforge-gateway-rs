@@ -20,6 +20,7 @@ readme = "./README.md"
 repository = "https://github.com/contextforge-org/contextforge-data-plane"
 
 
+
 [workspace.dependencies]
 # Keep dependencies here only when at least two workspace members inherit them.
 contextforge-data-plane-cpex = { path = "./crates/contextforge-data-plane-cpex" }

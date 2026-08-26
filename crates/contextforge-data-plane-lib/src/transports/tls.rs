@@ -30,12 +30,6 @@ impl TryFrom<&Config> for Option<DownstreamTls> {
                     .with_no_client_auth()
                     .with_single_cert(certificates, private_key)?;
 
-                if let Some(tcp_address) = config.address
-                    && tcp_address == address
-                {
-                    return Err("Invalid configuration TCP and TLS ports are the same ".into());
-                }
-
                 let tcp = Tcp::new(address);
                 Ok(Some(DownstreamTls { tcp, server_config }))
             },

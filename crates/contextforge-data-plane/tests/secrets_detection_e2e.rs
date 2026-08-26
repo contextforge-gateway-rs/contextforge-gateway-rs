@@ -58,6 +58,7 @@ struct TestBackend {
     state: BackendState,
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 impl ServerHandler for TestBackend {
     async fn initialize(
         &self,
@@ -382,6 +383,9 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                         tool_name_aliases: HashMap::new(),
                         allowed_resource_names: Vec::new(),
                         allowed_prompt_names: Vec::new(),
+                        resource_name_aliases: HashMap::new(),
+                        prompt_name_aliases: HashMap::new(),
+                        completion: HashMap::new(),
                     },
                 )]),
             },

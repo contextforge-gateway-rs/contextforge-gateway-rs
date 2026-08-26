@@ -23,8 +23,8 @@ mod tools;
 
 mod user_config_store;
 pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
-use gateway::{BackendTransports, McpService};
-use layers::session_id::SessionId;
+use gateway::McpService;
+
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use transports::{DownstreamTls, Tcp};
@@ -39,12 +39,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 use crate::{
     common::{ContextForgeDataPlaneAppState, JwtTokenDecoders},
-    gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer,
         mcp_header_limits::{McpStandardHeaderLimits, mcp_header_limits_layer},
         mcp_origin::mcp_origin_layer,
-        session_id::{SessionIdState, session_id_layer},
         user_config_store::user_config_store_layer,
         virtual_host_config::virtual_host_config_layer,
         virtual_host_id::virtual_host_id_layer,
@@ -74,12 +72,23 @@ impl Gateway {
 
         let mut handlers = vec![];
 
-        if let Some(tcp) = Option::<Tcp>::try_from(&config)? {
-            handlers.push(tcp.handle_tcp(app.clone()).boxed());
-        }
+        match (Option::<Tcp>::try_from(&config), Option::<DownstreamTls>::try_from(&config)) {
+            (Ok(Some(tcp)), Ok(Some(tls))) => {
+                handlers.push(tcp.handle_tcp(app.clone()).boxed());
+                handlers.push(tls.handle_tls(app.clone()).boxed());
+            },
+            (Ok(Some(tcp)), Ok(None)) => {
+                handlers.push(tcp.handle_tcp(app.clone()).boxed());
+            },
 
-        if let Some(tls) = Option::<DownstreamTls>::try_from(&config)? {
-            handlers.push(tls.handle_tls(app.clone()).boxed());
+            (Ok(None), Ok(Some(tls))) => {
+                handlers.push(tls.handle_tls(app.clone()).boxed());
+            },
+
+            (Ok(None), Ok(None)) => return Err("At least one listening address has to be provided ".into()),
+
+            (Ok(_), Err(e)) => return Err(format!("TLS is miconfigured {e:?}").into()),
+            _ => return Err("Listening address(es) misconfigured".into()),
         }
 
         let _ = futures::future::join_all(handlers).await;
@@ -95,13 +104,6 @@ impl Gateway {
         };
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
 
-        let user_session_store = LocalUserSessionStore::new();
-        let backend_transports = BackendTransports::default();
-        let session_id_state = SessionIdState {
-            user_session_store: Arc::new(user_session_store.clone()),
-            backend_transports: backend_transports.clone(),
-        };
-
         // RMCP owns Host validation. Keep its Origin validator disabled because
         // mcp_origin_layer enforces exact origin tuples and returns 403 for every
         // invalid present Origin, including when no allowlist is configured.
@@ -116,19 +118,16 @@ impl Gateway {
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service
-        let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
-            StreamableHttpService::new(
-                move || {
-                    Ok(McpService::builder()
-                        .with_user_session_store(user_session_store.clone())
-                        .with_http_client(reqwest_backend_client.clone())
-                        .with_transports(backend_transports.clone())
-                        .with_plugin_runtime(plugin_runtime.clone())
-                        .build())
-                },
-                session_manager,
-                streamable_config,
-            );
+        let mcp_service: StreamableHttpService<McpService, LocalSessionManager> = StreamableHttpService::new(
+            move || {
+                Ok(McpService::builder()
+                    .with_http_client(reqwest_backend_client.clone())
+                    .with_plugin_runtime(plugin_runtime.clone())
+                    .build())
+            },
+            session_manager,
+            streamable_config,
+        );
 
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
@@ -163,7 +162,6 @@ impl Gateway {
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
             .layer(middleware::from_fn(virtual_host_config_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
-            .layer(middleware::from_fn_with_state(session_id_state, session_id_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
             // Keep this outside auth/config/RMCP work so oversized MCP headers

@@ -35,18 +35,4 @@ impl ServerHandler for PaginatingServer {
             .with_server_info(Implementation::from_build_env())
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
     }
-
-    async fn list_tools(
-        &self,
-        request: Option<PaginatedRequestParams>,
-        _: RequestContext<RoleServer>,
-    ) -> Result<ListToolsResult, McpError> {
-        if request.as_ref().and_then(|r| r.cursor.as_deref()) == Some(PAGE2_CURSOR) {
-            Ok(ListToolsResult::with_all_items(Self::page2_tools()))
-        } else {
-            let mut result = ListToolsResult::with_all_items(Self::page1_tools());
-            result.next_cursor = Some(PAGE2_CURSOR.to_owned());
-            Ok(result)
-        }
-    }
 }

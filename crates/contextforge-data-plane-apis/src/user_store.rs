@@ -24,11 +24,18 @@ pub struct BackendMCPGateway {
     /// Header names stripped from the upstream connection (applied last).
     #[serde(default)]
     pub remove_headers: Vec<String>,
-    pub allowed_tool_names: Vec<String>,
     #[serde(default)]
     pub tool_name_aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub resource_name_aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub prompt_name_aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub completion: HashMap<String, String>,
+
     pub allowed_resource_names: Vec<String>,
     pub allowed_prompt_names: Vec<String>,
+    pub allowed_tool_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

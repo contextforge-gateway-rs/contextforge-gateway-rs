@@ -20,6 +20,7 @@ const MOCK_COUNTER_TOOL_NAMES: &[&str] =
 const MOCK_COUNTER_PROMPT_NAMES: &[&str] = &["counter_analysis", "example_prompt"];
 const MOCK_COUNTER_RESOURCE_TEMPLATE_NAMES: &[&str] = &["filesystem", "memo"];
 const MOCK_COUNTER_RESOURCE_TEMPLATE_URIS: &[&str] = &["memo://{id}", "str:////{path}"];
+const MOCK_COUNTER_RESOURCE_URIS: &[&str] = &["memo://insights", "str:////Users/to/some/path/"];
 
 pub(crate) struct ListToolsGatewaySettings {
     pub(crate) handle: tokio::task::JoinHandle<Vec<Result<()>>>,
@@ -28,6 +29,7 @@ pub(crate) struct ListToolsGatewaySettings {
     pub(crate) expected_prompt_names: Vec<String>,
     pub(crate) expected_resource_template_names: Vec<String>,
     pub(crate) expected_resource_template_uris: Vec<String>,
+    pub(crate) expected_resource_uris: Vec<String>,
 }
 
 /// Gateway config for plaintext-upstream tests, shared by the integration test binaries.
@@ -53,7 +55,9 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
 
 pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<ListToolsGatewaySettings> {
     let mocked_user_config_store = MemoryUserConfigStore::default();
-    let gateway_port = config.address.ok_or("Invalid configuration")?.port();
+
+    let config_address = config.address.expect("This must be set");
+    let gateway_port = config_address.port();
 
     let service = StreamableHttpService::new(
         || Ok(mock_counter::Counter::new()),
@@ -79,6 +83,8 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     virtual_host_one_resource_template_names.sort();
     let mut virtual_host_one_resource_template_uris = create_resource_template_uris(&gateway_one_ports);
     virtual_host_one_resource_template_uris.sort();
+    let mut virtual_host_one_resource_uris = create_resource_uris(&gateway_one_ports);
+    virtual_host_one_resource_uris.sort();
 
     let user_key = User::new(user);
 
@@ -107,23 +113,21 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     }
     .boxed();
 
-    if let Some(address) = config.address.as_ref() {
-        let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
+    let address = config_address;
+    let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
-        let handle =
-            tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
+    let handle =
+        tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
-        Ok(ListToolsGatewaySettings {
-            handle,
-            gateway_url,
-            expected_tool_names: virtual_host_one_tool_names,
-            expected_prompt_names: virtual_host_one_prompt_names,
-            expected_resource_template_names: virtual_host_one_resource_template_names,
-            expected_resource_template_uris: virtual_host_one_resource_template_uris,
-        })
-    } else {
-        Err("Invalid configuration".into())
-    }
+    Ok(ListToolsGatewaySettings {
+        handle,
+        gateway_url,
+        expected_tool_names: virtual_host_one_tool_names,
+        expected_prompt_names: virtual_host_one_prompt_names,
+        expected_resource_template_names: virtual_host_one_resource_template_names,
+        expected_resource_template_uris: virtual_host_one_resource_template_uris,
+        expected_resource_uris: virtual_host_one_resource_uris,
+    })
 }
 
 pub(crate) async fn create_tls_gateway_with_four_tls_counters(
@@ -157,6 +161,8 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     virtual_host_one_resource_template_names.sort();
     let mut virtual_host_one_resource_template_uris = create_resource_template_uris(&gateway_one_ports);
     virtual_host_one_resource_template_uris.sort();
+    let mut virtual_host_one_resource_uris = create_resource_uris(&gateway_one_ports);
+    virtual_host_one_resource_uris.sort();
 
     let user_key = User::new(user);
 
@@ -198,6 +204,7 @@ pub(crate) async fn create_tls_gateway_with_four_tls_counters(
             expected_prompt_names: virtual_host_one_prompt_names,
             expected_resource_template_names: virtual_host_one_resource_template_names,
             expected_resource_template_uris: virtual_host_one_resource_template_uris,
+            expected_resource_uris: virtual_host_one_resource_uris,
         })
     } else {
         Err("Invalid configuration".into())
@@ -230,6 +237,9 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                         .collect(),
                     allowed_resource_names: Vec::new(),
                     allowed_prompt_names: Vec::new(),
+                    resource_name_aliases: HashMap::new(),
+                    prompt_name_aliases: HashMap::new(),
+                    completion: HashMap::new(),
                 },
             )
         })
@@ -273,6 +283,16 @@ fn create_resource_template_uris(ports: &[u16]) -> Vec<String> {
         .flat_map(|port| {
             let backend_id = backend_id(*port);
             MOCK_COUNTER_RESOURCE_TEMPLATE_URIS.iter().map(move |uri| format!("{backend_id}-{uri}"))
+        })
+        .collect()
+}
+
+fn create_resource_uris(ports: &[u16]) -> Vec<String> {
+    ports
+        .iter()
+        .flat_map(|port| {
+            let backend_id = backend_id(*port);
+            MOCK_COUNTER_RESOURCE_URIS.iter().map(move |uri| format!("{backend_id}-{uri}"))
         })
         .collect()
 }

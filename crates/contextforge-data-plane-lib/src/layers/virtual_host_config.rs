@@ -47,7 +47,6 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::const_values::MCP_SESSION_ID;
 
     async fn handler() -> StatusCode {
         StatusCode::NO_CONTENT
@@ -74,7 +73,6 @@ mod tests {
         let response = app.oneshot(request).await.expect("response should be returned");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert!(response.headers().get(MCP_SESSION_ID).is_none());
 
         let body = to_bytes(response.into_body(), SERVER_NOT_FOUND_BODY.len()).await.expect("body should be readable");
         assert_eq!(&body[..], SERVER_NOT_FOUND_BODY.as_bytes());
