@@ -157,7 +157,10 @@ mod tests {
                         "Echo_Tool": "echo"
                     },
                     "allowed_resource_names": [],
-                    "allowed_prompt_names": []
+                    "allowed_prompt_names": [],
+                    "disable_tool_names_filtering": true,
+                    "disable_prompt_names_filtering": true,
+                    "disable_resource_names_filtering": true,
                 }
             }
         });
@@ -184,7 +187,10 @@ mod tests {
                     "passthrough_headers": [],
                     "allowed_tool_names": ["get_stats"],
                     "allowed_resource_names": [],
-                    "allowed_prompt_names": []
+                    "allowed_prompt_names": [],
+                    "disable_tool_names_filtering": true,
+                    "disable_prompt_names_filtering": true,
+                    "disable_resource_names_filtering": true,
                 },
                 "other": {
                     "name": "other",
@@ -192,7 +198,10 @@ mod tests {
                     "passthrough_headers": [],
                     "allowed_tool_names": [],
                     "allowed_resource_names": [],
-                    "allowed_prompt_names": []
+                    "allowed_prompt_names": [],
+                    "disable_tool_names_filtering": true,
+                    "disable_prompt_names_filtering": true,
+                    "disable_resource_names_filtering": true,
                 }
             }
         });
