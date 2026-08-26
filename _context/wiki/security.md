@@ -16,7 +16,7 @@
 | --- | --- |
 | ContextForge control plane | Owns login/SSO, users, teams, IAM, API-token issuance and revocation, and external-dataplane configuration publication. `dataplane_publisher.py` writes visibility-filtered `UserConfig` snapshots to Redis by user email. |
 | ContextForge built-in dataplane | Owns the Python repository's MCP request routes, including old/new protocol and stateful/stateless behavior. |
-| ContextForge external dataplane | Has no IAM or user database. It currently verifies modern MCP bearer JWTs locally, loads `UserConfig` by `sub`, and requires the requested virtual host to exist. No runtime control-plane call occurs. |
+| ContextForge external dataplane | Has no IAM or user database. It verifies modern MCP bearer JWTs locally, loads `UserConfig` by `sub`, requires the requested virtual host to exist, and enforces effective object allowlists for targeted calls. No runtime control-plane call occurs. |
 
 External-dataplane request path: control-plane API token (`sub` = email) → Origin check →
 `claims_layer` → Redis config lookup → virtual-host check → RMCP Host check →
@@ -29,9 +29,9 @@ external-dataplane contract.
   are required fields; `token_use`, `iat`, `teams`, and `scopes` are optional.
 - Failures: bad/missing JWT → `401`; no user config → `400`; unavailable virtual
   host → `404`.
-- Authorization is currently coarse: valid JWT plus published virtual host.
-  JWT scopes/teams and object allowlists are not enforced; publishing a backend
-  exposes all objects returned by it.
+- Authorization remains coarse for JWT scopes and teams, but targeted tool,
+  prompt, and resource-read calls are denied unless the resolved backend-local
+  identifier appears in the published effective object allowlist.
 - This coarse current behavior does not meet the tentative Phase 3 target. The
   target requires principal- and isolation-bound snapshots, per-request scope
   and compiled-RBAC enforcement, and default denial for missing or unauthorized

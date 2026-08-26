@@ -95,6 +95,13 @@
             "type": "string"
           }
         },
+        "allowed_resource_uris": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
         "allowed_prompt_names": {
           "type": "array",
           "items": {

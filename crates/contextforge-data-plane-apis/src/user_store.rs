@@ -34,6 +34,8 @@ pub struct BackendMCPGateway {
     pub completion: HashMap<String, String>,
 
     pub allowed_resource_names: Vec<String>,
+    #[serde(default)]
+    pub allowed_resource_uris: Vec<String>,
     pub allowed_prompt_names: Vec<String>,
     pub allowed_tool_names: Vec<String>,
 }

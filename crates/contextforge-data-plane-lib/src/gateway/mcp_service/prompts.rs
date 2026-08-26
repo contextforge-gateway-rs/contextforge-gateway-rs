@@ -37,6 +37,13 @@ pub(super) async fn get_prompt(
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
+    if !backend.allowed_prompt_names.iter().any(|allowed| allowed == &prompt_name) {
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... prompt not found".into(),
+            data: None,
+        });
+    }
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name).await?

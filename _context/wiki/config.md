@@ -129,10 +129,13 @@ BackendMCPGateway
   add_headers: HashMap<String, String>            ← injected after passthrough
   remove_headers: Vec<String>                     ← stripped after add
   tool_name_aliases: HashMap<String, String>      ← downstream_alias → upstream_original
-  allowed_tool_names: Vec<String>                 ← model exists, NOT currently enforced
-  allowed_resource_names: Vec<String>             ← model exists, NOT currently enforced
-  allowed_prompt_names: Vec<String>               ← model exists, NOT currently enforced
+  allowed_tool_names: Vec<String>                 ← enforced against resolved upstream tool names
+  allowed_resource_names: Vec<String>             ← display/catalog names; not sufficient for read authorization
+  allowed_resource_uris: Vec<String>              ← enforced against resolved upstream resource URIs
+  allowed_prompt_names: Vec<String>               ← enforced against resolved upstream prompt names
 ```
+
+An empty effective allowlist denies every targeted call in that object category. The control-plane publisher must populate `allowed_resource_uris` before this schema is deployed; its current `allowed_resource_names` values cannot authorize URI-based `resources/read` requests.
 
 **Header apply order:** `passthrough_headers` → `add_headers` (override passthrough) → `remove_headers` (applied last).
 

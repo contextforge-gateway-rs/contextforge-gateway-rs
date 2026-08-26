@@ -27,6 +27,7 @@
 | --- | --- |
 | Prefixed name doesn't start with backend name + `-` | Internal error |
 | No backend entry matches split name | Internal error (`got no responses from backends`) |
+| Resolved tool, prompt, or resource URI absent from its effective allowlist | `-32602 Invalid params`; rejected before plugins or backend connection |
 | Backend entry exists but no running service | Internal error (backend failed during initialize) |
 | More than one backend entry matches | `INVALID_REQUEST`; session backend entries cleaned up |
 | Undecodable pagination cursor | `-32602 Invalid params` |

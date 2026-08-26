@@ -37,6 +37,13 @@ pub(super) async fn read_resource(
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
+    if !backend.allowed_resource_uris.iter().any(|allowed| allowed == &resource_uri) {
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... resource not found".into(),
+            data: None,
+        });
+    }
 
     let service_name = backend_name.clone();
     let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;

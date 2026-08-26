@@ -46,6 +46,18 @@ gateway-oneincrement   →  rejected (no - separator)
 
 Methods using the same conditional routing: `read_resource`, `subscribe`, `unsubscribe`, `get_prompt`, `complete`.
 
+## Effective Object Allowlists
+
+After alias or prefix resolution, targeted calls check the backend-local identifier against the selected backend's effective allowlist:
+
+| Method | Effective allowlist |
+| --- | --- |
+| `tools/call` | `allowed_tool_names` |
+| `resources/read` | `allowed_resource_uris` |
+| `prompts/get` | `allowed_prompt_names` |
+
+Missing entries return `INVALID_PARAMS` with the same not-found response as an unroutable object. Rejection happens before plugin hooks and backend connection setup, and an empty allowlist denies every object in that category. The control-plane publisher must supply resource URIs; resource display names are not valid authorization keys for `resources/read`.
+
 ## Federated Pagination
 
 The gateway wraps per-backend cursors inside its own opaque token (JSON, treated as opaque by MCP clients). First request: all backends queried. Resume: cursor decoded, exhausted backends skipped. New cursor emitted when any backend has more pages.

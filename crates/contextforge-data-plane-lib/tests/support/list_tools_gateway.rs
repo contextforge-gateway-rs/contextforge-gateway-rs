@@ -230,13 +230,14 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     passthrough_headers: Vec::new(),
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),
-                    allowed_tool_names: Vec::new(),
+                    allowed_tool_names: MOCK_COUNTER_TOOL_NAMES.iter().map(|name| (*name).to_owned()).collect(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
                         .map(|tool_name| (format!("backend-{port}.{tool_name}"), (*tool_name).to_owned()))
                         .collect(),
                     allowed_resource_names: Vec::new(),
-                    allowed_prompt_names: Vec::new(),
+                    allowed_resource_uris: MOCK_COUNTER_RESOURCE_URIS.iter().map(|uri| (*uri).to_owned()).collect(),
+                    allowed_prompt_names: MOCK_COUNTER_PROMPT_NAMES.iter().map(|name| (*name).to_owned()).collect(),
                     resource_name_aliases: HashMap::new(),
                     prompt_name_aliases: HashMap::new(),
                     completion: HashMap::new(),

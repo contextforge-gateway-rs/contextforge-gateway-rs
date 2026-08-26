@@ -47,6 +47,7 @@ pub(crate) struct BackendObservation {
 
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
+    pub(crate) connections: Arc<StdMutex<usize>>,
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
@@ -312,7 +313,10 @@ async fn start_gateway_with_state(
     let backend_service = StreamableHttpService::new(
         {
             let backend_state = backend_state.clone();
-            move || Ok(TestBackend { state: backend_state.clone() })
+            move || {
+                *backend_state.connections.lock().expect("backend connections lock poisoned") += 1;
+                Ok(TestBackend { state: backend_state.clone() })
+            }
         },
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default().with_json_response(json_backend_responses),
@@ -335,10 +339,24 @@ async fn start_gateway_with_state(
                                 passthrough_headers: Vec::new(),
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),
-                                allowed_tool_names: Vec::new(),
+                                allowed_tool_names: [
+                                    "sum",
+                                    "progress_sum",
+                                    "progress_counter_tokens",
+                                    "reflect_text",
+                                    "wait_for_cancellation",
+                                    "missing_tool",
+                                ]
+                                .into_iter()
+                                .map(str::to_owned)
+                                .collect(),
                                 tool_name_aliases: HashMap::new(),
                                 allowed_resource_names: Vec::new(),
-                                allowed_prompt_names: Vec::new(),
+                                allowed_resource_uris: Vec::new(),
+                                allowed_prompt_names: ["review", "review_bundle"]
+                                    .into_iter()
+                                    .map(str::to_owned)
+                                    .collect(),
                                 resource_name_aliases: HashMap::new(),
                                 prompt_name_aliases: HashMap::new(),
                                 completion: HashMap::new(),

@@ -168,6 +168,7 @@ mod tests {
             allowed_tool_names: vec![],
             tool_name_aliases: HashMap::new(),
             allowed_resource_names: vec![],
+            allowed_resource_uris: vec![],
             allowed_prompt_names: vec![],
             resource_name_aliases: HashMap::new(),
             prompt_name_aliases: HashMap::new(),

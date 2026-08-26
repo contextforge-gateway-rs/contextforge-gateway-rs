@@ -11,7 +11,7 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ContentBlock, ErrorCode,
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, ProgressNotificationParam,
-        Request, ResourceContents, Role as McpRole, ServerResult,
+        ReadResourceRequestParams, Request, ResourceContents, Role as McpRole, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
@@ -401,6 +401,33 @@ async fn stateless_tool_error_round_trips() {
         panic!("expected backend MCP error, got {error:?}");
     };
     assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn disallowed_objects_are_rejected_before_backend_connection() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+
+    for error in [
+        service.call_tool(CallToolRequestParams::new("unapproved_tool")).await.unwrap_err(),
+        service.get_prompt(GetPromptRequestParams::new("unapproved_prompt")).await.unwrap_err(),
+        service.read_resource(ReadResourceRequestParams::new("file:///unapproved")).await.unwrap_err(),
+    ] {
+        let rmcp::service::ServiceError::McpError(error) = error else {
+            panic!("expected MCP allowlist error, got {error:?}");
+        };
+        assert_eq!(ErrorCode::INVALID_PARAMS, error.code);
+    }
+    assert_eq!(
+        0,
+        *gateway.backend_state.connections.lock().expect("backend connections lock poisoned"),
+        "allowlist rejection must happen before backend connection"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
