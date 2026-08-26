@@ -240,6 +240,9 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                     resource_name_aliases: HashMap::new(),
                     prompt_name_aliases: HashMap::new(),
                     completion: HashMap::new(),
+                    disable_tool_names_filtering: true,
+                    disable_prompt_names_filtering: true,
+                    disable_resource_names_filtering: true,
                 },
             )
         })

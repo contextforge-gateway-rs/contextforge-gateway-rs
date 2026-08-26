@@ -29,6 +29,7 @@ pub(super) async fn call_tool(
             data: None,
         });
     };
+
     let backend_name = backend_name.to_owned();
     let tool_name = tool_name.to_owned();
     let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
@@ -36,6 +37,15 @@ pub(super) async fn call_tool(
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
+
+    if !backend.disable_tool_names_filtering && !backend.allowed_tool_names.contains(&tool_name) {
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... tool not permitted".into(),
+            data: None,
+        });
+    }
+
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.before_tool_call(&request, &tool_name, &service_name).await?

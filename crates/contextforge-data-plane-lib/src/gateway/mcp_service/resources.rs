@@ -38,6 +38,14 @@ pub(super) async fn read_resource(
         data: None,
     })?;
 
+    if !backend.disable_resource_names_filtering && !backend.allowed_resource_names.contains(&resource_uri) {
+        return Err(ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: "Routing problem... tool not permitted".into(),
+            data: None,
+        });
+    }
+
     let service_name = backend_name.clone();
     let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
 

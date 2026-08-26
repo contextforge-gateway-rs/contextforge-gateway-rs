@@ -2,12 +2,12 @@
 
 mod auth;
 mod client;
-mod list_tools_gateway;
 pub(crate) mod mock_counter;
 pub(crate) mod paginating_mock;
 mod plugin;
 mod plugin_gateway;
 mod runtime;
+mod test_gateways;
 mod tool;
 mod user_config_store;
 
@@ -16,12 +16,8 @@ pub(crate) const TEST_USER_EMAIL: &str = "admin@example.com";
 
 pub(crate) use auth::token;
 pub(crate) use client::{
-    CLIENT_CONNECT_TIMEOUT, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler, connect_modern_client,
-    create_client, create_tls_client, modern_client_info,
-};
-pub(crate) use list_tools_gateway::{
-    ListToolsGatewaySettings, create_gateway_with_four_counters, create_ports,
-    create_tls_gateway_with_four_tls_counters, plaintext_config,
+    CLIENT_CONNECT_TIMEOUT, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler,
+    connect_client_with_protocol, connect_modern_client, create_client, create_tls_client, modern_client_info,
 };
 pub(crate) use plugin::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior,
@@ -33,5 +29,9 @@ pub(crate) use plugin_gateway::{
     start_gateway_with_json_backend_responses,
 };
 pub(crate) use runtime::{runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin};
+pub(crate) use test_gateways::{
+    ListToolsGatewaySettings, create_gateway_with_four_counters, create_ports,
+    create_tls_gateway_with_four_tls_counters, plaintext_config,
+};
 pub(crate) use tool::{error_code, error_parts, sum_request, text};
 pub(crate) use user_config_store::MemoryUserConfigStore;
