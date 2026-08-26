@@ -1,6 +1,6 @@
 use std::{fs, sync::Arc};
 
-use axum::middleware;
+use axum::{extract::DefaultBodyLimit, middleware};
 use axum_otel_metrics::HttpMetricsLayerBuilder;
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
@@ -162,7 +162,8 @@ impl Gateway {
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
-            .layer(middleware::from_fn_with_state(max_request_body_bytes, mcp_param_validation_layer))
+            .layer(middleware::from_fn(mcp_param_validation_layer))
+            .layer(DefaultBodyLimit::max(max_request_body_bytes))
             .layer(middleware::from_fn(virtual_host_config_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))

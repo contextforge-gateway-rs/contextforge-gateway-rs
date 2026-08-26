@@ -1,40 +1,49 @@
 use axum::{
+    RequestExt,
     body::{Body, to_bytes},
-    extract::State,
     middleware::Next,
     response::Response,
 };
 use contextforge_data_plane_apis::user_store::UserConfig;
 use http::{Method, StatusCode, header};
-use rmcp::model::{ClientJsonRpcMessage, ClientRequest, ErrorData, JsonRpcError};
+use rmcp::{
+    model::{ClientJsonRpcMessage, ClientRequest, ErrorData, JsonRpcError},
+    transport::common::http_header::HEADER_MCP_METHOD,
+};
 
 use crate::{gateway::resolve_tool_route, layers::virtual_host_id::VirtualHostId, mcp_standard_headers};
 
-pub async fn mcp_param_validation_layer(
-    State(max_request_body_bytes): State<usize>,
-    request: http::Request<Body>,
-    next: Next,
-) -> Response {
-    if request.method() != Method::POST || !mcp_standard_headers::required_for(request.headers()) {
+pub async fn mcp_param_validation_layer(request: http::Request<Body>, next: Next) -> Response {
+    if !should_validate_tool_params(&request) {
         return next.run(request).await;
     }
 
-    let (parts, body) = request.into_parts();
-    let Ok(body) = to_bytes(body, max_request_body_bytes).await else {
+    // The router's DefaultBodyLimit layer owns the byte budget. Applying it
+    // here wraps the body without duplicating that limit in this validator.
+    let (parts, body) = request.with_limited_body().into_parts();
+    let Ok(body) = to_bytes(body, usize::MAX).await else {
         return Response::builder()
             .status(StatusCode::PAYLOAD_TOO_LARGE)
             .body(Body::from("Payload Too Large"))
             .expect("payload-too-large response builds");
     };
 
-    if let Some(response) = validation_error(&parts, &body) {
+    if let Some(response) = tool_param_validation_error(&parts, &body) {
         return response;
     }
 
     next.run(http::Request::from_parts(parts, Body::from(body))).await
 }
 
-fn validation_error(parts: &http::request::Parts, body: &[u8]) -> Option<Response> {
+fn should_validate_tool_params(request: &http::Request<Body>) -> bool {
+    // RMCP rejects Mcp-Method/body mismatches before dispatch, so the standard
+    // header is a safe cheap gate for this tool-only validation.
+    request.method() == Method::POST
+        && mcp_standard_headers::required_for(request.headers())
+        && request.headers().get(HEADER_MCP_METHOD).and_then(|value| value.to_str().ok()) == Some("tools/call")
+}
+
+fn tool_param_validation_error(parts: &http::request::Parts, body: &[u8]) -> Option<Response> {
     let message = serde_json::from_slice::<ClientJsonRpcMessage>(body).ok()?;
     let ClientJsonRpcMessage::Request(request) = message else {
         return None;
@@ -48,7 +57,7 @@ fn validation_error(parts: &http::request::Parts, body: &[u8]) -> Option<Respons
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
     let (backend_name, tool_name) = resolve_tool_route(virtual_host, &tool_call.params.name, &backend_names)?;
     let backend = virtual_host.backends.get(backend_name)?;
-    let reason = match backend.tool_schemas.get(tool_name) {
+    let mismatch = match backend.tool_schemas.get(tool_name) {
         Some(tool_schema) => {
             mcp_standard_headers::validate_tool_params(&parts.headers, tool_call.params.arguments.as_ref(), tool_schema)
                 .err()?
@@ -56,7 +65,7 @@ fn validation_error(parts: &http::request::Parts, body: &[u8]) -> Option<Respons
         None => format!("Missing published schema for tool '{tool_name}'"),
     };
 
-    let error = JsonRpcError::new(Some(request.id), ErrorData::header_mismatch(reason, None));
+    let error = JsonRpcError::new(Some(request.id), ErrorData::header_mismatch(mismatch, None));
     let body = serde_json::to_vec(&error).expect("JSON-RPC header mismatch serializes");
     Some(
         Response::builder()
@@ -65,4 +74,26 @@ fn validation_error(parts: &http::request::Parts, body: &[u8]) -> Option<Respons
             .body(Body::from(body))
             .expect("header mismatch response builds"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(protocol_version: &'static str, method: &'static str) -> http::Request<Body> {
+        http::Request::builder()
+            .method(Method::POST)
+            .uri("/")
+            .header("MCP-Protocol-Version", protocol_version)
+            .header(HEADER_MCP_METHOD, method)
+            .body(Body::empty())
+            .expect("request builds")
+    }
+
+    #[test]
+    fn only_modern_tool_calls_require_param_validation() {
+        assert!(should_validate_tool_params(&request("2026-07-28", "tools/call")));
+        assert!(!should_validate_tool_params(&request("2026-07-28", "resources/read")));
+        assert!(!should_validate_tool_params(&request("2025-11-25", "tools/call")));
+    }
 }

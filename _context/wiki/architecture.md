@@ -22,7 +22,8 @@ TCP/TLS listener
   -> session_id_layer            → inserts SessionId if present
   -> user_config_store_layer     → inserts UserConfig              (400 no config, 500 store error)
   -> virtual_host_config_layer   → rejects unknown vhost           (404 "Server not found")
-  -> mcp_param_validation_layer  → validates tools/call params      (400/-32020 on mismatch)
+  -> DefaultBodyLimit            → configures the MCP body cap      (413 when exceeded)
+  -> mcp_param_validation_layer  → validates modern tools/call      (400/-32020 on mismatch)
   -> /servers/{virtual_host_name}/mcp RMCP service → validates Host, then dispatches MCP
 ```
 
@@ -78,9 +79,12 @@ flowchart TD
 ```
 
 
-For modern `tools/call`, the parameter-header layer resolves the request's
-backend and original tool name, then validates `Mcp-Param-*` against the input
-schema published in `UserConfig`. It does not call backend `tools/list`.
+For modern `tools/call`, `DefaultBodyLimit` supplies the configured body cap
+before the parameter-header layer reads the body. Non-tool requests bypass this
+layer's body processing; RMCP still validates their standard headers. The layer
+then resolves the request's backend and original tool name and validates
+`Mcp-Param-*` against the schema published in `UserConfig`; it does not call
+backend `tools/list`.
 Validated headers are forwarded unchanged; request plugins run afterward, so a
 plugin that changes an annotated argument also owns the resulting upstream
 mismatch.
