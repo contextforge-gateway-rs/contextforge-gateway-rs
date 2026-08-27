@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
@@ -179,16 +179,20 @@ fn create_backends(
                     remove_headers: Vec::new(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
-                        .map(|tool_name| (format!("backend-{port}.{tool_name}"), (*tool_name).to_owned()))
+                        .map(|tool_name| NameAlias::new(format!("backend-{port}.{tool_name}"), tool_name.to_string()))
                         .collect(),
 
                     resource_uri_aliases: MOCK_COUNTER_RESOURCE_URIS
                         .iter()
-                        .map(|resource_uri| (format!("backend-{port}.{resource_uri}"), (*resource_uri).to_owned()))
+                        .map(|resource_uri| {
+                            NameAlias::new(format!("backend-{port}.{resource_uri}"), resource_uri.to_string())
+                        })
                         .collect(),
                     prompt_name_aliases: MOCK_COUNTER_PROMPT_NAMES
                         .iter()
-                        .map(|resource_uri| (format!("backend-{port}.{resource_uri}"), (*resource_uri).to_owned()))
+                        .map(|prompt_name| {
+                            NameAlias::new(format!("backend-{port}.{prompt_name}"), prompt_name.to_string())
+                        })
                         .collect(),
 
                     completion: HashMap::new(),

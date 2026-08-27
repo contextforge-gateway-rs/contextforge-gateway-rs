@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex as StdMutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -336,9 +336,9 @@ async fn start_gateway_with_state(
                                 passthrough_headers: Vec::new(),
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),
-                                tool_name_aliases: HashMap::new(),
-                                resource_uri_aliases: HashMap::new(),
-                                prompt_name_aliases: HashMap::new(),
+                                tool_name_aliases: HashSet::new(),
+                                resource_uri_aliases: HashSet::new(),
+                                prompt_name_aliases: HashSet::new(),
                                 completion: HashMap::new(),
                             },
                         )]),

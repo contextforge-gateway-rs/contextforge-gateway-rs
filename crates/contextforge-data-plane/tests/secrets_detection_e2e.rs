@@ -4,7 +4,7 @@
 #![cfg(feature = "plugins")]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     net::TcpStream as StdTcpStream,
     path::PathBuf,
@@ -381,9 +381,9 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                         passthrough_headers: Vec::new(),
                         add_headers: HashMap::new(),
                         remove_headers: Vec::new(),
-                        tool_name_aliases: HashMap::new(),
-                        resource_uri_aliases: HashMap::new(),
-                        prompt_name_aliases: HashMap::new(),
+                        tool_name_aliases: HashSet::new(),
+                        resource_uri_aliases: HashSet::new(),
+                        prompt_name_aliases: HashSet::new(),
                         completion: HashMap::new(),
                     },
                 )]),

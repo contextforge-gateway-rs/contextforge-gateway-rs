@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,40 @@ pub enum IntegrationType {
     #[default]
     #[serde(rename = "MCP")]
     Mcp,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, Eq)]
+pub struct NameAlias {
+    downstream_prefixed_name: String,
+    upstream_name: String,
+}
+
+impl PartialEq for NameAlias {
+    fn eq(&self, other: &Self) -> bool {
+        self.downstream_prefixed_name == other.downstream_prefixed_name
+    }
+}
+
+impl std::hash::Hash for NameAlias {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.downstream_prefixed_name.hash(state);
+    }
+}
+
+impl NameAlias {
+    pub fn new(downstream_prefixed_name: String, upstream_name: String) -> Self {
+        Self { downstream_prefixed_name, upstream_name }
+    }
+    pub fn with_downstream_prefixed_name(downstream_prefixed_name: String) -> Self {
+        NameAlias { downstream_prefixed_name, upstream_name: String::new() }
+    }
+    pub fn get_upstream_name(&self) -> &str {
+        &self.upstream_name
+    }
+
+    pub fn get_downstream_prefixed_name(&self) -> &str {
+        &self.downstream_prefixed_name
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -26,11 +60,11 @@ pub struct BackendMCPGateway {
     #[serde(default)]
     pub remove_headers: Vec<String>,
     #[serde(default)]
-    pub tool_name_aliases: HashMap<String, String>,
+    pub tool_name_aliases: HashSet<NameAlias>,
     #[serde(default)]
-    pub resource_uri_aliases: HashMap<String, String>,
+    pub resource_uri_aliases: HashSet<NameAlias>,
     #[serde(default)]
-    pub prompt_name_aliases: HashMap<String, String>,
+    pub prompt_name_aliases: HashSet<NameAlias>,
     #[serde(default)]
     pub completion: HashMap<String, String>,
 }
