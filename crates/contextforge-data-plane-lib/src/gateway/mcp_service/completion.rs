@@ -19,7 +19,6 @@ pub(super) async fn complete(
     request: CompleteRequestParams,
     cx: RequestContext<RoleServer>,
 ) -> Result<CompleteResult, ErrorData> {
-    info!("\n\n\n---------- request ----- {:?}", &request);
     let mcp_call_validator = AuthorizedCallValidator::new("complete", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
 
@@ -58,7 +57,7 @@ pub(super) async fn complete(
     }
     let response = response.map_err(|error| backend_forward_error("complete", &service_name, &error))?;
 
-    info!("read_resource: backend {service_name} returned {} contents", response.completion.values.len());
+    info!("complete: backend {service_name} returned {} contents", response.completion.values.len());
 
-    Ok(response.into())
+    Ok(response)
 }
