@@ -116,7 +116,8 @@ impl Gateway {
                 .disable_allowed_origins()
         } else {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
-        };
+        }
+        .with_legacy_session_mode(false);
 
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
