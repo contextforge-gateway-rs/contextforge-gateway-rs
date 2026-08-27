@@ -1,8 +1,3 @@
-[advisories]
-ignore = [
-    { id = "RUSTSEC-2026-0214", reason = "Transitive through the load-test-only Goose crate, which has no maintained CLI replacement yet" },
-]
-
 ## This doesn't work at the moment. see https://github.com/EmbarkStudios/cargo-deny/issues/859
 [[licenses.exceptions]]
 allow = ["CDLA-Permissive-2.0"]

@@ -1,26 +1,11 @@
 # Performance And Load Testing
 
-## Two Load Paths
-
-- **External-dataplane-only:** `contextforge-load-test` measures the ContextForge external dataplane in isolation.
-- **Full-stack:** `cf-integration` measures the nginx → external dataplane → backend request path with Locust while the ContextForge control plane publishes configuration.
-
-Use the first to profile gateway changes; use the second to measure what users see.
-
-## External-Dataplane-Only (Goose)
-
-`crates/contextforge-load-test` is a [Goose](https://book.goose.rs/)-based driver that speaks full streamable HTTP MCP. Start the local stack and seed user config first (see [getting-started.md](getting-started.md)), then:
-
-```bash
-cargo run --release --bin contextforge-load-test -- \
-  --host 'http://127.0.0.1:8001' \
-  -u 120 -r 40 --run-time 120s \
-  --report-file report.html
-```
-
-`-u` = concurrent users, `-r` = spawn rate/s, `--report-file` = HTML report. Curated run reports live in `reports/`.
-
 ## Full-Stack Load (Locust via cf-integration)
+
+Performance testing uses the control-plane Locust suite through
+[`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools).
+It measures the nginx → external dataplane → backend request path while the
+ContextForge control plane publishes configuration.
 
 | Command | What it runs |
 | --- | --- |
