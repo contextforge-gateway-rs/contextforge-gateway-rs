@@ -85,12 +85,12 @@ cargo run --release \
 cargo run --features contextforge-data-plane-lib/with_tools \
 -- \
 --address 0.0.0.0:8080 \
---redis-address 127.0.0.1 \ 
---redis-port 6379 \ 
+--redis-address 127.0.0.1 \
+--redis-port 6379 \
 --redis-mode plain-text \
 --token-verification-private-key ./assets/jwt.key \
 --token-verification-public-key ./assets/jwt.key.pub \
---upstream-connection-mode plain-text-or-tls \ 
+--upstream-connection-mode plain-text-or-tls \
 --tls-address 0.0.0.0:8443 \
 --server-private-key ./assets/tls_key.pem \
 --server-certificate ./assets/tls_certificate.pem
@@ -103,12 +103,7 @@ The data plane exports OTLP traces and metrics. Local Langfuse, OTel Collector, 
 
 ## Performance Tests
 
-With a configured data plane running on port `8001`:
-
-```bash
-cargo run --release --bin contextforge-load-test -- \
-  --host http://127.0.0.1:8001 \
-  -r 40 -u 120 --run-time 120s --report-file report.html
-```
-
-Existing benchmark results are under [reports](reports).
+Performance testing uses the control-plane Locust suite through
+[`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools).
+See the [performance guide](_context/wiki/performance.md) for load and baseline
+runs.

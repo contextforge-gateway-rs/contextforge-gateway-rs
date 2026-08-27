@@ -4,7 +4,6 @@ members = [
     "crates/contextforge-data-plane-apis",
     "crates/contextforge-data-plane-cpex",
     "crates/contextforge-data-plane-lib",
-    "crates/contextforge-load-test",
     "crates/plugins/cpex-secrets-detection",
 ]
 resolver = "3"
