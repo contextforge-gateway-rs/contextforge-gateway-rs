@@ -71,7 +71,7 @@
           },
           "default": {}
         },
-        "resource_name_aliases": {
+        "resource_uri_aliases": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
@@ -91,46 +91,13 @@
             "type": "string"
           },
           "default": {}
-        },
-        "disable_tool_names_filtering": {
-          "type": "boolean"
-        },
-        "disable_prompt_names_filtering": {
-          "type": "boolean"
-        },
-        "disable_resource_uris_filtering": {
-          "type": "boolean"
-        },
-        "allowed_resource_uris": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "allowed_prompt_names": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "allowed_tool_names": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         }
       },
       "required": [
         "name",
         "url",
         "mcp_protocol_version",
-        "passthrough_headers",
-        "disable_tool_names_filtering",
-        "disable_prompt_names_filtering",
-        "disable_resource_uris_filtering",
-        "allowed_resource_uris",
-        "allowed_prompt_names",
-        "allowed_tool_names"
+        "passthrough_headers"
       ]
     },
     "ProtocolVersion": {

@@ -28,19 +28,11 @@ pub struct BackendMCPGateway {
     #[serde(default)]
     pub tool_name_aliases: HashMap<String, String>,
     #[serde(default)]
-    pub resource_name_aliases: HashMap<String, String>,
+    pub resource_uri_aliases: HashMap<String, String>,
     #[serde(default)]
     pub prompt_name_aliases: HashMap<String, String>,
     #[serde(default)]
     pub completion: HashMap<String, String>,
-
-    pub disable_tool_names_filtering: bool,
-    pub disable_prompt_names_filtering: bool,
-    pub disable_resource_uris_filtering: bool,
-
-    pub allowed_resource_uris: Vec<String>,
-    pub allowed_prompt_names: Vec<String>,
-    pub allowed_tool_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

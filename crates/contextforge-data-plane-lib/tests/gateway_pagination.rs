@@ -28,16 +28,10 @@ fn paginating_backend(port: u16) -> BackendMCPGateway {
         passthrough_headers: Vec::new(),
         add_headers: HashMap::new(),
         remove_headers: Vec::new(),
-        allowed_tool_names: Vec::new(),
         tool_name_aliases: HashMap::new(),
-        allowed_resource_uris: Vec::new(),
-        allowed_prompt_names: Vec::new(),
-        resource_name_aliases: HashMap::new(),
+        resource_uri_aliases: HashMap::new(),
         prompt_name_aliases: HashMap::new(),
         completion: HashMap::new(),
-        disable_tool_names_filtering: false,
-        disable_prompt_names_filtering: false,
-        disable_resource_uris_filtering: false,
     }
 }
 

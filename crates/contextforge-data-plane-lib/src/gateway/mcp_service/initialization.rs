@@ -166,16 +166,10 @@ mod tests {
             passthrough_headers: passthrough.iter().map(|s| (*s).to_owned()).collect(),
             add_headers: add.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
             remove_headers: remove.iter().map(|s| (*s).to_owned()).collect(),
-            allowed_tool_names: vec![],
             tool_name_aliases: HashMap::new(),
-            allowed_resource_uris: vec![],
-            allowed_prompt_names: vec![],
-            resource_name_aliases: HashMap::new(),
+            resource_uri_aliases: HashMap::new(),
             prompt_name_aliases: HashMap::new(),
             completion: HashMap::new(),
-            disable_tool_names_filtering: false,
-            disable_prompt_names_filtering: false,
-            disable_resource_uris_filtering: false,
         }
     }
 
