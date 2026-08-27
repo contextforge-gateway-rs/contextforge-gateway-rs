@@ -9,7 +9,8 @@ use contextforge_data_plane_lib::{
 };
 use futures::{FutureExt, future::BoxFuture};
 use rmcp::transport::{
-    StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
+    StreamableHttpServerConfig, StreamableHttpService,
+    streamable_http_server::session::{local::LocalSessionManager, never::NeverSessionManager},
 };
 use rustls::ProtocolVersion;
 use tracing::warn;
@@ -107,7 +108,7 @@ async fn create_gateway_with_four_counters_and_custom_config(
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
+        .with_session_manager(Arc::new(NeverSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 

@@ -31,7 +31,7 @@ use rmcp::{
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,
-        streamable_http_server::session::local::LocalSessionManager,
+        streamable_http_server::session::{local::LocalSessionManager, never::NeverSessionManager},
     },
 };
 
@@ -285,7 +285,8 @@ async fn start_backend() -> RunningBackend {
     let backend_state = state.clone();
     let service = StreamableHttpService::new(
         move || Ok(TestBackend { state: backend_state.clone() }),
-        LocalSessionManager::default().into(),
+        //LocalSessionManager::default().into(),
+        NeverSessionManager::default().into(),
         StreamableHttpServerConfig::default(),
     );
     let router = axum::Router::new().route_service("/mcp", service);

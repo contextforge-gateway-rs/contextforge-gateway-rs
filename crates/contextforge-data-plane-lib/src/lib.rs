@@ -8,7 +8,10 @@ use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use rmcp::transport::{
     StreamableHttpServerConfig,
-    streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
+    streamable_http_server::{
+        session::{local::LocalSessionManager, never::NeverSessionManager},
+        tower::StreamableHttpService,
+    },
 };
 mod common;
 mod const_values;
@@ -59,7 +62,7 @@ pub enum UserConfigStoreType {
 #[builder(field_defaults(setter(prefix = "with_")))]
 pub struct Gateway {
     config: Config,
-    session_manager: Arc<LocalSessionManager>,
+    session_manager: Arc<NeverSessionManager>,
     user_config_store_type: UserConfigStoreType,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
@@ -118,7 +121,7 @@ impl Gateway {
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service
-        let mcp_service: StreamableHttpService<McpService, LocalSessionManager> = StreamableHttpService::new(
+        let mcp_service: StreamableHttpService<McpService, NeverSessionManager> = StreamableHttpService::new(
             move || {
                 Ok(McpService::builder()
                     .with_http_client(reqwest_backend_client.clone())
@@ -199,7 +202,7 @@ mod tests {
     use axum::body::Body;
     use contextforge_data_plane_apis::{User, user_store::UserConfig};
     use http::{Request, StatusCode};
-    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+    use rmcp::transport::streamable_http_server::session::{local::LocalSessionManager, never::NeverSessionManager};
     use tower::ServiceExt;
 
     use crate::{
@@ -226,7 +229,8 @@ mod tests {
         let config = Config { mcp_standard_header_max_count: 1, ..Config::default() };
         let app = Gateway::builder()
             .with_config(config)
-            .with_session_manager(Arc::new(LocalSessionManager::default()))
+            //.with_session_manager(Arc::new(LocalSessionManager::default()))
+            .with_session_manager(Arc::new(NeverSessionManager::default()))
             .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(UnusedConfigStore)))
             .build()
             .build_app()

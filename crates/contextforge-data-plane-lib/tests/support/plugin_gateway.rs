@@ -23,7 +23,7 @@ use rmcp::{
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,
-        streamable_http_server::session::local::LocalSessionManager,
+        streamable_http_server::session::{local::LocalSessionManager, never::NeverSessionManager},
     },
 };
 use serde_json::{Map, Value};
@@ -363,7 +363,7 @@ async fn start_gateway_with_state(
             runtime_plugins_enabled: Some(runtime_plugins_enabled),
             ..Default::default()
         })
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
+        .with_session_manager(Arc::new(NeverSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(user_store)))
         .with_plugin_runtime(runtime_plugins_enabled.then(|| plugin_runtime.handle()))
         .build();

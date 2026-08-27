@@ -10,7 +10,8 @@ use contextforge_data_plane_lib::{Config, Gateway, Result, UserConfigStore, User
 use rmcp::{
     model::PaginatedRequestParams,
     transport::{
-        StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
+        StreamableHttpServerConfig, StreamableHttpService,
+        streamable_http_server::session::{local::LocalSessionManager, never::NeverSessionManager},
     },
 };
 use tracing::warn;
@@ -72,7 +73,7 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
 
     let gateway = Gateway::builder()
         .with_config(config)
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
+        .with_session_manager(Arc::new(NeverSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(store)))
         .build();
 
