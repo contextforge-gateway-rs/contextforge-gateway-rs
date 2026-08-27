@@ -97,6 +97,12 @@ echo "Starting the dataplane and nginx."
 echo "Running MCP ${MCP_CONFORMANCE_SPEC_VERSION} conformance."
 "${script_dir}/run-conformance.sh"
 
+set +e
+echo "Running scoped MCP ${MCP_CONFORMANCE_SPEC_VERSION} client conformance."
+"${script_dir}/run-client-conformance.sh"
+client_status="$?"
+set -e
+
 runner_status="$(sed -n 's/^status=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
 if [ -z "${runner_status}" ]; then
   echo "Conformance runner did not report a status." >&2
@@ -105,14 +111,29 @@ fi
 
 set +e
 if [ "${MCP_CONFORMANCE_BLESS:-false}" = "true" ]; then
-  "${script_dir}/report-baseline-diff.sh" --bless "${MCP_CONFORMANCE_RESULTS_DIR}"
+  "${script_dir}/report-baseline-diff.sh" --bless "${MCP_CONFORMANCE_RESULTS_DIR}/server"
+  report_status="$?"
+  "${script_dir}/bless-client-baseline.sh" \
+    "${MCP_CONFORMANCE_RESULTS_DIR}/client" \
+    "${script_dir}/client-expected-failures.yml"
+  client_baseline_status="$?"
+  if [ "${client_baseline_status}" -eq 0 ]; then
+    client_status=0
+  fi
 else
-  "${script_dir}/report-baseline-diff.sh" "${MCP_CONFORMANCE_RESULTS_DIR}"
+  "${script_dir}/report-baseline-diff.sh" "${MCP_CONFORMANCE_RESULTS_DIR}/server"
+  report_status="$?"
+  client_baseline_status=0
 fi
-report_status="$?"
 set -e
 
 if [ "${runner_status}" -ne 0 ] && [ "${report_status}" -eq 0 ]; then
   echo "Official runner status ${runner_status} contained no dataplane baseline mismatch."
+fi
+if [ "${client_baseline_status}" -ne 0 ]; then
+  exit "${client_baseline_status}"
+fi
+if [ "${client_status}" -ne 0 ]; then
+  exit "${client_status}"
 fi
 exit "${report_status}"

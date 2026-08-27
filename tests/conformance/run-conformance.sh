@@ -9,7 +9,10 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 suite_dir="${MCP_CONFORMANCE_SUITE_DIR:-${repo_root}/.conformance-suite}"
 conformance_port="${MCP_CONFORMANCE_PORT:-8080}"
-results_dir="${MCP_CONFORMANCE_RESULTS_DIR:-${repo_root}/conformance-results}"
+results_root="${MCP_CONFORMANCE_RESULTS_DIR:-${repo_root}/conformance-results}"
+results_dir="${MCP_CONFORMANCE_SERVER_RESULTS_DIR:-${results_root}/server}"
+
+mkdir -p "${results_dir}"
 
 set +e
 (

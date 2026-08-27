@@ -70,6 +70,7 @@ services:
       LOG_LEVEL: INFO
     volumes:
       - ../../assets:/keys:ro
+      - ./write_client_config.py:/opt/contextforge-conformance/write_client_config.py:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -83,6 +84,8 @@ services:
   data-plane:
     image: ${CF_DATAPLANE_IMAGE:-ghcr.io/contextforge-org/contextforge-data-plane:latest}
     networks: [contextforge]
+    extra_hosts:
+      - host.docker.internal:host-gateway
     environment:
       CONTEXTFORGE_DATA_PLANE_ADDRESS: 0.0.0.0:4445
       CONTEXTFORGE_DATA_PLANE_REDIS_HOSTNAME: redis

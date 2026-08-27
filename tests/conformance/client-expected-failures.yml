@@ -1,0 +1,10 @@
+# Dataplane-owned upstream MCP client findings for the scoped client lane.
+# OAuth scenarios are control-plane responsibilities and are not run here.
+client:
+  # The upstream client does not yet mirror x-mcp-header tool arguments into
+  # Mcp-Param-* request headers. Keep the null/omission checks as required
+  # passes by baselining only the affected checks, not the whole scenario.
+  - http-custom-headers:sep-2243-client-supports-custom-headers
+  - http-custom-headers:sep-2243-client-mirrors-designated-params
+  - http-custom-headers:sep-2243-client-encode-values
+  - http-custom-headers:sep-2243-client-base64-unsafe
