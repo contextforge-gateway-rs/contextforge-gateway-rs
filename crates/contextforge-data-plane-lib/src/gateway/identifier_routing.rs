@@ -20,7 +20,7 @@ fn resolve_route<'a, N: AsRef<str>>(
     name: &'a str,
     backend_names: &'a [N],
     name_extractor: impl Fn(&'a str, &'a BackendMCPGateway) -> Option<&'a str>,
-) -> Option<(&'a str, &'a str)> {
+) -> Result<Option<(&'a str, &'a str)>, Box<dyn std::error::Error + Send + Sync>> {
     let mut aliases = backend_names.iter().filter_map(|backend_name| {
         let backend_name = backend_name.as_ref();
         let backend = virtual_host.backends.get(backend_name)?;
@@ -29,9 +29,9 @@ fn resolve_route<'a, N: AsRef<str>>(
     });
     let alias = aliases.next();
     if aliases.next().is_some() {
-        return None;
+        return Err(format!("Multiple backends found for {name}").into());
     }
-    alias.or_else(|| route_identifier(name, backend_names))
+    Ok(alias.or_else(|| route_identifier(name, backend_names)))
 }
 
 /// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
@@ -40,7 +40,7 @@ pub(super) fn resolve_tool_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
-) -> Option<(&'a str, &'a str)> {
+) -> Result<Option<(&'a str, &'a str)>, Box<dyn std::error::Error + Send + Sync>> {
     resolve_route(virtual_host, name, backend_names, |name: &'a str, backend: &'a BackendMCPGateway| {
         backend
             .tool_name_aliases
@@ -53,7 +53,7 @@ pub(super) fn resolve_resources_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
-) -> Option<(&'a str, &'a str)> {
+) -> Result<Option<(&'a str, &'a str)>, Box<dyn std::error::Error + Send + Sync>> {
     resolve_route(virtual_host, name, backend_names, |name: &'a str, backend: &'a BackendMCPGateway| {
         backend
             .resource_uri_aliases
@@ -66,7 +66,7 @@ pub(super) fn resolve_prompt_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
-) -> Option<(&'a str, &'a str)> {
+) -> Result<Option<(&'a str, &'a str)>, Box<dyn std::error::Error + Send + Sync>> {
     resolve_route(virtual_host, name, backend_names, |name: &'a str, backend: &'a BackendMCPGateway| {
         backend
             .prompt_name_aliases
@@ -177,7 +177,7 @@ mod tests {
         );
         assert_eq!(
             Some(("79fabb70-2188-4de8-95ed-dc1e976e14d4", "get_stats")),
-            resolve_tool_route(&virtual_host, "Public.Tool", &backend_ids)
+            resolve_tool_route(&virtual_host, "Public.Tool", &backend_ids).expect("this should work")
         );
     }
 
@@ -209,6 +209,7 @@ mod tests {
         assert_eq!(
             Some(("compliance-reference", "get_stats")),
             resolve_tool_route(&virtual_host, "compliance-reference-get_stats", &backend_names)
+                .expect("this should work")
         );
     }
 }
