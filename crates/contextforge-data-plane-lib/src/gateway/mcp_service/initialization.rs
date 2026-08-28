@@ -62,14 +62,17 @@ pub(super) async fn connect_backend_for_request(
         ClientCapabilities::default(),
         Implementation::new("contextforge-data-plane", env!("CARGO_PKG_VERSION")),
     )
-    .with_protocol_version(ProtocolVersion::V_2026_07_28);
+    .with_protocol_version(backend.mcp_protocol_version.clone());
 
     let backend_client = GatewayBackendClient::new(client_info, mcp_service.plugin_runtime.clone());
 
     serve_client_with_lifecycle_and_ct(
         backend_client,
         transport,
-        ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
+        ClientLifecycleMode::Auto {
+            preferred_versions: vec![backend.mcp_protocol_version.clone()],
+            legacy_version: Some(backend.mcp_protocol_version.clone()),
+        },
         cx.ct.clone(),
     )
     .await
@@ -164,22 +167,22 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     fn backend(passthrough: &[&str], add: &[(&str, &str)], remove: &[&str]) -> BackendMCPGateway {
         BackendMCPGateway {
             name: "b".into(),
             url: "https://upstream.example/mcp".parse().unwrap(),
+            mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
             passthrough_headers: passthrough.iter().map(|s| (*s).to_owned()).collect(),
             add_headers: add.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
             remove_headers: remove.iter().map(|s| (*s).to_owned()).collect(),
-            allowed_tool_names: vec![],
             tool_schemas: HashMap::new(),
-            tool_name_aliases: HashMap::new(),
-            allowed_resource_names: vec![],
-            allowed_prompt_names: vec![],
-            resource_name_aliases: HashMap::new(),
-            prompt_name_aliases: HashMap::new(),
+            tool_name_aliases: HashSet::new(),
+            resource_uri_aliases: HashSet::new(),
+            prompt_name_aliases: HashSet::new(),
             completion: HashMap::new(),
         }
     }
@@ -307,6 +310,7 @@ mod tests {
         );
 
         apply_header_config(&mut headers, &cfg, Some(&ds));
+
         assert_eq!(headers[&http::HeaderName::from_static("mcp-method")], "tools/call");
         assert_eq!(headers[&http::HeaderName::from_static("mcp-param-user")], "client-user");
         assert!(!headers.contains_key(&http::HeaderName::from_static("mcp-name")));

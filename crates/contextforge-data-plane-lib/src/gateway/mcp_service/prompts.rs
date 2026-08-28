@@ -21,7 +21,13 @@ pub(super) async fn get_prompt(
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
-    let Some((backend_name, prompt_name)) = resolve_prompt_route(virtual_host, &request.name, &backend_names) else {
+    let Some((backend_name, prompt_name)) =
+        resolve_prompt_route(virtual_host, &request.name, &backend_names).map_err(|e| ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: format!("Routing problem... {e}").into(),
+            data: None,
+        })?
+    else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... promtp not found".into(),

@@ -22,7 +22,13 @@ pub(super) async fn read_resource(
     let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
-    let Some((backend_name, resource_uri)) = resolve_resources_route(virtual_host, &request.uri, &backend_names) else {
+    let Some((backend_name, resource_uri)) = resolve_resources_route(virtual_host, &request.uri, &backend_names)
+        .map_err(|e| ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: format!("Routing problem... {e}").into(),
+            data: None,
+        })?
+    else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... resource not found".into(),

@@ -4,7 +4,7 @@ use contextforge_data_plane_lib::Result;
 use http::{HeaderMap, HeaderValue};
 use rmcp::{
     ServiceExt,
-    model::InitializeRequestParams,
+    model::{InitializeRequestParams, ProtocolVersion},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
 use tracing::warn;
@@ -41,7 +41,25 @@ pub(crate) async fn connect_client(
     gateway_url: String,
     client: reqwest::Client,
 ) -> Result<rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams>> {
-    connect_client_with_handler(gateway_url, client, InitializeRequestParams::default()).await
+    connect_client_with_handler(
+        gateway_url,
+        client,
+        InitializeRequestParams::default().with_protocol_version(ProtocolVersion::V_2026_07_28),
+    )
+    .await
+}
+
+pub(crate) async fn connect_client_with_protocol(
+    gateway_url: String,
+    client: reqwest::Client,
+    protocol_version: ProtocolVersion,
+) -> Result<rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams>> {
+    connect_client_with_handler(
+        gateway_url,
+        client,
+        InitializeRequestParams::default().with_protocol_version(protocol_version),
+    )
+    .await
 }
 
 /// Connects any `ClientHandler` to the gateway, retrying until `CLIENT_CONNECT_TIMEOUT`.

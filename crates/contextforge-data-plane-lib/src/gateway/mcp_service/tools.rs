@@ -24,13 +24,20 @@ pub(super) async fn call_tool(
     let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
-    let Some((backend_name, tool_name)) = resolve_tool_route(virtual_host, &request.name, &backend_names) else {
+    let Some((backend_name, tool_name)) =
+        resolve_tool_route(virtual_host, &request.name, &backend_names).map_err(|e| ErrorData {
+            code: ErrorCode::INVALID_PARAMS,
+            message: format!("Routing problem... {e}").into(),
+            data: None,
+        })?
+    else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... tool not found".into(),
             data: None,
         });
     };
+
     let backend_name = backend_name.to_owned();
     let tool_name = tool_name.to_owned();
     let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
@@ -38,6 +45,7 @@ pub(super) async fn call_tool(
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
+
     if cx.protocol_version().is_some_and(|version| version >= ProtocolVersion::STANDARD_HEADERS) {
         let downstream_headers = cx
             .extensions
@@ -50,6 +58,7 @@ pub(super) async fn call_tool(
         mcp_standard_headers::validate_tool_params(downstream_headers, request.arguments.as_ref(), tool_schema)
             .map_err(|message| ErrorData::header_mismatch(message, None))?;
     }
+
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
         plugin_runtime.before_tool_call(&request, &tool_name, &service_name).await?

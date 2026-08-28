@@ -4,7 +4,7 @@
 #![cfg(feature = "plugins")]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     net::TcpStream as StdTcpStream,
     path::PathBuf,
@@ -34,6 +34,7 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
+
 use serde_json::{Map, Value, json};
 use tokio::net::TcpListener;
 
@@ -376,19 +377,17 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                     BackendMCPGateway {
                         name: "backend".to_owned(),
                         url: backend.url.parse().expect("backend URL parses"),
+                        mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
                         passthrough_headers: Vec::new(),
                         add_headers: HashMap::new(),
                         remove_headers: Vec::new(),
-                        allowed_tool_names: Vec::new(),
                         tool_schemas: HashMap::from([
                             ("sum".to_owned(), Map::new()),
                             ("reflect_text".to_owned(), Map::new()),
                         ]),
-                        tool_name_aliases: HashMap::new(),
-                        allowed_resource_names: Vec::new(),
-                        allowed_prompt_names: Vec::new(),
-                        resource_name_aliases: HashMap::new(),
-                        prompt_name_aliases: HashMap::new(),
+                        tool_name_aliases: HashSet::new(),
+                        resource_uri_aliases: HashSet::new(),
+                        prompt_name_aliases: HashSet::new(),
                         completion: HashMap::new(),
                     },
                 )]),
