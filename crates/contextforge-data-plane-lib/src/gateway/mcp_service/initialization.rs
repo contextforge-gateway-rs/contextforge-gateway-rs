@@ -69,7 +69,10 @@ pub(super) async fn connect_backend_for_request(
     serve_client_with_lifecycle_and_ct(
         backend_client,
         transport,
-        ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
+        ClientLifecycleMode::Auto {
+            preferred_versions: vec![backend.mcp_protocol_version.clone()],
+            legacy_version: Some(backend.mcp_protocol_version.clone()),
+        },
         cx.ct.clone(),
     )
     .await
