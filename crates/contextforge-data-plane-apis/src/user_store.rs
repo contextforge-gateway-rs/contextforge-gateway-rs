@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,10 +12,45 @@ pub enum IntegrationType {
     Mcp,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, Eq)]
+pub struct NameAlias {
+    downstream_prefixed_name: String,
+    upstream_name: String,
+}
+
+impl PartialEq for NameAlias {
+    fn eq(&self, other: &Self) -> bool {
+        self.downstream_prefixed_name == other.downstream_prefixed_name
+    }
+}
+
+impl std::hash::Hash for NameAlias {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.downstream_prefixed_name.hash(state);
+    }
+}
+
+impl NameAlias {
+    pub fn new(downstream_prefixed_name: String, upstream_name: String) -> Self {
+        Self { downstream_prefixed_name, upstream_name }
+    }
+    pub fn with_downstream_prefixed_name(downstream_prefixed_name: String) -> Self {
+        NameAlias { downstream_prefixed_name, upstream_name: String::new() }
+    }
+    pub fn get_upstream_name(&self) -> &str {
+        &self.upstream_name
+    }
+
+    pub fn get_downstream_prefixed_name(&self) -> &str {
+        &self.downstream_prefixed_name
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct BackendMCPGateway {
     pub name: String,
     pub url: url::Url,
+    pub mcp_protocol_version: rmcp::model::ProtocolVersion,
     /// Header names copied from the downstream request onto the upstream connection.
     pub passthrough_headers: Vec<String>,
     /// Static headers injected onto the upstream connection (override passthrough).
@@ -25,17 +60,13 @@ pub struct BackendMCPGateway {
     #[serde(default)]
     pub remove_headers: Vec<String>,
     #[serde(default)]
-    pub tool_name_aliases: HashMap<String, String>,
+    pub tool_name_aliases: HashSet<NameAlias>,
     #[serde(default)]
-    pub resource_name_aliases: HashMap<String, String>,
+    pub resource_uri_aliases: HashSet<NameAlias>,
     #[serde(default)]
-    pub prompt_name_aliases: HashMap<String, String>,
+    pub prompt_name_aliases: HashSet<NameAlias>,
     #[serde(default)]
     pub completion: HashMap<String, String>,
-
-    pub allowed_resource_names: Vec<String>,
-    pub allowed_prompt_names: Vec<String>,
-    pub allowed_tool_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

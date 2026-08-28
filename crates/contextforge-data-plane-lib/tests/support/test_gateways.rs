@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
@@ -11,6 +11,7 @@ use futures::{FutureExt, future::BoxFuture};
 use rmcp::transport::{
     StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
+use rustls::ProtocolVersion;
 use tracing::warn;
 
 use super::{MemoryUserConfigStore, mock_counter};
@@ -53,7 +54,11 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
     selected
 }
 
-pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<ListToolsGatewaySettings> {
+async fn create_gateway_with_four_counters_and_custom_config(
+    user: &str,
+    config: Config,
+    create_backends: impl Fn(&[u16]) -> HashMap<String, BackendMCPGateway>,
+) -> Result<ListToolsGatewaySettings> {
     let mocked_user_config_store = MemoryUserConfigStore::default();
 
     let config_address = config.address.expect("This must be set");
@@ -72,8 +77,8 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
 
     assert_ne!(gateway_one_ports, gateway_two_ports);
 
-    let gateway_one_backends = create_backends(&gateway_one_ports, false);
-    let gateway_two_backends = create_backends(&gateway_two_ports, false);
+    let gateway_one_backends = create_backends(&gateway_one_ports);
+    let gateway_two_backends = create_backends(&gateway_two_ports);
 
     let mut virtual_host_one_tool_names = create_tool_names(&gateway_one_ports);
     virtual_host_one_tool_names.sort();
@@ -130,88 +135,29 @@ pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config
     })
 }
 
+pub(crate) async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<ListToolsGatewaySettings> {
+    create_gateway_with_four_counters_and_custom_config(user, config, create_plain_backends).await
+}
+
+pub(crate) async fn create_gateway_with_four_legacy_counters(
+    user: &str,
+    config: Config,
+) -> Result<ListToolsGatewaySettings> {
+    create_gateway_with_four_counters_and_custom_config(user, config, create_plain_legacy_backends).await
+}
+
 pub(crate) async fn create_tls_gateway_with_four_tls_counters(
     user: &str,
     config: Config,
 ) -> Result<ListToolsGatewaySettings> {
-    let mocked_user_config_store = MemoryUserConfigStore::default();
-    let gateway_port = config.tls_address.ok_or("Invalid configuration")?.port();
-
-    let service = StreamableHttpService::new(
-        || Ok(mock_counter::Counter::new()),
-        LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins(),
-    );
-
-    let router = axum::Router::new().route_service("/mcp", service);
-
-    let (gateway_one_ports, servers_one) = create_axum_tls_servers(2, gateway_port, router.clone()).await?;
-    let (gateway_two_ports, servers_two) = create_axum_tls_servers(2, gateway_port, router).await?;
-
-    assert_ne!(gateway_one_ports, gateway_two_ports);
-
-    let gateway_one_backends = create_backends(&gateway_one_ports, true);
-    let gateway_two_backends = create_backends(&gateway_two_ports, true);
-
-    let mut virtual_host_one_tool_names = create_tool_names(&gateway_one_ports);
-    virtual_host_one_tool_names.sort();
-    let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
-    virtual_host_one_prompt_names.sort();
-    let mut virtual_host_one_resource_template_names = create_resource_template_names(&gateway_one_ports);
-    virtual_host_one_resource_template_names.sort();
-    let mut virtual_host_one_resource_template_uris = create_resource_template_uris(&gateway_one_ports);
-    virtual_host_one_resource_template_uris.sort();
-    let mut virtual_host_one_resource_uris = create_resource_uris(&gateway_one_ports);
-    virtual_host_one_resource_uris.sort();
-
-    let user_key = User::new(user);
-
-    let virtual_host_one_id = uuid::Uuid::new_v4().to_string();
-    let virtual_host_two_id = uuid::Uuid::new_v4().to_string();
-
-    let virtual_hosts = HashMap::from([
-        (virtual_host_one_id.clone(), VirtualHost { backends: gateway_one_backends }),
-        (virtual_host_two_id, VirtualHost { backends: gateway_two_backends }),
-    ]);
-
-    let user_config = UserConfig { virtual_hosts };
-
-    mocked_user_config_store.set_config(&user_key, &user_config).await.expect("This should work");
-
-    let gateway = Gateway::builder()
-        .with_config(config.clone())
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
-        .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
-        .build();
-
-    let gateway = async move {
-        let res = gateway.run_gateway().await;
-        warn!("Gateway exited with result {res:?}");
-        Ok(())
-    }
-    .boxed();
-
-    if let Some(address) = config.tls_address.as_ref() {
-        let gateway_url = format!("https://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
-
-        let handle =
-            tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
-
-        Ok(ListToolsGatewaySettings {
-            handle,
-            gateway_url,
-            expected_tool_names: virtual_host_one_tool_names,
-            expected_prompt_names: virtual_host_one_prompt_names,
-            expected_resource_template_names: virtual_host_one_resource_template_names,
-            expected_resource_template_uris: virtual_host_one_resource_template_uris,
-            expected_resource_uris: virtual_host_one_resource_uris,
-        })
-    } else {
-        Err("Invalid configuration".into())
-    }
+    create_gateway_with_four_counters_and_custom_config(user, config, create_tls_backends).await
 }
 
-fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPGateway> {
+fn create_backends(
+    ports: &[u16],
+    with_tls: bool,
+    protocol_version: &rmcp::model::ProtocolVersion,
+) -> HashMap<String, BackendMCPGateway> {
     ports
         .iter()
         .map(|port| {
@@ -223,27 +169,54 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
 
             let backend_id = backend_id(*port);
             (
-                backend_id,
+                backend_id.clone(),
                 BackendMCPGateway {
                     name: format!("backend-{port}"),
                     url,
+                    mcp_protocol_version: protocol_version.clone(),
                     passthrough_headers: Vec::new(),
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),
-                    allowed_tool_names: Vec::new(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
-                        .map(|tool_name| (format!("backend-{port}.{tool_name}"), (*tool_name).to_owned()))
+                        .map(|tool_name| {
+                            let backend_id = backend_id.clone();
+                            NameAlias::new(format!("{backend_id}-{tool_name}"), tool_name.to_string())
+                        })
                         .collect(),
-                    allowed_resource_names: Vec::new(),
-                    allowed_prompt_names: Vec::new(),
-                    resource_name_aliases: HashMap::new(),
-                    prompt_name_aliases: HashMap::new(),
+
+                    resource_uri_aliases: MOCK_COUNTER_RESOURCE_URIS
+                        .iter()
+                        .map(|resource_uri| {
+                            let backend_id = backend_id.clone();
+                            NameAlias::new(format!("{backend_id}-{resource_uri}"), resource_uri.to_string())
+                        })
+                        .collect(),
+                    prompt_name_aliases: MOCK_COUNTER_PROMPT_NAMES
+                        .iter()
+                        .map(|prompt_name| {
+                            let backend_id = backend_id.clone();
+                            NameAlias::new(format!("{backend_id}-{prompt_name}"), prompt_name.to_string())
+                        })
+                        .collect(),
+
                     completion: HashMap::new(),
                 },
             )
         })
         .collect()
+}
+
+fn create_plain_backends(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
+    create_backends(ports, false, &rmcp::model::ProtocolVersion::V_2026_07_28)
+}
+
+fn create_plain_legacy_backends(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
+    create_backends(ports, false, &rmcp::model::ProtocolVersion::V_2025_11_25)
+}
+
+fn create_tls_backends(ports: &[u16]) -> HashMap<String, BackendMCPGateway> {
+    create_backends(ports, true, &rmcp::model::ProtocolVersion::V_2026_07_28)
 }
 
 fn backend_id(port: u16) -> String {
@@ -253,7 +226,10 @@ fn backend_id(port: u16) -> String {
 fn create_tool_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}.{name}")))
+        .flat_map(|port| {
+            let backend_id = backend_id(*port);
+            MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("{backend_id}-{name}"))
+        })
         .collect()
 }
 

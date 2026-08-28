@@ -38,6 +38,9 @@
           "type": "string",
           "format": "uri"
         },
+        "mcp_protocol_version": {
+          "$ref": "#/$defs/ProtocolVersion"
+        },
         "passthrough_headers": {
           "description": "Header names copied from the downstream request onto the upstream connection.",
           "type": "array",
@@ -62,25 +65,28 @@
           "default": []
         },
         "tool_name_aliases": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/NameAlias"
           },
-          "default": {}
+          "default": []
         },
-        "resource_name_aliases": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
+        "resource_uri_aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/NameAlias"
           },
-          "default": {}
+          "default": []
         },
         "prompt_name_aliases": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/NameAlias"
           },
-          "default": {}
+          "default": []
         },
         "completion": {
           "type": "object",
@@ -88,33 +94,32 @@
             "type": "string"
           },
           "default": {}
-        },
-        "allowed_resource_names": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "allowed_prompt_names": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "allowed_tool_names": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         }
       },
       "required": [
         "name",
         "url",
-        "passthrough_headers",
-        "allowed_resource_names",
-        "allowed_prompt_names",
-        "allowed_tool_names"
+        "mcp_protocol_version",
+        "passthrough_headers"
+      ]
+    },
+    "ProtocolVersion": {
+      "description": "Represents the MCP protocol version used for communication.\n\nThis ensures compatibility between clients and servers by specifying\nwhich version of the Model Context Protocol is being used.",
+      "type": "string"
+    },
+    "NameAlias": {
+      "type": "object",
+      "properties": {
+        "downstream_prefixed_name": {
+          "type": "string"
+        },
+        "upstream_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "downstream_prefixed_name",
+        "upstream_name"
       ]
     }
   }

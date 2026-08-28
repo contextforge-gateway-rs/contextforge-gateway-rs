@@ -18,11 +18,13 @@ use rmcp::{
 };
 
 use support::{
-    CLIENT_CONNECT_TIMEOUT, ListToolsGatewaySettings, TEST_POLL_INTERVAL, TEST_USER_ID, connect_client,
-    connect_client_with_handler, create_client, create_gateway_with_four_counters, create_ports,
+    CLIENT_CONNECT_TIMEOUT, ListToolsGatewaySettings, TEST_POLL_INTERVAL, TEST_USER_ID, connect_client_with_handler,
+    create_client, create_gateway_with_four_counters, create_ports,
     mock_counter::{KNOWN_RESOURCE_URIS, RESOURCE_UPDATE_NOTIFY_INTERVAL},
     plaintext_config,
 };
+
+use crate::support::connect_modern_client;
 
 /// The mocks notify continuously, so this is just the threshold proving delivery works.
 const MIN_UPDATES_PER_BACKEND: usize = 4;
@@ -147,7 +149,7 @@ async fn assert_no_more_resource_updates(
 
 #[expect(deprecated, reason = "legacy RMCP coverage; modern subscriptions/listen tests are deferred")]
 async fn assert_unrouted_subscribe_errors(gateway_url: String, client: reqwest::Client) -> Result<()> {
-    let running_service = connect_client(gateway_url, client).await?;
+    let running_service = connect_modern_client(&gateway_url, client, support::modern_client_info()).await;
 
     // No backend namespace prefix => no route, so the gateway must reject it.
     let result = running_service.subscribe(SubscribeRequestParams::new("unrouted://resource")).await;

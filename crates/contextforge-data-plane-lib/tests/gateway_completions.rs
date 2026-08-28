@@ -8,6 +8,8 @@ use support::{
     create_ports, plaintext_config,
 };
 
+use crate::support::connect_modern_client;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
 #[ignore = "2026-07-28 protocol transition"]
@@ -107,7 +109,7 @@ async fn assert_resource_completion(gateway_url: String, client: reqwest::Client
 }
 
 async fn assert_unrouted_completion_errors(gateway_url: String, client: reqwest::Client) -> Result<()> {
-    let running_service = connect_client(gateway_url, client).await?;
+    let running_service = connect_modern_client(&gateway_url, client, support::modern_client_info()).await;
 
     // No backend namespace prefix => no route, so the gateway must reject it.
     let result = running_service.complete_prompt_simple("unrouted_prompt", "message", "h").await;

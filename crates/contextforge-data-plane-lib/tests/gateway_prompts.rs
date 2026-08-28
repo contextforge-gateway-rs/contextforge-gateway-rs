@@ -10,6 +10,8 @@ use support::{
     create_ports,
 };
 
+use crate::support::connect_modern_client;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
 #[ignore = "Fan out list tools is not supported at the moment. This should be enabled in 2.x"]
@@ -97,7 +99,7 @@ async fn assert_list_prompts(
 }
 
 async fn assert_get_prompt(gateway_url: String, client: reqwest::Client, prompt_name: String) -> Result<()> {
-    let running_service = connect_client(gateway_url, client).await?;
+    let running_service = connect_modern_client(&gateway_url, client, support::modern_client_info()).await;
     let mut arguments = serde_json::Map::new();
     arguments.insert("message".to_owned(), json!("hello from gateway"));
 
