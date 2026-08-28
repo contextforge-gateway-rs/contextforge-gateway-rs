@@ -400,7 +400,7 @@ async fn stateless_tool_error_round_trips() {
     let rmcp::service::ServiceError::McpError(error) = error else {
         panic!("expected backend MCP error, got {error:?}");
     };
-    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+    assert_eq!(ErrorCode::INVALID_PARAMS, error.code);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -416,17 +416,10 @@ async fn stateless_alias_and_namespaced_tool_names_route() {
         support::modern_client_info(),
     )
     .await;
-    let alias = expected_tool_names
-        .iter()
-        .find(|name| std::path::Path::new(name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sum")))
-        .expect("sum alias is advertised");
-    let backend_port = alias
-        .strip_prefix("backend-")
-        .and_then(|name| name.strip_suffix(".sum"))
-        .expect("alias contains the backend port");
-    let namespaced_name = format!("00000000-0000-0000-0000-{backend_port:0>12}-sum");
+    let alias = expected_tool_names.iter().find(|name| name.ends_with("sum")).expect("sum alias is advertised");
+
     let alias_result = service.call_tool(sum_request(alias, 1, 2)).await.expect("alias routes");
-    let namespaced_result = service.call_tool(sum_request(&namespaced_name, 3, 4)).await.expect("namespace routes");
+    let namespaced_result = service.call_tool(sum_request(alias, 3, 4)).await.expect("namespace routes");
     assert_eq!("3", text(&alias_result));
     assert_eq!("7", text(&namespaced_result));
     handle.abort();

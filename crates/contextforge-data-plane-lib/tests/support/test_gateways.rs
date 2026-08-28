@@ -169,7 +169,7 @@ fn create_backends(
 
             let backend_id = backend_id(*port);
             (
-                backend_id,
+                backend_id.clone(),
                 BackendMCPGateway {
                     name: format!("backend-{port}"),
                     url,
@@ -179,19 +179,24 @@ fn create_backends(
                     remove_headers: Vec::new(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
-                        .map(|tool_name| NameAlias::new(format!("backend-{port}.{tool_name}"), tool_name.to_string()))
+                        .map(|tool_name| {
+                            let backend_id = backend_id.clone();
+                            NameAlias::new(format!("{backend_id}-{tool_name}"), tool_name.to_string())
+                        })
                         .collect(),
 
                     resource_uri_aliases: MOCK_COUNTER_RESOURCE_URIS
                         .iter()
                         .map(|resource_uri| {
-                            NameAlias::new(format!("backend-{port}.{resource_uri}"), resource_uri.to_string())
+                            let backend_id = backend_id.clone();
+                            NameAlias::new(format!("{backend_id}-{resource_uri}"), resource_uri.to_string())
                         })
                         .collect(),
                     prompt_name_aliases: MOCK_COUNTER_PROMPT_NAMES
                         .iter()
                         .map(|prompt_name| {
-                            NameAlias::new(format!("backend-{port}.{prompt_name}"), prompt_name.to_string())
+                            let backend_id = backend_id.clone();
+                            NameAlias::new(format!("{backend_id}-{prompt_name}"), prompt_name.to_string())
                         })
                         .collect(),
 
@@ -221,7 +226,10 @@ fn backend_id(port: u16) -> String {
 fn create_tool_names(ports: &[u16]) -> Vec<String> {
     ports
         .iter()
-        .flat_map(|port| MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("backend-{port}.{name}")))
+        .flat_map(|port| {
+            let backend_id = backend_id(*port);
+            MOCK_COUNTER_TOOL_NAMES.iter().map(move |name| format!("{backend_id}-{name}"))
+        })
         .collect()
 }
 

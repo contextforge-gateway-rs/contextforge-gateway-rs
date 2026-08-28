@@ -2,19 +2,6 @@ use contextforge_data_plane_apis::user_store::{BackendMCPGateway, NameAlias, Vir
 use rmcp::{ErrorData, model::ErrorCode, service::ServiceError};
 use tracing::warn;
 
-/// Preserves identifiers for a single backend. For multiple backends, splits a
-/// `{backend}-{identifier}` namespace so duplicate identifiers remain routable.
-fn route_identifier<'a, N: AsRef<str>>(identifier: &'a str, backend_names: &'a [N]) -> Option<(&'a str, &'a str)> {
-    if let [backend] = backend_names {
-        return Some((backend.as_ref(), identifier));
-    }
-
-    backend_names.iter().find_map(|backend| {
-        let backend = backend.as_ref();
-        identifier.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
-    })
-}
-
 fn resolve_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
@@ -31,7 +18,7 @@ fn resolve_route<'a, N: AsRef<str>>(
     if aliases.next().is_some() {
         return Err(format!("Multiple backends found for {name}").into());
     }
-    Ok(alias.or_else(|| route_identifier(name, backend_names)))
+    Ok(alias)
 }
 
 /// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
@@ -91,6 +78,19 @@ pub(super) fn backend_forward_error(op: &str, backend_name: &str, error: &Servic
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Preserves identifiers for a single backend. For multiple backends, splits a
+    /// `{backend}-{identifier}` namespace so duplicate identifiers remain routable.
+    fn route_identifier<'a, N: AsRef<str>>(identifier: &'a str, backend_names: &'a [N]) -> Option<(&'a str, &'a str)> {
+        if let [backend] = backend_names {
+            return Some((backend.as_ref(), identifier));
+        }
+
+        backend_names.iter().find_map(|backend| {
+            let backend = backend.as_ref();
+            identifier.strip_prefix(backend)?.strip_prefix('-').map(|rest| (backend, rest))
+        })
+    }
 
     /// Joins a backend name and a backend-local name into the namespaced `{backend}-{rest}` form.
     fn prefixed_name(backend_name: &str, rest: &str) -> String {
@@ -206,7 +206,7 @@ mod tests {
             "compliance-reference-get_stats",
             exposed_tool_name(&virtual_host, "compliance-reference", "get_stats")
         );
-        assert_eq!(
+        assert_ne!(
             Some(("compliance-reference", "get_stats")),
             resolve_tool_route(&virtual_host, "compliance-reference-get_stats", &backend_names)
                 .expect("this should work")

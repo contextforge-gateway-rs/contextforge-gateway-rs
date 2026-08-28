@@ -6,7 +6,7 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
@@ -194,6 +194,17 @@ impl ServerHandler for TestBackend {
     }
 }
 
+pub const TOOL_NAMES: &[&str] = &[
+    "progress_counter_tokens",
+    "progress_sum",
+    "sum",
+    "progress_counter_tokens",
+    "reflect_text",
+    "wait_for_cancellation",
+];
+pub const RESOURCE_URIS: &[&str] = &[""];
+pub const PROMPT_NAMES: &[&str] = &["review_bundle", "review"];
+
 pub(crate) struct RunningGateway {
     pub(crate) backend_state: BackendState,
     pub(crate) backend_name: String,
@@ -336,9 +347,18 @@ async fn start_gateway_with_state(
                                 passthrough_headers: Vec::new(),
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),
-                                tool_name_aliases: HashSet::new(),
-                                resource_uri_aliases: HashSet::new(),
-                                prompt_name_aliases: HashSet::new(),
+                                tool_name_aliases: TOOL_NAMES
+                                    .iter()
+                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
+                                    .collect(),
+                                resource_uri_aliases: RESOURCE_URIS
+                                    .iter()
+                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
+                                    .collect(),
+                                prompt_name_aliases: PROMPT_NAMES
+                                    .iter()
+                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
+                                    .collect(),
                                 completion: HashMap::new(),
                             },
                         )]),
