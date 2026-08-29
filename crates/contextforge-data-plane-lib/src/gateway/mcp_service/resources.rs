@@ -9,8 +9,8 @@ use tracing::info;
 
 use super::McpService;
 use crate::gateway::{
-    identifier_routing::backend_forward_error, mcp_call_validator::AuthorizedCallValidator,
-    mcp_service::initialization::connect_backend_for_request,
+    mcp_call_validator::AuthorizedCallValidator, mcp_service::initialization::connect_backend_for_request,
+    routing_error::backend_forward_error,
 };
 
 pub(super) async fn read_resource(
@@ -38,6 +38,7 @@ pub(super) async fn read_resource(
 
     let mut backend_service = connect_backend_for_request(mcp_service, backend_name, backend, &cx).await?;
     let mut routed_request = request;
+
     routed_request.uri = resource_uri.clone();
     let response = backend_service.read_resource(routed_request).await;
     if let Err(error) = backend_service.close().await {

@@ -9,8 +9,8 @@ use tracing::{info, warn};
 
 use super::McpService;
 use crate::gateway::{
-    backend_client::call_backend_tool, identifier_routing::backend_forward_error,
-    mcp_call_validator::AuthorizedCallValidator, mcp_service::initialization::connect_backend_for_request,
+    backend_client::call_backend_tool, mcp_call_validator::AuthorizedCallValidator,
+    mcp_service::initialization::connect_backend_for_request, routing_error::backend_forward_error,
 };
 use crate::mcp_standard_headers;
 
