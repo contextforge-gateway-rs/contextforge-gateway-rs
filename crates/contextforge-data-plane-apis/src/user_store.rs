@@ -74,6 +74,9 @@ pub struct BackendMCPGateway {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualHost {
     pub backends: HashMap<String, BackendMCPGateway>,
+    pub tools: HashMap<String, (String, String)>,
+    pub resources: HashMap<String, (String, String)>,
+    pub prompts: HashMap<String, (String, String)>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
