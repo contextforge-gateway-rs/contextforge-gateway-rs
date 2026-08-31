@@ -104,7 +104,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           repository: contextforge-org/contextforge-dev-tools
-          ref: a056b269d28c25702339c81f35afcce33649beb7
+          ref: 0864bf5ad5022070b62ea6e063c502f199dfe201
           path: target/cf-integration-src
           persist-credentials: false
 
