@@ -36,7 +36,7 @@ These run in `cargo nextest run` with no Docker dependencies.
 
 ## MCP Conformance
 
-[`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools)
+[`cf-integration`](https://crates.io/crates/cf-integration)
 owns the official fixture, control-plane registration, Compose topology, server
 and client runners, result rendering, and transactional baseline handling. This
 repository keeps only the CI invocation, Make targets, and expected findings.
@@ -46,15 +46,16 @@ external dataplane. Selecting that lane also runs the fixture-direct server
 leg and the scoped external-dataplane client leg:
 
 ```bash
+cargo binstall cf-integration@0.1.0 --no-confirm
 make conformance
 ```
 
 The Make target tests the committed data-plane `HEAD`. It rejects tracked
 uncommitted changes because the CLI clones the selected repository and commit
-into `.integration/`. To use a locally built CLI from a devtools branch:
+into `.integration/`. To use another local CLI binary:
 
 ```bash
-CF_INTEGRATION=../contextforge-dev-tools/.integration/cargo-target/release/cf-integration \
+CF_INTEGRATION=/path/to/cf-integration \
   make conformance
 ```
 
@@ -62,8 +63,7 @@ Update every selected baseline atomically only after all operational work and
 baseline evaluation succeeds:
 
 ```bash
-CF_INTEGRATION=../contextforge-dev-tools/.integration/cargo-target/release/cf-integration \
-  make conformance-bless
+make conformance-bless
 ```
 
 Baselines are partitioned beneath

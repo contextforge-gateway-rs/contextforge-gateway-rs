@@ -29,8 +29,8 @@ Teardown: `make compose-down` (stops containers; volumes kept).
 ## cf-integration Conformance
 
 ```bash
-CF_INTEGRATION=../contextforge-dev-tools/.integration/cargo-target/release/cf-integration \
-  make conformance
+cargo binstall cf-integration@0.1.0 --no-confirm
+make conformance
 ```
 
 This runs the modern client and modern server eras through the committed

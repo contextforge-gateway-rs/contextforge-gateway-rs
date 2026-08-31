@@ -100,34 +100,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check out cf-integration
-        uses: actions/checkout@v6.0.2
-        with:
-          repository: contextforge-org/contextforge-dev-tools
-          ref: 0864bf5ad5022070b62ea6e063c502f199dfe201
-          path: target/cf-integration-src
-          persist-credentials: false
-
-      - name: Isolate cf-integration from the data-plane workspace
-        run: cp -R target/cf-integration-src "${RUNNER_TEMP}/cf-integration-src"
-
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
+      - uses: taiki-e/install-action@v2.75.27
         with:
-          workspaces: ${{ runner.temp }}/cf-integration-src -> .integration/cargo-target
+          tool: cargo-binstall
 
       - name: Install Node.js 22
         uses: actions/setup-node@v6.5.0
         with:
           node-version: 22
 
-      - name: Build cf-integration
-        working-directory: ${{ runner.temp }}/cf-integration-src
-        run: cargo build --release --locked --bin cf-integration
+      - name: Install cf-integration 0.1.0 binary
+        run: cargo binstall cf-integration@0.1.0 --no-confirm
 
       - name: Run strict modern conformance
-        env:
-          CF_INTEGRATION: ${{ runner.temp }}/cf-integration-src/.integration/cargo-target/release/cf-integration
         run: make conformance
 
       - name: Upload conformance diagnostics

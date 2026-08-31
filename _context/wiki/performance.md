@@ -3,7 +3,7 @@
 ## Full-Stack Load (Locust via cf-integration)
 
 Performance testing uses the control-plane Locust suite through
-[`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools).
+[`cf-integration`](https://crates.io/crates/cf-integration).
 It measures the nginx → external dataplane → backend request path while the
 ContextForge control plane publishes configuration.
 
