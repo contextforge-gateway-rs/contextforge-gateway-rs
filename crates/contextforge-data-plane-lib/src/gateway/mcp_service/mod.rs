@@ -3,7 +3,6 @@ mod initialization;
 mod prompts;
 mod resources;
 mod tools;
-
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,

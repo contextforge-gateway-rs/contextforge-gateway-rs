@@ -30,7 +30,7 @@ pub(super) async fn get_prompt(
     else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
-            message: "Routing problem... promtp not found".into(),
+            message: "Routing problem... prompt not found".into(),
             data: None,
         });
     };

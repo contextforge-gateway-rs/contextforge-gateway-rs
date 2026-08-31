@@ -1,13 +1,14 @@
 use contextforge_data_plane_apis::user_store::{BackendMCPGateway, NameAlias, VirtualHost};
 use rmcp::{ErrorData, model::ErrorCode, service::ServiceError};
-use tracing::warn;
+use tracing::{debug, warn};
 
-fn resolve_route<'a, N: AsRef<str>>(
+fn resolve_route<'a, N: AsRef<str> + std::fmt::Debug>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
     name_extractor: impl Fn(&'a str, &'a BackendMCPGateway) -> Option<&'a str>,
 ) -> Result<Option<(&'a str, &'a str)>, Box<dyn std::error::Error + Send + Sync>> {
+    debug!("resolve_route: vh {virtual_host:#?}, name {name}, backend_names {backend_names:?}");
     let mut aliases = backend_names.iter().filter_map(|backend_name| {
         let backend_name = backend_name.as_ref();
         let backend = virtual_host.backends.get(backend_name)?;
@@ -23,7 +24,7 @@ fn resolve_route<'a, N: AsRef<str>>(
 
 /// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
 /// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
-pub(crate) fn resolve_tool_route<'a, N: AsRef<str>>(
+pub(crate) fn resolve_tool_route<'a, N: AsRef<str> + std::fmt::Debug>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
@@ -36,7 +37,7 @@ pub(crate) fn resolve_tool_route<'a, N: AsRef<str>>(
     })
 }
 
-pub(super) fn resolve_resources_route<'a, N: AsRef<str>>(
+pub(super) fn resolve_resources_route<'a, N: AsRef<str> + std::fmt::Debug>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
@@ -49,7 +50,7 @@ pub(super) fn resolve_resources_route<'a, N: AsRef<str>>(
     })
 }
 
-pub(super) fn resolve_prompt_route<'a, N: AsRef<str>>(
+pub(super) fn resolve_prompt_route<'a, N: AsRef<str> + std::fmt::Debug>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
