@@ -1,7 +1,11 @@
 IMAGE_NAME := contextforge-data-plane:latest
-CF_DATAPLANE_IMAGE ?= contextforge-data-plane:conformance
 SERVICES ?= nginx control-plane redis postgres pgbouncer data-plane fast_time_server register_fast_time
 ARGS     ?=
+CF_INTEGRATION ?= cf-integration
+CF_INTEGRATION_DIR ?= $(CURDIR)/.integration
+CF_DATAPLANE_REPO ?= $(CURDIR)
+CF_DATAPLANE_REF ?= $(shell git -C "$(CF_DATAPLANE_REPO)" rev-parse HEAD)
+CONFORMANCE_BASELINE_DIR := $(CURDIR)/tests/conformance/baselines
 
 # IBM detect-secrets hardened fork — pinned to the same commit used in mcp-context-forge.
 DETECT_SECRETS_SPEC ?= git+https://github.com/ibm/detect-secrets.git@076672a9a01abdfc7ecee2e7d14f08cdccb73976
@@ -25,12 +29,44 @@ compose-up: ## Launch stack: nginx, control plane, redis, postgres, pgbouncer, d
 compose-down: ## Tear down the stack
 	docker compose -f docker/docker-compose.yml stop $(SERVICES) $(ARGS)
 
-conformance: ## Build the data plane and run official MCP 2026-07-28 conformance locally
-	docker build -t "$(CF_DATAPLANE_IMAGE)" -f docker/conformance.Dockerfile .
-	CF_DATAPLANE_IMAGE="$(CF_DATAPLANE_IMAGE)" tests/conformance/run-local.sh
+conformance: ## Run strict modern MCP conformance against the committed data-plane HEAD
+	@if ! command -v "$(CF_INTEGRATION)" >/dev/null 2>&1; then \
+		echo "cf-integration not found: set CF_INTEGRATION to the built CLI path."; \
+		exit 1; \
+	fi
+	@if [ -n "$$(git -C "$(CF_DATAPLANE_REPO)" status --porcelain --untracked-files=no)" ]; then \
+		echo "Tracked data-plane changes are not committed; commit or stash them before conformance."; \
+		exit 1; \
+	fi
+	@CF_INTEGRATION_DIR="$(CF_INTEGRATION_DIR)" \
+	CF_DATAPLANE_REPO="$(CF_DATAPLANE_REPO)" \
+	CF_DATAPLANE_REF="$(CF_DATAPLANE_REF)" \
+	"$(CF_INTEGRATION)" conformance run \
+		--client-era modern \
+		--server-era modern \
+		--lane external-data-plane \
+		--baseline-dir "$(CONFORMANCE_BASELINE_DIR)" \
+		--output-dir "$(CF_INTEGRATION_DIR)/reports"
 
-conformance-bless: ## Run conformance and update the server and client expected-failure baselines
-	MCP_CONFORMANCE_BLESS=true $(MAKE) conformance
+conformance-bless: ## Run strict modern conformance and atomically update its baselines
+	@if ! command -v "$(CF_INTEGRATION)" >/dev/null 2>&1; then \
+		echo "cf-integration not found: set CF_INTEGRATION to the built CLI path."; \
+		exit 1; \
+	fi
+	@if [ -n "$$(git -C "$(CF_DATAPLANE_REPO)" status --porcelain --untracked-files=no)" ]; then \
+		echo "Tracked data-plane changes are not committed; commit or stash them before conformance."; \
+		exit 1; \
+	fi
+	@CF_INTEGRATION_DIR="$(CF_INTEGRATION_DIR)" \
+	CF_DATAPLANE_REPO="$(CF_DATAPLANE_REPO)" \
+	CF_DATAPLANE_REF="$(CF_DATAPLANE_REF)" \
+	"$(CF_INTEGRATION)" conformance run \
+		--client-era modern \
+		--server-era modern \
+		--lane external-data-plane \
+		--baseline-dir "$(CONFORMANCE_BASELINE_DIR)" \
+		--output-dir "$(CF_INTEGRATION_DIR)/reports" \
+		--bless
 
 docs-serve: ## Serve the wiki book locally at http://127.0.0.1:3000
 	mdbook serve _context/wiki --hostname 127.0.0.1 --port 3000 --open

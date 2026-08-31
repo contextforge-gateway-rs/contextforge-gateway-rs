@@ -26,8 +26,5 @@ LABEL org.opencontainers.image.source=https://github.com/contextforge-org/contex
 LABEL org.opencontainers.image.description="contextforge-data-plane - open source experimental data plane for ContextForge."
 ENTRYPOINT ["/contextforge-data-plane"]
 
-FROM runtime AS conformance-prebuilt
-COPY --from=prebuilt /contextforge-data-plane /contextforge-data-plane
-
 FROM runtime
 COPY --from=builder /app/target/release/contextforge-data-plane /contextforge-data-plane
