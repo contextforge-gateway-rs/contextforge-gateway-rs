@@ -94,13 +94,22 @@
             "type": "string"
           },
           "default": {}
+        },
+        "tool_schemas": {
+          "description": "Input schemas keyed by the original upstream tool name.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
         }
       },
       "required": [
         "name",
         "url",
         "mcp_protocol_version",
-        "passthrough_headers"
+        "passthrough_headers",
+        "tool_schemas"
       ]
     },
     "ProtocolVersion": {

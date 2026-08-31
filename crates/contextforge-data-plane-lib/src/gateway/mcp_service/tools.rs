@@ -1,7 +1,8 @@
 use contextforge_data_plane_cpex::ToolPreCallResult;
+use http::request::Parts;
 use rmcp::{
     ErrorData, RoleServer,
-    model::{CallToolRequestParams, CallToolResponse, ErrorCode},
+    model::{CallToolRequestParams, CallToolResponse, ErrorCode, ProtocolVersion},
     service::RequestContext,
 };
 use tracing::{info, warn};
@@ -13,6 +14,7 @@ use crate::gateway::{
     mcp_call_validator::AuthorizedCallValidator,
     mcp_service::initialization::connect_backend_for_request,
 };
+use crate::mcp_standard_headers;
 
 pub(super) async fn call_tool(
     mcp_service: &McpService,
@@ -43,6 +45,19 @@ pub(super) async fn call_tool(
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
+
+    if cx.protocol_version().is_some_and(|version| version >= ProtocolVersion::STANDARD_HEADERS) {
+        let downstream_headers = cx
+            .extensions
+            .get::<Parts>()
+            .map(|parts| &parts.headers)
+            .ok_or_else(|| ErrorData::internal_error("Routing problem... request headers not found", None))?;
+        let tool_schema = backend.tool_schemas.get(&tool_name).ok_or_else(|| {
+            ErrorData::header_mismatch(format!("Missing published schema for tool '{tool_name}'"), None)
+        })?;
+        mcp_standard_headers::validate_tool_params(downstream_headers, request.arguments.as_ref(), tool_schema)
+            .map_err(|message| ErrorData::header_mismatch(message, None))?;
+    }
 
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {

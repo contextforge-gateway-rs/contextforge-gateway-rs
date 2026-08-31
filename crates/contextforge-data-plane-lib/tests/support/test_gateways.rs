@@ -177,6 +177,10 @@ fn create_backends(
                     passthrough_headers: Vec::new(),
                     add_headers: HashMap::default(),
                     remove_headers: Vec::new(),
+                    tool_schemas: MOCK_COUNTER_TOOL_NAMES
+                        .iter()
+                        .map(|name| ((*name).to_owned(), serde_json::Map::new()))
+                        .collect(),
                     tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
                         .iter()
                         .map(|tool_name| {

@@ -23,7 +23,7 @@ fn resolve_route<'a, N: AsRef<str>>(
 
 /// Resolves an exact control-plane alias to its backend and upstream name. Without an alias,
 /// single-backend hosts preserve the upstream name and multi-backend hosts use the legacy prefix.
-pub(super) fn resolve_tool_route<'a, N: AsRef<str>>(
+pub(crate) fn resolve_tool_route<'a, N: AsRef<str>>(
     virtual_host: &'a VirtualHost,
     name: &'a str,
     backend_names: &'a [N],
@@ -164,7 +164,8 @@ mod tests {
                     "tool_name_aliases": [
                         {"downstream_prefixed_name":"Public.Tool", "upstream_name":"get_stats"},
                         {"downstream_prefixed_name":"Echo_Tool", "upstream_name":"echo"}
-                    ]
+                    ],
+                    "tool_schemas": {}
                 }
             }
         });
@@ -190,12 +191,14 @@ mod tests {
                     "url": "http://upstream:9000/mcp",
                     "mcp_protocol_version": "2026_07_28",
                     "passthrough_headers": [],
+                    "tool_schemas": {}
                 },
                 "other": {
                     "name": "other",
                     "url": "http://other:9000/mcp",
                     "mcp_protocol_version": "2026_07_28",
                     "passthrough_headers": [],
+                    "tool_schemas": {}
                 }
             }
         });

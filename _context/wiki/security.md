@@ -91,6 +91,16 @@ covers the legacy/RMCP transport header `Mcp-Session-Id`. It is an
 application-level guard for MCP-related headers only; non-MCP headers remain
 bounded by the HTTP transport.
 
+Backend header policy cannot add, remove, or replace MCP standard or parameter
+headers. For modern `tools/call`, the dataplane resolves the authenticated
+user, virtual host, backend, and original tool name before validating
+`Mcp-Param-*` against the control-plane-published input schema. A missing schema
+or header/body mismatch fails closed with JSON-RPC `-32020`.
+Validation does not call backend `tools/list`. Validated values are forwarded
+unchanged, while RMCP regenerates method, routed-name, and protocol-version
+headers. If a plugin later changes an annotated argument, the original header
+remains and the upstream server may reject the mismatch.
+
 ## Local Bootstrap Helpers (`with_tools`)
 
 The `contextforge-data-plane-lib/with_tools` feature compiles in:

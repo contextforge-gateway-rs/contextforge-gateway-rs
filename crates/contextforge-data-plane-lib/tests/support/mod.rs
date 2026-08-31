@@ -26,7 +26,7 @@ pub(crate) use plugin::{
 };
 pub(crate) use plugin_gateway::{
     BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, RunningGateway, start_gateway, start_gateway_with_events,
-    start_gateway_with_json_backend_responses,
+    start_gateway_with_json_backend_responses, start_gateway_with_parameter_headers,
 };
 pub(crate) use runtime::{runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin};
 pub(crate) use test_gateways::{

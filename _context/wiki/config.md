@@ -128,8 +128,9 @@ BackendMCPGateway
   passthrough_headers: Vec<String>                ← snapshotted at initialize; session-scoped
   add_headers: HashMap<String, String>            ← injected after passthrough
   remove_headers: Vec<String>                     ← stripped after add
-  tool_name_aliases: HashMap<String, String>      ← downstream_alias → upstream_original
   allowed_tool_names: Vec<String>                 ← model exists, NOT currently enforced
+  tool_schemas: HashMap<String, JsonObject>        ← required; upstream name → input schema
+  tool_name_aliases: HashMap<String, String>      ← downstream_alias → upstream_original
   allowed_resource_names: Vec<String>             ← model exists, NOT currently enforced
   allowed_prompt_names: Vec<String>               ← model exists, NOT currently enforced
 ```
@@ -146,7 +147,7 @@ BackendMCPGateway
 | Hop-by-hop | `Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `Proxy-Connection`, `TE`, `Trailer`, `Trailers`, `Transfer-Encoding`, `Upgrade` |
 | RMCP-reserved | `Mcp-Session-Id`, `Accept`, `Last-Event-Id` |
 | Gateway-managed | `Host` (set from backend URL host + port; never overridden by config) |
-| Computed MCP standard | `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`, `Mcp-Param-*` |
+| MCP standard | `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`, `Mcp-Param-*` |
 
 `Authorization` and `Cookie` are not protected here because backend
 authentication through `passthrough_headers` or `add_headers` is intentional

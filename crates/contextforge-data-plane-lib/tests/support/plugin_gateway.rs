@@ -11,7 +11,7 @@ use contextforge_data_plane_apis::{
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
 use futures::FutureExt;
-use http::{HeaderMap, HeaderValue};
+use http::{HeaderMap, HeaderValue, request::Parts};
 use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
@@ -26,7 +26,7 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tokio::sync::Mutex as TokioMutex;
 
 use super::{MemoryUserConfigStore, token};
@@ -48,14 +48,41 @@ pub(crate) struct BackendObservation {
 #[derive(Clone, Default)]
 pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) request_headers: Arc<StdMutex<Vec<HeaderMap>>>,
     pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
     pub(crate) events: Arc<StdMutex<Vec<&'static str>>>,
+    parameter_headers: bool,
 }
 
 #[derive(Clone)]
 struct TestBackend {
     state: BackendState,
+}
+
+fn published_tool_schemas(parameter_headers: bool) -> HashMap<String, Map<String, Value>> {
+    let mut schemas =
+        ["sum", "reflect_text", "progress_sum", "progress_counter_tokens", "wait_for_cancellation", "missing_tool"]
+            .into_iter()
+            .map(|name| (name.to_owned(), Map::new()))
+            .collect::<HashMap<_, _>>();
+    if parameter_headers {
+        schemas.insert(
+            "sum".to_owned(),
+            json!({
+                "type": "object",
+                "properties": {
+                    "a": { "type": "integer", "x-mcp-header": "A" },
+                    "b": { "type": "integer", "x-mcp-header": "B" }
+                },
+                "required": ["a", "b"]
+            })
+            .as_object()
+            .expect("sum schema is an object")
+            .clone(),
+        );
+    }
+    schemas
 }
 
 #[allow(clippy::unused_async_trait_impl)]
@@ -107,6 +134,13 @@ impl ServerHandler for TestBackend {
         request: CallToolRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(parts) = cx.extensions.get::<Parts>() {
+            self.state
+                .request_headers
+                .lock()
+                .expect("backend request headers lock poisoned")
+                .push(parts.headers.clone());
+        }
         self.state
             .calls
             .lock()
@@ -195,6 +229,7 @@ impl ServerHandler for TestBackend {
 }
 
 pub const TOOL_NAMES: &[&str] = &[
+    "missing_schema_tool",
     "progress_counter_tokens",
     "progress_sum",
     "sum",
@@ -272,13 +307,27 @@ pub(crate) async fn start_gateway(
     start_gateway_with_runtime(user, runtime_plugins_enabled, plugin_runtime, false).await
 }
 
+pub(crate) async fn start_gateway_with_parameter_headers(
+    user: &str,
+    runtime_plugins_enabled: bool,
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+) -> RunningGateway {
+    start_gateway_with_state(
+        user,
+        runtime_plugins_enabled,
+        plugin_runtime,
+        false,
+        BackendState { parameter_headers: true, ..Default::default() },
+    )
+    .await
+}
+
 pub(crate) async fn start_gateway_with_events(
     user: &str,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
     events: Arc<StdMutex<Vec<&'static str>>>,
 ) -> RunningGateway {
-    start_gateway_with_state(user, true, plugin_runtime, false, BackendState { events, ..BackendState::default() })
-        .await
+    start_gateway_with_state(user, true, plugin_runtime, false, BackendState { events, ..Default::default() }).await
 }
 
 pub(crate) async fn start_gateway_with_json_backend_responses(
@@ -319,6 +368,7 @@ async fn start_gateway_with_state(
     let backend_port = backend_listener.local_addr().expect("backend address").port();
     let backend_name = format!("backend-{backend_port}");
     let virtual_host_id = "vh-cpex-test";
+    let parameter_headers = backend_state.parameter_headers;
 
     let backend_service = StreamableHttpService::new(
         {
@@ -347,6 +397,7 @@ async fn start_gateway_with_state(
                                 passthrough_headers: Vec::new(),
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),
+                                tool_schemas: published_tool_schemas(parameter_headers),
                                 tool_name_aliases: TOOL_NAMES
                                     .iter()
                                     .map(|n| NameAlias::new(n.to_string(), n.to_string()))

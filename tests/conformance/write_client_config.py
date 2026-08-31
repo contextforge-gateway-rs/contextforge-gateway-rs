@@ -51,6 +51,7 @@ def main() -> None:
                         "add_headers": {},
                         "remove_headers": [],
                         "allowed_tool_names": tool_names,
+                        "tool_schemas": {name: {} for name in tool_names},
                         "tool_name_aliases": {},
                         "allowed_resource_names": [],
                         "allowed_prompt_names": [],

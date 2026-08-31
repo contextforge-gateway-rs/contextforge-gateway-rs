@@ -12,6 +12,7 @@ server:
   - input-required-result-basic-list-roots:sep-2322-list-roots-incomplete
   - input-required-result-basic-sampling:sep-2322-sampling-incomplete
   - input-required-result-capability-check:sep-2322-respect-client-capabilities
+  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params
   - input-required-result-missing-input-response:sep-2322-missing-response-rerequests
   - input-required-result-multi-round:sep-2322-multi-round-r1
   - input-required-result-multiple-input-requests:sep-2322-multiple-inputs-incomplete
@@ -23,6 +24,9 @@ server:
   - resources-list:resources-list
   - server-stateless:sep-2575-discover-capabilities-match-handlers
   - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
+  - server-stateless:sep-2575-missing-capability-http-400
   - server-stateless:sep-2575-server-declares-prompts-in-discover
+  - server-stateless:sep-2575-server-no-log-without-loglevel
+  - server-stateless:sep-2575-server-rejects-undeclared-capability
   - tools-call-with-progress:tools-call-with-progress
   - tools-list:tools-list

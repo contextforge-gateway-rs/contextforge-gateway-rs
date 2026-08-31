@@ -601,6 +601,7 @@ dependencies = [
  "axum",
  "axum-otel-metrics",
  "axum-server",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "contextforge-data-plane-apis",

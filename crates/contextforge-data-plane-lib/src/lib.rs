@@ -114,7 +114,6 @@ impl Gateway {
         } else {
             StreamableHttpServerConfig::default().disable_allowed_hosts().disable_allowed_origins()
         };
-
         let reqwest_backend_client = reqwest::Client::try_from(&config)?;
 
         // Create streamable HTTP service

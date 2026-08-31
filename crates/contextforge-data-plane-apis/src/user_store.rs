@@ -67,6 +67,8 @@ pub struct BackendMCPGateway {
     pub prompt_name_aliases: HashSet<NameAlias>,
     #[serde(default)]
     pub completion: HashMap<String, String>,
+    /// Input schemas keyed by the original upstream tool name.
+    pub tool_schemas: HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
