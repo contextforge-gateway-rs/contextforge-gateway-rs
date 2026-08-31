@@ -29,7 +29,7 @@ use rmcp::{
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex as TokioMutex;
 
-use crate::support::test_gateways::construct_services;
+use crate::support::{create_default_config, test_gateways::construct_services};
 
 use super::{MemoryUserConfigStore, token};
 
@@ -417,10 +417,9 @@ async fn start_gateway_with_state(
     let gateway = Gateway::builder()
         .with_config(Config {
             address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-            token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
             upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
             runtime_plugins_enabled: Some(runtime_plugins_enabled),
-            ..Default::default()
+            ..create_default_config()
         })
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(user_store)))

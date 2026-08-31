@@ -6,7 +6,10 @@ use tracing::{info, warn};
 
 use support::{ListToolsGatewaySettings, TEST_USER_ID, create_client, create_gateway_with_four_counters, create_ports};
 
-use crate::support::{connect_client_with_protocol, connect_modern_client, create_gateway_with_four_legacy_counters};
+use crate::support::{
+    connect_client_with_protocol, connect_modern_client, create_default_config,
+    create_gateway_with_four_legacy_counters,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
@@ -15,9 +18,8 @@ async fn plaintext_call_prefixed_read_resources_modern_modern() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
@@ -59,9 +61,8 @@ async fn plaintext_call_prefixed_read_resources_modern_legacy() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
@@ -103,9 +104,8 @@ async fn plaintext_call_prefixed_read_resources_legacy_modern() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
@@ -196,9 +196,8 @@ async fn plaintext_call_invalid_backend_tools() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;

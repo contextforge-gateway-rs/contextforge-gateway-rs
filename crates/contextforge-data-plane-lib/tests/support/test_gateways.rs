@@ -14,6 +14,8 @@ use rmcp::transport::{
 use rustls::ProtocolVersion;
 use tracing::warn;
 
+use crate::support::create_default_config;
+
 use super::{MemoryUserConfigStore, mock_counter};
 
 const MOCK_COUNTER_TOOL_NAMES: &[&str] =
@@ -37,9 +39,8 @@ pub(crate) struct ListToolsGatewaySettings {
 pub(crate) fn plaintext_config(gateway_port: u16) -> Config {
     Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     }
 }
 

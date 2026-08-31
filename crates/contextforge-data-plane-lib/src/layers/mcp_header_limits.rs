@@ -9,13 +9,13 @@ use crate::common::{
 use crate::mcp_standard_headers;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct McpStandardHeaderLimits {
+pub(crate) struct StandardHeaderLimits {
     pub(crate) count: usize,
     pub(crate) value_bytes: usize,
     pub(crate) total_bytes: usize,
 }
 
-impl From<&Config> for McpStandardHeaderLimits {
+impl From<&Config> for StandardHeaderLimits {
     fn from(config: &Config) -> Self {
         Self {
             count: configured_or_default(config.mcp_standard_header_max_count, DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT),
@@ -36,14 +36,14 @@ fn configured_or_default(configured: usize, default: usize) -> usize {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct McpStandardHeaderUsage {
+struct StandardHeaderUsage {
     count: usize,
     value_bytes: usize,
     total_bytes: usize,
 }
 
 pub(crate) async fn mcp_header_limits_layer(
-    State(limits): State<McpStandardHeaderLimits>,
+    State(limits): State<StandardHeaderLimits>,
     request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
@@ -64,14 +64,14 @@ pub(crate) async fn mcp_header_limits_layer(
     next.run(request).await
 }
 
-fn exceeded_limits(headers: &http::HeaderMap, limits: &McpStandardHeaderLimits) -> Option<McpStandardHeaderUsage> {
+fn exceeded_limits(headers: &http::HeaderMap, limits: &StandardHeaderLimits) -> Option<StandardHeaderUsage> {
     let usage = mcp_standard_header_usage(headers);
 
     usage.exceeds(limits).then_some(usage)
 }
 
-fn mcp_standard_header_usage(headers: &http::HeaderMap) -> McpStandardHeaderUsage {
-    let mut usage = McpStandardHeaderUsage { count: 0, value_bytes: 0, total_bytes: 0 };
+fn mcp_standard_header_usage(headers: &http::HeaderMap) -> StandardHeaderUsage {
+    let mut usage = StandardHeaderUsage { count: 0, value_bytes: 0, total_bytes: 0 };
     for (name, value) in headers.iter().filter(|(name, _)| mcp_standard_headers::is_limited(name)) {
         let value_bytes = value.as_bytes().len();
 
@@ -85,8 +85,8 @@ fn mcp_standard_header_usage(headers: &http::HeaderMap) -> McpStandardHeaderUsag
     usage
 }
 
-impl McpStandardHeaderUsage {
-    fn exceeds(self, limits: &McpStandardHeaderLimits) -> bool {
+impl StandardHeaderUsage {
+    fn exceeds(self, limits: &StandardHeaderLimits) -> bool {
         self.count > limits.count || self.value_bytes > limits.value_bytes || self.total_bytes > limits.total_bytes
     }
 }
@@ -98,15 +98,16 @@ mod tests {
     use async_trait::async_trait;
     use axum::{Router, body::Body, middleware, response::Response, routing::get};
     use contextforge_data_plane_apis::{User, user_store::UserConfig};
-    use http::{Request, StatusCode};
+    use http::{HeaderValue, Request, StatusCode};
     use tower::ServiceExt;
 
     use crate::{
         Config,
-        common::{ContextForgeDataPlaneAppState, JwtTokenDecoders},
+        authorization::{AuthorizationClaims, AuthorizationService},
+        common::ContextForgeDataPlaneAppState,
         layers::{
             claims_id::claims_layer,
-            mcp_header_limits::{McpStandardHeaderLimits, mcp_header_limits_layer},
+            mcp_header_limits::{StandardHeaderLimits, mcp_header_limits_layer},
         },
         user_config_store::{ConfigStoreError, UserConfigStore},
     };
@@ -115,7 +116,7 @@ mod tests {
         Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
     }
 
-    fn app(limits: McpStandardHeaderLimits) -> Router {
+    fn app(limits: StandardHeaderLimits) -> Router {
         Router::new().route("/", get(ok)).layer(middleware::from_fn_with_state(limits, mcp_header_limits_layer))
     }
 
@@ -129,7 +130,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_too_many_mcp_headers() {
-        let limits = McpStandardHeaderLimits { count: 2, value_bytes: 1024, total_bytes: 4096 };
+        let limits = StandardHeaderLimits { count: 2, value_bytes: 1024, total_bytes: 4096 };
         let response = app(limits)
             .oneshot(request_with_headers(&[
                 ("Mcp-Method", "tools/call"),
@@ -144,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_oversized_mcp_header_value() {
-        let limits = McpStandardHeaderLimits { count: 32, value_bytes: 4, total_bytes: 4096 };
+        let limits = StandardHeaderLimits { count: 32, value_bytes: 4, total_bytes: 4096 };
         let response = app(limits)
             .oneshot(request_with_headers(&[("Mcp-Param-User", "alice")]))
             .await
@@ -155,7 +156,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_excessive_total_mcp_header_bytes() {
-        let limits = McpStandardHeaderLimits { count: 32, value_bytes: 16, total_bytes: 24 };
+        let limits = StandardHeaderLimits { count: 32, value_bytes: 16, total_bytes: 24 };
         let response = app(limits)
             .oneshot(request_with_headers(&[("Mcp-Method", "tools/call"), ("Mcp-Name", "example")]))
             .await
@@ -166,7 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn counts_mcp_headers_case_insensitively() {
-        let limits = McpStandardHeaderLimits { count: 1, value_bytes: 1024, total_bytes: 4096 };
+        let limits = StandardHeaderLimits { count: 1, value_bytes: 1024, total_bytes: 4096 };
         let response = app(limits)
             .oneshot(request_with_headers(&[("McP-MeThOd", "tools/call"), ("mCp-PaRaM-User", "alice")]))
             .await
@@ -177,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_non_mcp_headers_for_mcp_specific_budget() {
-        let limits = McpStandardHeaderLimits { count: 1, value_bytes: 1024, total_bytes: 4096 };
+        let limits = StandardHeaderLimits { count: 1, value_bytes: 1024, total_bytes: 4096 };
         let response = app(limits)
             .oneshot(request_with_headers(&[
                 ("X-One", "1"),
@@ -205,11 +206,21 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    pub struct Noop;
+
+    #[async_trait]
+    impl AuthorizationService for Noop {
+        async fn authorize(&self, _: &HeaderValue) -> Option<AuthorizationClaims> {
+            None
+        }
+    }
+
     #[tokio::test]
     async fn rejects_excessive_mcp_headers_before_auth() {
-        let limits = McpStandardHeaderLimits { count: 1, value_bytes: 1024, total_bytes: 4096 };
+        let limits = StandardHeaderLimits { count: 1, value_bytes: 1024, total_bytes: 4096 };
         let state = ContextForgeDataPlaneAppState {
-            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: None },
+            authorization_service: Arc::new(Noop {}),
             config_store: Arc::new(UnusedConfigStore),
             config: Config::default(),
         };

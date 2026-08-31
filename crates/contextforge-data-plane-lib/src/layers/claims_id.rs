@@ -4,12 +4,8 @@ use axum::{
     response::Response,
 };
 use http::{StatusCode, header};
-use jsonwebtoken::Validation;
 
-use crate::{
-    common::{ContextForgeClaims, ContextForgeDataPlaneAppState},
-    const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
-};
+use crate::common::ContextForgeDataPlaneAppState;
 
 fn unauthorized_response(message: &str) -> Response {
     Response::builder()
@@ -24,53 +20,14 @@ pub async fn claims_layer(
     request: http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    let decoding_keys = state.jwt_token_decoding_keys;
     let (mut parts, body) = request.into_parts();
 
     let Some(authorization) = parts.headers.get("Authorization") else { return unauthorized_response("No header") };
 
-    let Some(token) = authorization.as_bytes().strip_prefix(b"Bearer ") else {
+    let Some(claims) = state.authorization_service.authorize(authorization).await else {
         return unauthorized_response("Invalid token");
     };
 
-    let Ok(raw_token) = str::from_utf8(token) else { return unauthorized_response("Invalid token encoding") };
-
-    let Ok(header) = jsonwebtoken::decode_header(raw_token) else { return unauthorized_response("Invalid header") };
-
-    let mut validation = Validation::new(header.alg);
-    validation.set_audience(&[CONTEXT_FORGE_GATEWAY_AUDIENCE]);
-    validation.set_issuer(&[CONTEXT_FORGE_GATEWAY_ISSUER]);
-    let claims = match header.alg {
-        jsonwebtoken::Algorithm::RS256 | jsonwebtoken::Algorithm::RS384 | jsonwebtoken::Algorithm::RS512 => {
-            let Some(decoding_key) = decoding_keys.rs.as_ref() else {
-                return Response::builder()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .header(header::CONTENT_TYPE, "text/plain")
-                    .body("Invalid key".into())
-                    .expect("Expecting this to work");
-            };
-            let maybe_valid = jsonwebtoken::decode::<ContextForgeClaims>(raw_token, decoding_key, &validation);
-            let Ok(claims) = maybe_valid else {
-                return unauthorized_response(&format!("Invalid claims {maybe_valid:?}"));
-            };
-            claims
-        },
-        jsonwebtoken::Algorithm::HS256 | jsonwebtoken::Algorithm::HS384 | jsonwebtoken::Algorithm::HS512 => {
-            let Some(decoding_key) = decoding_keys.hmac_sha.as_ref() else {
-                return unauthorized_response("Invalid decoding key");
-            };
-            let maybe_valid = jsonwebtoken::decode::<ContextForgeClaims>(raw_token, decoding_key, &validation);
-            let Ok(claims) = maybe_valid else { return unauthorized_response("Invalid claims") };
-
-            claims
-        },
-
-        _ => {
-            return unauthorized_response("Invalid algorithm");
-        },
-    };
-
-    let claims: ContextForgeClaims = claims.claims;
     parts.extensions.insert(claims.clone());
     let request = Request::from_parts(parts, body);
     next.run(request).await
@@ -85,18 +42,29 @@ mod test {
     use axum::{Router, body::Body, middleware, response::Response, routing::get};
     use chrono::Duration;
     use contextforge_data_plane_apis::{User, user_store::UserConfig};
-    use http::{HeaderMap, Request, StatusCode};
+    use http::{HeaderMap, HeaderValue, Request, StatusCode};
     use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, encode};
     use tower::ServiceExt;
     use uuid::Uuid;
 
     use crate::{
         Config,
-        common::{self, ContextForgeClaims, ContextForgeDataPlaneAppState, JwtTokenDecoders, Scopes},
+        authorization::{AuthorizationClaims, AuthorizationService},
+        common::{self, ContextForgeClaims, ContextForgeDataPlaneAppState, Scopes},
         const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
         layers::claims_id::claims_layer,
         user_config_store::{ConfigStoreError, UserConfigStore},
     };
+
+    #[derive(Debug)]
+    pub struct Noop;
+
+    #[async_trait]
+    impl AuthorizationService for Noop {
+        async fn authorize(&self, _: &HeaderValue) -> Option<AuthorizationClaims> {
+            None
+        }
+    }
 
     static CRYPTO: Once = Once::new();
     const HMAC_SECRET: &[u8] = b"my-test-key-but-now-longer-than-32-bytes";
@@ -171,7 +139,7 @@ mod test {
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
         let state = ContextForgeDataPlaneAppState {
-            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
+            authorization_service: Arc::new(Noop),
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
         };
@@ -206,7 +174,7 @@ mod test {
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
         let state = ContextForgeDataPlaneAppState {
-            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
+            authorization_service: Arc::new(Noop {}),
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
         };
@@ -248,7 +216,7 @@ mod test {
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
 
         let state = ContextForgeDataPlaneAppState {
-            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
+            authorization_service: Arc::new(Noop {}),
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
         };
@@ -280,10 +248,8 @@ mod test {
         claims.exp = 0;
         let token = get_hmac_token_for_claims(&claims);
 
-        let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
-
         let state = ContextForgeDataPlaneAppState {
-            jwt_token_decoding_keys: JwtTokenDecoders { rs: None, hmac_sha: Some(decoding_key) },
+            authorization_service: Arc::new(Noop {}),
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
         };

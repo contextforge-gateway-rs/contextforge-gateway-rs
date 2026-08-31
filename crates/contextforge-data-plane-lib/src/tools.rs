@@ -9,7 +9,11 @@ use axum::{
 };
 use chrono::Duration;
 use contextforge_data_plane_apis::{User as CFUser, user_store::UserConfig};
-use http::{StatusCode, header};
+use http::{
+    StatusCode,
+    header::{self, CACHE_CONTROL},
+};
+use jsonwebtoken::jwk::{Jwk, JwkSet};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -20,6 +24,10 @@ use crate::{
 };
 
 const DEFAULT_TOKEN_EMAIL: &str = "admin@example.com";
+const JWKS_CACHE_CONTROL: &str = "public, max-age=300, must-revalidate";
+const TOKEN_PATH: &str = "/admin/tokens/{tenant_id}/{user_id}";
+const JWKS_PATH: &str = "/admin/.well-known/jwks.json";
+const CONFIGURE_USER_PATH: &str = "admin/userconfigs/{user_id}";
 
 #[derive(Debug, Deserialize)]
 pub struct TokenQuery {
@@ -58,10 +66,28 @@ impl ContextForgeClaims {
     }
 }
 
+async fn get_jwks(State(state): State<ContextForgeDataPlaneAppState>) -> Response {
+    let Ok(key) = jsonwebtoken::EncodingKey::from_rsa_pem(
+        &fs::read(&state.config.token_verification_private_key).expect("Expecting this to work"),
+    ) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Can't find the encoding key or the format is wrong")
+            .into_response();
+    };
+
+    let Ok(key) = Jwk::from_encoding_key(&key, jsonwebtoken::Algorithm::RS256) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Can't find the encoding key or the format is wrong")
+            .into_response();
+    };
+
+    let keys = vec![key];
+    (StatusCode::OK, [(CACHE_CONTROL, JWKS_CACHE_CONTROL)], Json(JwkSet { keys })).into_response()
+}
+
 pub fn add_tools(router: Router<ContextForgeDataPlaneAppState>) -> Router<ContextForgeDataPlaneAppState> {
     router
-        .route("/admin/tokens/{user_id}", get(get_token))
-        .route("/admin/userconfigs/{user_id}", post(configure_user))
+        .route(TOKEN_PATH, get(get_token))
+        .route(JWKS_PATH, get(get_jwks))
+        .route(CONFIGURE_USER_PATH, post(configure_user))
         .route("/health", get(health))
 }
 

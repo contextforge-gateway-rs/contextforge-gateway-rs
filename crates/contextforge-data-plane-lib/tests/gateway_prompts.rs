@@ -10,7 +10,7 @@ use support::{
     create_ports,
 };
 
-use crate::support::connect_modern_client;
+use crate::support::{connect_modern_client, create_default_config};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
@@ -20,9 +20,8 @@ async fn plaintext_lists_prefixed_backend_prompts() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
@@ -46,9 +45,8 @@ async fn plaintext_gets_prompt_from_prefixed_backend_name() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;

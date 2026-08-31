@@ -9,6 +9,8 @@ use support::{
     create_ports,
 };
 
+use crate::support::create_default_config;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
 #[ignore = "Fan out list resources is not supported at the moment. This should be enabled in 2.x"]
@@ -17,9 +19,8 @@ async fn plaintext_lists_prefixed_backend_resource_templates() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
@@ -55,9 +56,8 @@ async fn plaintext_reads_resource_from_prefixed_template() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
