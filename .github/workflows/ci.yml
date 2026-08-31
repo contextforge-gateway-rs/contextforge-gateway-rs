@@ -108,10 +108,13 @@ jobs:
           path: target/cf-integration-src
           persist-credentials: false
 
+      - name: Isolate cf-integration from the data-plane workspace
+        run: cp -R target/cf-integration-src "${RUNNER_TEMP}/cf-integration-src"
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
         with:
-          workspaces: target/cf-integration-src -> .integration/cargo-target
+          workspaces: ${{ runner.temp }}/cf-integration-src -> .integration/cargo-target
 
       - name: Install Node.js 22
         uses: actions/setup-node@v6.5.0
@@ -119,12 +122,12 @@ jobs:
           node-version: 22
 
       - name: Build cf-integration
-        working-directory: target/cf-integration-src
+        working-directory: ${{ runner.temp }}/cf-integration-src
         run: cargo build --release --locked --bin cf-integration
 
       - name: Run strict modern conformance
         env:
-          CF_INTEGRATION: ${{ github.workspace }}/target/cf-integration-src/.integration/cargo-target/release/cf-integration
+          CF_INTEGRATION: ${{ runner.temp }}/cf-integration-src/.integration/cargo-target/release/cf-integration
         run: make conformance
 
       - name: Upload conformance diagnostics
