@@ -12,7 +12,7 @@ then follow only the links that are relevant.
 | [project.md](project.md) | What the project is, goals, stakeholders, key modules, crate ownership, active work |
 | [preferences.md](preferences.md) | Working standards, code style, logging rules, branch naming, AI interaction preferences |
 | [architecture.md](architecture.md) | Current middleware stack order, pipeline shape, module boundaries, state ownership, executor shapes |
-| [routing.md](routing.md) | Current backend prefix contract, list/routed ops, federated pagination, session state, capability merge |
+| [routing.md](routing.md) | Stateless routing model: VirtualHost routing tables, per-request backend lifecycle, method quick reference, header forwarding, plugin hooks |
 | [mcp-capability-allocation.md](mcp-capability-allocation.md) | Tentative ContextForge 2.0 target topology, ownership, state model, Phase 1-4 roadmap, and Phase 3 flows |
 | [failure-modes.md](failure-modes.md) | HTTP/MCP/routing/backend/plugin failure table — exact HTTP codes and JSON-RPC errors |
 | [config.md](config.md) | Key CLI flags, JWT claims, UserConfig shape, plugin config, telemetry debugging, startup validation, local observability stack |
