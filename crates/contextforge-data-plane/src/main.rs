@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use clap::Parser;
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
-use contextforge_data_plane_lib::{Config, Gateway, RedisClient, RedisConfig, UserConfigStoreType};
+use contextforge_data_plane_lib::{
+    Config, Gateway, RedisClient, RedisConfig, UserConfigStoreType, get_authorization_service,
+};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rustls::crypto;
 use tikv_jemallocator::Jemalloc;
@@ -32,11 +34,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
     let plugin_runtime = plugin_registry.as_ref().map(|runtime| runtime.handle());
 
+    let authorization_service = get_authorization_service(&config)?;
+
     let gateway = Gateway::builder()
         .with_config(config)
         .with_user_config_store_type(UserConfigStoreType::Redis)
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_plugin_runtime(plugin_runtime.clone())
+        .with_authorization_service(authorization_service)
         .build();
 
     runtime.execute(gateway, plugin_registry)

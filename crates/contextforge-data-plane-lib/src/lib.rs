@@ -38,17 +38,15 @@ pub use crate::common::*;
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
 
-use crate::{
-    authorization::get_authorization_service,
-    layers::{
-        claims_id::claims_layer,
-        mcp_header_limits::{StandardHeaderLimits, mcp_header_limits_layer},
-        mcp_origin::mcp_origin_layer,
-        user_config_store::user_config_store_layer,
-        virtual_host_config::virtual_host_config_layer,
-        virtual_host_id::virtual_host_id_layer,
-    },
+use crate::layers::{
+    claims_id::claims_layer,
+    mcp_header_limits::{StandardHeaderLimits, mcp_header_limits_layer},
+    mcp_origin::mcp_origin_layer,
+    user_config_store::user_config_store_layer,
+    virtual_host_config::virtual_host_config_layer,
+    virtual_host_id::virtual_host_id_layer,
 };
+pub use authorization::{AuthorizationClaims, AuthorizationService, get_authorization_service};
 
 #[derive(Clone)]
 pub enum UserConfigStoreType {
@@ -64,6 +62,7 @@ pub struct Gateway {
     user_config_store_type: UserConfigStoreType,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
+    authorization_service: Arc<dyn AuthorizationService + Send + Sync>,
 }
 
 impl Gateway {
@@ -98,7 +97,7 @@ impl Gateway {
     }
 
     async fn build_app(self) -> Result<axum::Router> {
-        let Gateway { config, session_manager, user_config_store_type, plugin_runtime } = self;
+        let Gateway { config, session_manager, user_config_store_type, plugin_runtime, authorization_service } = self;
         let user_config_store = match user_config_store_type {
             UserConfigStoreType::Redis => Arc::new(get_config_store(&config).await?),
             UserConfigStoreType::Test(store) => store,
@@ -132,7 +131,7 @@ impl Gateway {
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
         let mcp_add_state: ContextForgeDataPlaneAppState = ContextForgeDataPlaneAppState {
-            authorization_service: get_authorization_service(&config)?,
+            authorization_service,
             config_store: Arc::clone(&user_config_store),
             config: config.clone(),
         };
@@ -183,7 +182,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
-        Config, Gateway, UserConfigStoreType,
+        Config, Gateway, UserConfigStoreType, get_authorization_service,
         user_config_store::{ConfigStoreError, UserConfigStore},
     };
 
@@ -205,6 +204,7 @@ mod tests {
     async fn production_router_rejects_excessive_mcp_headers_before_auth() {
         let config = Config { mcp_standard_header_max_count: 1, ..Config::default() };
         let app = Gateway::builder()
+            .with_authorization_service(get_authorization_service(&config).expect("this should not fail"))
             .with_config(config)
             .with_session_manager(Arc::new(LocalSessionManager::default()))
             .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(UnusedConfigStore)))

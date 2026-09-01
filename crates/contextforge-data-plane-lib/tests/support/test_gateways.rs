@@ -1,20 +1,23 @@
 use std::{collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
 use contextforge_data_plane_apis::{
     User,
     user_store::{BackendMCPGateway, ServiceRoute, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
-    Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
+    AuthorizationClaims, AuthorizationService, Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore,
+    UserConfigStoreType,
 };
 use futures::{FutureExt, future::BoxFuture};
+use http::HeaderValue;
 use rmcp::transport::{
     StreamableHttpServerConfig, StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
 use rustls::ProtocolVersion;
 use tracing::warn;
 
-use crate::support::create_default_config;
+use crate::support::{self, create_default_config};
 
 use super::{MemoryUserConfigStore, mock_counter};
 
@@ -157,6 +160,7 @@ async fn create_gateway_with_four_counters_and_custom_config(
         .with_config(config.clone())
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
+        .with_authorization_service(Arc::new(support::auth::AlwaysAllowAuthorizatioService::new(user.to_owned())))
         .build();
 
     let gateway = async move {

@@ -13,8 +13,6 @@ mod jwks;
 pub const AUDIENCE: &str = "audience";
 pub const ISSUER: &str = "issuer";
 
-#[allow(clippy::unnecessary_wraps)]
-#[allow(unused_variables)]
 pub fn get_authorization_service(
     config: &Config,
 ) -> Result<Arc<dyn AuthorizationService + Send + Sync>, AuthorizationError> {
@@ -30,7 +28,7 @@ pub trait AuthorizationService: std::fmt::Debug {
 
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)]
-pub(crate) enum AuthorizationError {
+pub enum AuthorizationError {
     #[error("SaaS JWKS contains no supported signing keys")]
     NoSupportedKeys,
     #[error("SaaS JWKS is invalid")]

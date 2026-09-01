@@ -1,8 +1,4 @@
-use std::{
-    net::IpAddr,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::time::Duration;
 
 use futures::StreamExt as _;
 use jsonwebtoken::{
@@ -22,15 +18,13 @@ use crate::authorization::{
     jwks::principal::{DefaultPrincipalExtractor, PrincipalExtractor},
 };
 
-const JWKS_CACHE_TTL: Duration = Duration::from_mins(5);
-const JWKS_CACHE_KEY: &str = "jwks";
-const JWKS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const JWKS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const JWKS_READ_TIMEOUT: Duration = Duration::from_secs(5);
+pub const JWKS_CACHE_TTL: Duration = Duration::from_mins(5);
+pub const JWKS_CACHE_KEY: &str = "jwks";
+
 const JWKS_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 #[derive(TypedBuilder)]
-pub(super) struct RemoteJwks<T>
+pub(super) struct Jwks<T>
 where
     T: PrincipalExtractor,
 {
@@ -47,23 +41,7 @@ where
     principal_extractor: T,
 }
 
-impl RemoteJwks<DefaultPrincipalExtractor> {
-    pub(super) fn new(value: Url, ca_cert_path: Option<&PathBuf>) -> Result<Self, AuthorizationError> {
-        let url = parse_jwks_url(value)?;
-        let mut client = reqwest::Client::builder()
-            .tls_backend_rustls()
-            .connect_timeout(JWKS_CONNECT_TIMEOUT)
-            .read_timeout(JWKS_READ_TIMEOUT)
-            .timeout(JWKS_REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("mcp-ops/", env!("CARGO_PKG_VERSION")));
-        if let Some(ca_cert_path) = ca_cert_path {
-            client = client.tls_certs_only(load_ca_certificates(ca_cert_path)?);
-        }
-        let client = client.build().map_err(AuthorizationError::JwksRequest)?;
-        Ok(RemoteJwks::builder().client(client).url(url).principal_extractor(DefaultPrincipalExtractor {}).build())
-    }
-
+impl Jwks<DefaultPrincipalExtractor> {
     fn validation(&self, alg: Algorithm) -> Validation {
         let mut validation = Validation::new(alg);
         validation.required_spec_claims.clear();
@@ -73,7 +51,7 @@ impl RemoteJwks<DefaultPrincipalExtractor> {
         validation
     }
 
-    pub(super) async fn validate(&self, token: &str, header: &Header) -> Option<AuthorizationClaims> {
+    pub async fn validate(&self, token: &str, header: &Header) -> Option<AuthorizationClaims> {
         {
             let cache = self.cache.read().await;
             if let Some(keys) = cache.peek(JWKS_CACHE_KEY)
@@ -118,11 +96,12 @@ impl RemoteJwks<DefaultPrincipalExtractor> {
         validation: &Validation,
     ) -> Option<AuthorizationClaims> {
         let claims = decode::<Value>(token, key, validation)
-            .inspect_err(|e| debug!("validate_and_decode_claims: problem {e:?}"))
+            .inspect_err(|e| {
+                debug!("validate_and_decode_claims: problem {e:?}");
+            })
             .ok()?
             .claims;
         let claims = claims.as_object()?;
-
         let user_id = self.principal_extractor.user_id(claims)?;
         let tenant_id = self.principal_extractor.tenant_id(claims)?;
 
@@ -130,9 +109,9 @@ impl RemoteJwks<DefaultPrincipalExtractor> {
     }
 }
 
-pub(super) struct VerificationKey {
-    key_id: Option<String>,
-    decoding_key: DecodingKey,
+pub struct VerificationKey {
+    pub(crate) key_id: Option<String>,
+    pub(crate) decoding_key: DecodingKey,
 }
 
 impl VerificationKey {
@@ -158,29 +137,6 @@ impl VerificationKey {
                 .as_ref()
                 .is_none_or(|header_key_id| self.key_id.as_ref().is_none_or(|key_id| key_id == header_key_id))
     }
-}
-
-pub(super) fn load_ca_certificates(path: &Path) -> Result<Vec<reqwest::Certificate>, AuthorizationError> {
-    let pem = std::fs::read(path)
-        .map_err(|source| AuthorizationError::ReadJwksCaCertificate { path: path.to_owned(), source })?;
-    let certificates = reqwest::Certificate::from_pem_bundle(&pem)
-        .map_err(|source| AuthorizationError::InvalidJwksCaCertificate { path: path.to_owned(), source })?;
-    if certificates.is_empty() {
-        return Err(AuthorizationError::EmptyJwksCaCertificate { path: path.to_owned() });
-    }
-    Ok(certificates)
-}
-
-fn parse_jwks_url(url: Url) -> Result<Url, AuthorizationError> {
-    let secure = url.scheme() == "https";
-    let local_http = url.scheme() == "http"
-        && url.host_str().is_some_and(|host| {
-            host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok_and(|address| address.is_loopback())
-        });
-    if !secure && !local_http {
-        return Err(AuthorizationError::InsecureJwksUrl);
-    }
-    Ok(url)
 }
 
 async fn fetch_jwks(client: &reqwest::Client, url: &Url) -> Result<Vec<VerificationKey>, AuthorizationError> {

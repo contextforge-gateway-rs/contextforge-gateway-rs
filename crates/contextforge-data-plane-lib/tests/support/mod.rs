@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports, reason = "shared CPEX test fixture is used by separate integration test targets")]
 
-mod auth;
+pub mod auth;
 mod client;
 pub(crate) mod mock_counter;
 pub(crate) mod paginating_mock;
