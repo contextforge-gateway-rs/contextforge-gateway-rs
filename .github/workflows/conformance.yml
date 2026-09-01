@@ -1,13 +1,9 @@
 name: Conformance
-run-name: Conformance for PR #${{ github.event.issue.number }}
+run-name: "Conformance for PR #${{ github.event.issue.number }}"
 
 on:
   issue_comment:
     types: [created]
-
-permissions:
-  actions: read
-  contents: read
 
 concurrency:
   group: conformance-pr-${{ github.event.issue.number }}
@@ -17,45 +13,57 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  acknowledge:
-    name: acknowledge command
-    if: >-
-      github.event.issue.pull_request &&
-      github.event.comment.body == '/conformance' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-    permissions:
-      issues: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Acknowledge the command
-        env:
-          COMMENT_ID: ${{ github.event.comment.id }}
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: gh api --method POST "repos/$REPOSITORY/issues/comments/$COMMENT_ID/reactions" -f content=eyes
-
   conformance:
     name: conformance
     if: >-
       github.event.issue.pull_request &&
       github.event.comment.body == '/conformance' &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Resolve the exact PR revision
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: >-
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER"
+          --jq '"head_sha=\(.head.sha)\nmerge_sha=\(.merge_commit_sha)"'
+          >> "$GITHUB_OUTPUT"
+
+      - name: Publish the pending PR status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.revision.outputs.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA"
+          -f state=pending
+          -f context=conformance
+          -f description='Conformance is running'
+          -f target_url="$RUN_URL"
+
       - name: Check out data plane
         uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: refs/pull/${{ github.event.issue.number }}/merge
+          ref: ${{ steps.revision.outputs.merge_sha }}
 
       - uses: taiki-e/install-action@v2.75.27
         with:
           tool: cargo-binstall
 
-      - name: Install cf-integration 0.2.0 binary
-        run: cargo binstall cf-integration@0.2.0 --no-confirm
+      - name: Install cf-integration 0.2.1 binary
+        run: cargo binstall cf-integration@0.2.1 --no-confirm
 
       - name: Prepare the exact data-plane image
         env:
@@ -72,47 +80,25 @@ jobs:
           node-version: 22
 
       - name: Run strict modern conformance
+        id: conformance
         env:
           CF_DATAPLANE_IMAGE: contextforge-data-plane:conformance
           CF_DATAPLANE_PULL_POLICY: never
           CF_DATAPLANE_REF: ""
         run: make conformance
 
-      - name: Upload conformance diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: conformance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            .integration/conformance/
-            .integration/reports/
-          if-no-files-found: warn
-          include-hidden-files: true
-          retention-days: 7
-
-  report:
-    name: report conformance result
-    if: >-
-      always() &&
-      needs.conformance.result != 'skipped'
-    needs: conformance
-    permissions:
-      issues: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Report the result
+      - name: Publish the final PR status
+        if: always() && steps.revision.outputs.head_sha != ''
         env:
+          DESCRIPTION: Conformance ${{ job.status }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.issue.number }}
+          HEAD_SHA: ${{ steps.revision.outputs.head_sha }}
           REPOSITORY: ${{ github.repository }}
-          RESULT: ${{ needs.conformance.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          case "$RESULT" in
-            success) marker="✅" ;;
-            failure) marker="❌" ;;
-            cancelled) marker="⚪" ;;
-            *) marker="⚠️" ;;
-          esac
-          body="$marker Conformance **$RESULT** — [view workflow run]($RUN_URL)."
-          gh api --method POST "repos/$REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body"
+          STATE: ${{ job.status == 'success' && 'success' || job.status == 'failure' && 'failure' || 'error' }}
+        run: >-
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA"
+          -f state="$STATE"
+          -f context=conformance
+          -f description="$DESCRIPTION"
+          -f target_url="$RUN_URL"
