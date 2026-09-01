@@ -1,10 +1,7 @@
 name: Conformance
-run-name: Conformance for PR #${{ github.event.pull_request.number || github.event.issue.number }}
+run-name: Conformance for PR #${{ github.event.issue.number }}
 
 on:
-  # Keep the label trigger until this workflow reaches the default branch.
-  pull_request:
-    types: [labeled]
   issue_comment:
     types: [created]
 
@@ -13,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: conformance-pr-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: conformance-pr-${{ github.event.issue.number }}
   cancel-in-progress: true
 
 env:
@@ -23,7 +20,6 @@ jobs:
   acknowledge:
     name: acknowledge command
     if: >-
-      github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       github.event.comment.body == '/conformance' &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
@@ -41,11 +37,9 @@ jobs:
   conformance:
     name: conformance
     if: >-
-      (github.event_name == 'pull_request' && github.event.label.name == 'run-conformance') ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request &&
-       github.event.comment.body == '/conformance' &&
-       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/conformance' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -54,7 +48,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: refs/pull/${{ github.event.pull_request.number || github.event.issue.number }}/merge
+          ref: refs/pull/${{ github.event.issue.number }}/merge
 
       - uses: taiki-e/install-action@v2.75.27
         with:
@@ -100,7 +94,6 @@ jobs:
     name: report conformance result
     if: >-
       always() &&
-      github.event_name == 'issue_comment' &&
       needs.conformance.result != 'skipped'
     needs: conformance
     permissions:
