@@ -435,7 +435,7 @@ async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_without_published_schema_fails_closed() {
+async fn stateless_tool_call_without_published_schema_reaches_backend() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let service = support::connect_modern_client(
         gateway.gateway_url(),
@@ -447,8 +447,10 @@ async fn stateless_tool_call_without_published_schema_fails_closed() {
     let rmcp::service::ServiceError::McpError(error) = error else {
         panic!("expected backend MCP error, got {error:?}");
     };
-    assert_eq!(ErrorCode::HEADER_MISMATCH, error.code);
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+
+    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!("missing_schema_tool", backend_calls[0].tool_name);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

@@ -34,6 +34,9 @@ Protocol-sensitive tests and fixtures must cover MCP `2026-07-28` and `2025-11-2
 
 These run in `cargo nextest run` with no Docker dependencies.
 
+Parameter-header integration tests verify that calls without a published tool
+schema skip local `Mcp-Param-*` validation and still reach the backend.
+
 ## MCP Conformance
 
 [`cf-integration`](https://crates.io/crates/cf-integration)

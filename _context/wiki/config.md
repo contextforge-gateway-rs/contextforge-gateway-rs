@@ -129,11 +129,17 @@ BackendMCPGateway
   add_headers: HashMap<String, String>            ← injected after passthrough
   remove_headers: Vec<String>                     ← stripped after add
   allowed_tool_names: Vec<String>                 ← model exists, NOT currently enforced
-  tool_schemas: HashMap<String, JsonObject>        ← required; upstream name → input schema
+  tool_schemas: HashMap<String, JsonObject>        ← optional, defaults to {}; upstream name → input schema
   tool_name_aliases: HashMap<String, String>      ← downstream_alias → upstream_original
   allowed_resource_names: Vec<String>             ← model exists, NOT currently enforced
   allowed_prompt_names: Vec<String>               ← model exists, NOT currently enforced
 ```
+
+`tool_schemas` lets the dataplane recognize and validate `x-mcp-header`
+annotations without calling backend `tools/list`. The control plane may omit the
+field or individual unannotated tools. Without a published schema, parameter
+headers are forwarded as unrecognized intermediary headers and are not locally
+validated.
 
 **Header apply order:** `passthrough_headers` → `add_headers` (override passthrough) → `remove_headers` (applied last).
 

@@ -81,11 +81,12 @@ flowchart TD
 
 RMCP enforces its configured request-body cap and validates modern standard
 headers before dispatch. The `tools/call` handler then resolves the request's
-backend and original tool name and validates `Mcp-Param-*` from the request
-context against the schema published in `UserConfig`; it does not call backend
-`tools/list`.
-Validated headers are forwarded unchanged; request plugins run afterward, so a
-plugin that changes an annotated argument also owns the resulting upstream
+backend and original tool name. When `UserConfig` contains that tool's input
+schema, it validates recognized `Mcp-Param-*` headers against the request body;
+it does not call backend `tools/list`. Without a published schema, parameter
+headers are unrecognized and forwarded without local validation.
+Parameter headers are forwarded unchanged; request plugins run afterward, so a
+plugin that changes an annotated argument also owns any resulting upstream
 mismatch.
 
 Order is invariant: auth/config before backend selection; request plugins before upstream; response plugins before returning.

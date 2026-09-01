@@ -46,15 +46,14 @@ pub(super) async fn call_tool(
         data: None,
     })?;
 
-    if cx.protocol_version().is_some_and(|version| version >= ProtocolVersion::STANDARD_HEADERS) {
+    if cx.protocol_version().is_some_and(|version| version >= ProtocolVersion::STANDARD_HEADERS)
+        && let Some(tool_schema) = backend.tool_schemas.get(&tool_name)
+    {
         let downstream_headers = cx
             .extensions
             .get::<Parts>()
             .map(|parts| &parts.headers)
             .ok_or_else(|| ErrorData::internal_error("Routing problem... request headers not found", None))?;
-        let tool_schema = backend.tool_schemas.get(&tool_name).ok_or_else(|| {
-            ErrorData::header_mismatch(format!("Missing published schema for tool '{tool_name}'"), None)
-        })?;
         mcp_standard_headers::validate_tool_params(downstream_headers, request.arguments.as_ref(), tool_schema)
             .map_err(|message| ErrorData::header_mismatch(message, None))?;
     }
