@@ -41,9 +41,9 @@ owns the official fixture, control-plane registration, Compose topology, server
 and client runners, result rendering, and transactional baseline handling. This
 repository keeps only the CI invocation, Make targets, and expected findings.
 
-The blocking CI job runs the modern client and modern server eras through the
-external dataplane. Selecting that lane also runs the fixture-direct server
-leg and the scoped external-dataplane client leg:
+The manually dispatched **Conformance** Actions workflow runs the modern client
+and modern server eras through the external dataplane. Selecting that lane also
+runs the fixture-direct server leg and the scoped external-dataplane client leg:
 
 ```bash
 cargo binstall cf-integration@0.1.0 --no-confirm
