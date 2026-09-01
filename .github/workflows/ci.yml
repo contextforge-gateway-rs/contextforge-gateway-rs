@@ -81,6 +81,23 @@ jobs:
       - name: Build the workspace
         run: cargo build --locked --workspace --all-features
 
+      - name: Prepare the conformance binary artifact
+        run: |
+          mkdir -p target/conformance
+          cp target/debug/contextforge-data-plane target/conformance/contextforge-data-plane
+          strip target/conformance/contextforge-data-plane
+          git rev-parse HEAD > target/conformance/source-revision
+
+      - name: Upload the conformance binary
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: contextforge-data-plane-conformance
+          path: |
+            target/conformance/contextforge-data-plane
+            target/conformance/source-revision
+          if-no-files-found: error
+          retention-days: 1
+
   bench:
     runs-on: ubuntu-latest
     steps:
