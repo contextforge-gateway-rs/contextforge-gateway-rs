@@ -5,10 +5,6 @@ on:
   issue_comment:
     types: [created]
 
-permissions:
-  actions: read
-  contents: read
-
 concurrency:
   group: conformance-pr-${{ github.event.issue.number }}
   cancel-in-progress: true
@@ -17,19 +13,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  acknowledge:
-    name: mark conformance pending
+  conformance:
+    name: conformance
     if: >-
       github.event.issue.pull_request &&
       github.event.comment.body == '/conformance' &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-    outputs:
-      head_sha: ${{ steps.revision.outputs.head_sha }}
-      merge_sha: ${{ steps.revision.outputs.merge_sha }}
     permissions:
+      actions: read
+      contents: read
       pull-requests: read
       statuses: write
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Resolve the exact PR revision
         id: revision
@@ -55,23 +51,12 @@ jobs:
           -f description='Conformance is running'
           -f target_url="$RUN_URL"
 
-  conformance:
-    name: conformance
-    needs: acknowledge
-    if: >-
-      always() &&
-      github.event.issue.pull_request &&
-      github.event.comment.body == '/conformance' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
       - name: Check out data plane
         uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.acknowledge.outputs.merge_sha }}
+          ref: ${{ steps.revision.outputs.merge_sha }}
 
       - uses: taiki-e/install-action@v2.75.27
         with:
@@ -95,42 +80,22 @@ jobs:
           node-version: 22
 
       - name: Run strict modern conformance
+        id: conformance
         env:
           CF_DATAPLANE_IMAGE: contextforge-data-plane:conformance
           CF_DATAPLANE_PULL_POLICY: never
           CF_DATAPLANE_REF: ""
         run: make conformance
 
-      - name: Upload conformance diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: conformance-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            .integration/conformance/
-            .integration/reports/
-          if-no-files-found: warn
-          include-hidden-files: true
-          retention-days: 7
-
-  report:
-    name: publish conformance result
-    if: >-
-      always() &&
-      needs.conformance.result != 'skipped'
-    needs: [acknowledge, conformance]
-    permissions:
-      statuses: write
-    runs-on: ubuntu-latest
-    steps:
       - name: Publish the final PR status
+        if: always() && steps.revision.outputs.head_sha != ''
         env:
-          DESCRIPTION: Conformance ${{ needs.conformance.result }}
+          DESCRIPTION: Conformance ${{ job.status }}
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ needs.acknowledge.outputs.head_sha }}
+          HEAD_SHA: ${{ steps.revision.outputs.head_sha }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          STATE: ${{ needs.conformance.result == 'success' && 'success' || needs.conformance.result == 'failure' && 'failure' || 'error' }}
+          STATE: ${{ job.status == 'success' && 'success' || job.status == 'failure' && 'failure' || 'error' }}
         run: >-
           gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA"
           -f state="$STATE"
