@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use contextforge_data_plane_apis::{
     User,
@@ -54,6 +57,37 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
     selected
 }
 
+pub fn construct_services(backend_name: &str, service_names: &[&str]) -> HashMap<String, (String, String)> {
+    let aliases: HashSet<NameAlias> =
+        service_names.iter().map(|n| NameAlias::new(n.to_string(), n.to_string())).collect();
+    let mut result: HashMap<String, (String, String)> = HashMap::new();
+
+    for alias in aliases {
+        result.insert(
+            alias.get_downstream_prefixed_name().to_string(),
+            (backend_name.to_string(), alias.get_upstream_name().to_string()),
+        );
+    }
+    result
+}
+
+fn create_services_from_ports(ports: &[u16], service_names: &[&str]) -> HashMap<String, (String, String)> {
+    let mut services = HashMap::new();
+
+    for &port in ports {
+        let backend_id = backend_id(port);
+
+        for &service_name in service_names {
+            let key = format!("{backend_id}-{service_name}");
+            let value = (backend_id.clone(), service_name.to_string());
+
+            services.insert(key, value);
+        }
+    }
+
+    services
+}
+
 async fn create_gateway_with_four_counters_and_custom_config(
     user: &str,
     config: Config,
@@ -91,14 +125,34 @@ async fn create_gateway_with_four_counters_and_custom_config(
     let mut virtual_host_one_resource_uris = create_resource_uris(&gateway_one_ports);
     virtual_host_one_resource_uris.sort();
 
+    let gateway_one_tools = create_services_from_ports(&gateway_one_ports, MOCK_COUNTER_TOOL_NAMES);
+    let gateway_one_resources = create_services_from_ports(&gateway_one_ports, MOCK_COUNTER_RESOURCE_URIS);
+    let gateway_one_prompts = create_services_from_ports(&gateway_one_ports, MOCK_COUNTER_PROMPT_NAMES);
+
     let user_key = User::new(user);
 
     let virtual_host_one_id = uuid::Uuid::new_v4().to_string();
     let virtual_host_two_id = uuid::Uuid::new_v4().to_string();
 
     let virtual_hosts = HashMap::from([
-        (virtual_host_one_id.clone(), VirtualHost { backends: gateway_one_backends }),
-        (virtual_host_two_id, VirtualHost { backends: gateway_two_backends }),
+        (
+            virtual_host_one_id.clone(),
+            VirtualHost {
+                backends: gateway_one_backends,
+                tools: gateway_one_tools,
+                resources: gateway_one_resources,
+                prompts: gateway_one_prompts,
+            },
+        ),
+        (
+            virtual_host_two_id,
+            VirtualHost {
+                backends: gateway_two_backends,
+                tools: HashMap::new(),
+                resources: HashMap::new(),
+                prompts: HashMap::new(),
+            },
+        ),
     ]);
 
     let user_config = UserConfig { virtual_hosts };
