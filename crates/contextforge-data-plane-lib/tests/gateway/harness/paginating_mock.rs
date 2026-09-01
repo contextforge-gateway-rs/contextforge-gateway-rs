@@ -1,6 +1,10 @@
-#![allow(dead_code, reason = "shared test fixture used by separate integration test targets")]
-
-use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
+use rmcp::{
+    ErrorData as McpError, RoleServer, ServerHandler,
+    model::{
+        Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+    },
+    service::RequestContext,
+};
 
 /// Backend cursor the mock uses to signal "page 2 available".
 const PAGE2_CURSOR: &str = "page2";
@@ -33,6 +37,23 @@ impl ServerHandler for PaginatingServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_protocol_version(ProtocolVersion::V_2024_11_05)
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
+    }
+
+    fn list_tools(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send {
+        let result = match request.and_then(|params| params.cursor) {
+            None => {
+                let mut result = ListToolsResult::with_all_items(Self::page1_tools());
+                result.next_cursor = Some(PAGE2_CURSOR.to_owned());
+                Ok(result)
+            },
+            Some(cursor) if cursor == PAGE2_CURSOR => Ok(ListToolsResult::with_all_items(Self::page2_tools())),
+            Some(cursor) => Err(McpError::invalid_params(format!("unknown pagination cursor: {cursor}"), None)),
+        };
+        std::future::ready(result)
     }
 }

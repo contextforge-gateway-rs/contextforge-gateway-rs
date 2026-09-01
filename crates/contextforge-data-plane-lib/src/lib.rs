@@ -70,7 +70,7 @@ pub struct Gateway {
 impl Gateway {
     pub async fn run_gateway(self) -> Result<()> {
         let config = self.config.clone();
-        let app = self.build_app().await?;
+        let app = self.into_router().await?;
 
         let mut handlers = vec![];
 
@@ -98,7 +98,11 @@ impl Gateway {
         Ok(())
     }
 
-    async fn build_app(self) -> Result<axum::Router> {
+    /// Builds the complete gateway application without binding a network listener.
+    ///
+    /// This supports embedding the dataplane in an existing Axum server and lets
+    /// callers bind listeners before starting the service.
+    pub async fn into_router(self) -> Result<axum::Router> {
         let Gateway { config, session_manager, user_config_store_type, plugin_runtime, authorization_service } = self;
         let user_config_store = match user_config_store_type {
             UserConfigStoreType::Redis => Arc::new(get_config_store(&config).await?),
@@ -212,7 +216,7 @@ mod tests {
             .with_session_manager(Arc::new(LocalSessionManager::default()))
             .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(UnusedConfigStore)))
             .build()
-            .build_app()
+            .into_router()
             .await
             .expect("Expecting this to work");
         let request = Request::builder()

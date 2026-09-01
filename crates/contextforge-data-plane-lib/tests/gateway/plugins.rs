@@ -1,10 +1,7 @@
-mod support;
-
 use std::sync::{Arc, Mutex as StdMutex};
 
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use cpex::cpex_core::cmf::Role;
-use cpex::cpex_core::config::CpexConfig;
 use cpex::cpex_core::hooks::types::cmf_hook_names;
 use rmcp::{
     ClientHandler,
@@ -17,7 +14,7 @@ use rmcp::{
 };
 use serde_json::{Map, Value, json};
 
-use support::{
+use crate::harness::{
     BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE,
     PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT,
     REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID, TestPlugin, error_code,
@@ -149,43 +146,6 @@ fn raw_tool_call(tool_name: &str, request_id: i64, progress_token: &str) -> Valu
         "jsonrpc": "2.0",
         "id": request_id
     })
-}
-
-fn fake_aws_access_key(suffix: &str) -> String {
-    ["AKIA", suffix].concat()
-}
-
-fn sum_request_with_secret(secret_field: &str, secret: String) -> CallToolRequestParams {
-    let mut request = sum_request("sum", 1, 2);
-    request
-        .arguments
-        .as_mut()
-        .expect("sum request has arguments")
-        .insert(secret_field.to_owned(), Value::String(secret));
-    request
-}
-
-fn reflect_text_request(text: String) -> CallToolRequestParams {
-    CallToolRequestParams::new("reflect_text")
-        .with_arguments(Map::from_iter([("text".to_owned(), Value::String(text))]))
-}
-
-async fn runtime_with_secrets_detection(hooks: Vec<&'static str>, plugin_config: Value) -> Arc<CpexRuntimeRegistry> {
-    let mut runtime = CpexRuntimeRegistry::default();
-    runtime
-        .register_factory(cpex_secrets_detection::KIND, Box::new(cpex_secrets_detection::SecretsDetectionFactory))
-        .expect("secrets detection factory registers");
-    let config: CpexConfig = serde_json::from_value(json!({
-        "plugins": [{
-            "name": "secrets-detection",
-            "kind": cpex_secrets_detection::KIND,
-            "hooks": hooks,
-            "config": plugin_config,
-        }]
-    }))
-    .expect("secrets detection CPEX config parses");
-    runtime.apply_config(Some(config)).await.expect("secrets detection runtime applies");
-    Arc::new(runtime)
 }
 
 fn sse_data_values(body: &str) -> Vec<Value> {
@@ -401,10 +361,10 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 async fn stateless_tool_call_forwards_validated_parameter_headers_unchanged() {
     let gateway =
         start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
+    let service = crate::harness::connect_modern_client(
         gateway.gateway_url(),
         client_with_parameter_headers("1", "2"),
-        support::modern_client_info(),
+        crate::harness::modern_client_info(),
     )
     .await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.expect("stateless tool call succeeds");
@@ -419,10 +379,10 @@ async fn stateless_tool_call_forwards_validated_parameter_headers_unchanged() {
 async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected() {
     let gateway =
         start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
+    let service = crate::harness::connect_modern_client(
         gateway.gateway_url(),
         client_with_parameter_headers("9", "2"),
-        support::modern_client_info(),
+        crate::harness::modern_client_info(),
     )
     .await;
     let error = service.call_tool(sum_request("sum", 1, 2)).await.expect_err("mismatched header is rejected");
@@ -438,10 +398,10 @@ async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected() {
 async fn stateless_tool_call_without_required_parameter_headers_is_rejected() {
     let gateway =
         start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
+    let service = crate::harness::connect_modern_client(
         gateway.gateway_url(),
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
+        crate::harness::create_client(TEST_USER_ID),
+        crate::harness::modern_client_info(),
     )
     .await;
 
@@ -457,10 +417,10 @@ async fn stateless_tool_call_without_required_parameter_headers_is_rejected() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_call_without_published_schema_reaches_backend() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
+    let service = crate::harness::connect_modern_client(
         gateway.gateway_url(),
         client_with_parameter_headers("1", "2"),
-        support::modern_client_info(),
+        crate::harness::modern_client_info(),
     )
     .await;
     let error = service.call_tool(CallToolRequestParams::new("missing_schema_tool")).await.unwrap_err();
@@ -478,26 +438,12 @@ async fn stateless_tool_call_without_published_schema_reaches_backend() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn legacy_tool_call_without_published_schema_reaches_backend() {
-    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = gateway.connect(TEST_USER_ID).await;
-    let error = service.call_tool(CallToolRequestParams::new("missing_schema_tool")).await.unwrap_err();
-    let rmcp::service::ServiceError::McpError(error) = error else {
-        panic!("expected backend MCP error, got {error:?}");
-    };
-
-    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
-    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
-    assert_eq!("missing_schema_tool", backend_calls[0].tool_name);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_tool_error_round_trips() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = support::connect_modern_client(
+    let service = crate::harness::connect_modern_client(
         gateway.gateway_url(),
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
+        crate::harness::create_client(TEST_USER_ID),
+        crate::harness::modern_client_info(),
     )
     .await;
     let error = service.call_tool(CallToolRequestParams::new("missing_tool")).await.unwrap_err();
@@ -509,24 +455,23 @@ async fn stateless_tool_error_round_trips() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn stateless_alias_and_namespaced_tool_names_route() {
-    let gateway_port = support::create_ports(1)[0];
-    let support::ListToolsGatewaySettings { handle, gateway_url, expected_tool_names, .. } =
-        support::create_gateway_with_four_counters(TEST_USER_ID, support::plaintext_config(gateway_port))
-            .await
-            .expect("gateway starts");
-    let service = support::connect_modern_client(
-        &gateway_url,
-        support::create_client(TEST_USER_ID),
-        support::modern_client_info(),
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = crate::harness::connect_modern_client(
+        gateway.gateway_url(),
+        crate::harness::create_client(TEST_USER_ID),
+        crate::harness::modern_client_info(),
     )
     .await;
-    let alias = expected_tool_names.iter().find(|name| name.ends_with("sum")).expect("sum alias is advertised");
 
-    let alias_result = service.call_tool(sum_request(alias, 1, 2)).await.expect("alias routes");
-    let namespaced_result = service.call_tool(sum_request(alias, 3, 4)).await.expect("namespace routes");
+    let alias_result = service.call_tool(sum_request("sum", 1, 2)).await.expect("control-plane alias routes");
+    let namespaced_result = service
+        .call_tool(sum_request(format!("{}-sum", gateway.backend_name), 3, 4))
+        .await
+        .expect("namespaced tool routes");
     assert_eq!("3", text(&alias_result));
     assert_eq!("7", text(&namespaced_result));
-    handle.abort();
+    drop(service);
+    gateway.shutdown().await.expect("gateway shuts down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -534,8 +479,12 @@ async fn stateless_concurrent_progress_calls_remain_request_scoped() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let client = RecordingClient::default();
     let progress = Arc::clone(&client.progress);
-    let service =
-        support::connect_modern_client(gateway.gateway_url(), support::create_client(TEST_USER_ID), client).await;
+    let service = crate::harness::connect_modern_client(
+        gateway.gateway_url(),
+        crate::harness::create_client(TEST_USER_ID),
+        client,
+    )
+    .await;
     let first = send_progress_call(&service, "progress_sum").await;
     let first_progress_token = first.progress_token.clone();
     let second = send_progress_call(&service, "progress_sum").await;
@@ -561,149 +510,16 @@ async fn stateless_concurrent_progress_calls_remain_request_scoped() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn secrets_detection_pre_hook_redacts_tool_arguments_before_backend_call() {
-    let runtime = runtime_with_secrets_detection(
-        vec![cmf_hook_names::TOOL_PRE_INVOKE],
-        json!({
-            "redact": true,
-            "redaction_text": "[redacted]",
-            "block_on_detection": false,
-        }),
-    )
-    .await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-
-    let result = service
-        .call_tool(sum_request_with_secret("credential", fake_aws_access_key("1111111111111111")))
-        .await
-        .expect("secret argument is redacted and call succeeds");
-
-    assert_eq!("3", text(&result));
-    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
-    assert_eq!(1, backend_calls.len());
-    assert_eq!(
-        Some(&Value::from("[redacted]")),
-        backend_calls[0].args.as_ref().and_then(|args| args.get("credential"))
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn secrets_detection_clean_tool_payload_passes_through_unchanged() {
-    let runtime = runtime_with_secrets_detection(
-        vec![cmf_hook_names::TOOL_PRE_INVOKE, cmf_hook_names::TOOL_POST_INVOKE],
-        json!({
-            "redact": true,
-            "redaction_text": "[redacted]",
-            "block_on_detection": true,
-        }),
-    )
-    .await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-
-    let result =
-        service.call_tool(sum_request("sum", 1, 2)).await.expect("clean argument payload passes through unchanged");
-
-    let result_text = text(&result);
-    assert_eq!("3", result_text.as_str());
-    assert!(!result_text.contains("[redacted]"));
-    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
-    assert_eq!(1, backend_calls.len());
-    assert_eq!("sum", backend_calls[0].tool_name);
-    let args = backend_calls[0].args.as_ref().expect("backend call has args");
-    assert_eq!(2, args.len());
-    assert_eq!(Some(&Value::from(1)), args.get("a"));
-    assert_eq!(Some(&Value::from(2)), args.get("b"));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn secrets_detection_pre_hook_blocks_tool_arguments_before_backend_call() {
-    let runtime = runtime_with_secrets_detection(
-        vec![cmf_hook_names::TOOL_PRE_INVOKE],
-        json!({
-            "redact": false,
-            "block_on_detection": true,
-        }),
-    )
-    .await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-
-    let error = service
-        .call_tool(sum_request_with_secret("credential", fake_aws_access_key("2222222222222222")))
-        .await
-        .expect_err("secret argument blocks the call");
-
-    assert_eq!(ErrorCode::INVALID_REQUEST, error_code(error));
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn secrets_detection_post_hook_redacts_tool_result_before_client_response() {
-    let runtime = runtime_with_secrets_detection(
-        vec![cmf_hook_names::TOOL_POST_INVOKE],
-        json!({
-            "redact": true,
-            "redaction_text": "[redacted]",
-            "block_on_detection": false,
-        }),
-    )
-    .await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-
-    let result = service
-        .call_tool(reflect_text_request(fake_aws_access_key("3333333333333333")))
-        .await
-        .expect("secret result is redacted and call succeeds");
-
-    assert_eq!("[redacted]", text(&result));
-    assert_eq!(1, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn secrets_detection_pre_hook_respects_field_allowlist() {
-    let runtime = runtime_with_secrets_detection(
-        vec![cmf_hook_names::TOOL_PRE_INVOKE],
-        json!({
-            "redact": true,
-            "redaction_text": "[redacted]",
-            "block_on_detection": false,
-            "field_allowlist": ["credential"],
-        }),
-    )
-    .await;
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-    let ignored_secret = fake_aws_access_key("4444444444444444");
-    let mut request = sum_request_with_secret("credential", fake_aws_access_key("5555555555555555"));
-    request
-        .arguments
-        .as_mut()
-        .expect("sum request has arguments")
-        .insert("ignored".to_owned(), Value::String(ignored_secret.clone()));
-
-    let result = service.call_tool(request).await.expect("allowed field is redacted");
-
-    assert_eq!("3", text(&result));
-    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
-    let args = backend_calls[0].args.as_ref().expect("backend call has args");
-    assert_eq!(Some(&Value::from("[redacted]")), args.get("credential"));
-    assert_eq!(Some(&Value::from(ignored_secret)), args.get("ignored"));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn pre_hook_rewrites_payload_without_changing_forwarded_parameter_headers() {
     let plugin = Arc::new(TestPlugin::new("pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
     let observations = plugin.observations();
     let runtime = runtime_with_pre(plugin).await;
 
     let gateway = start_gateway_with_parameter_headers(TEST_USER_ID, true, runtime).await;
-    let service = support::connect_modern_client(
+    let service = crate::harness::connect_modern_client(
         gateway.gateway_url(),
         client_with_parameter_headers("1", "2"),
-        support::modern_client_info(),
+        crate::harness::modern_client_info(),
     )
     .await;
     let result = service.call_tool(sum_request("sum", 1, 2)).await.unwrap();
@@ -792,26 +608,6 @@ async fn post_hook_deny_drops_progress_notifications_without_failing_call() {
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(5, observations.post_calls);
     assert!(progress.lock().expect("progress lock poisoned").is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[ignore = "2026-07-28 protocol transition"]
-async fn downstream_cancellation_is_relayed_to_backend() {
-    let gateway = start_gateway(TEST_USER_ID, true, Arc::new(CpexRuntimeRegistry::default())).await;
-    let service = gateway.connect(TEST_USER_ID).await;
-
-    let request = CallToolRequestParams::new("wait_for_cancellation");
-    let handle = service
-        .send_cancellable_request(
-            ClientRequest::CallToolRequest(Request::new(request)),
-            PeerRequestOptions::no_options(),
-        )
-        .await
-        .expect("wait_for_cancellation request is sent");
-    wait_for_event_count(&gateway.backend_state.calls, 1).await;
-
-    handle.cancel(Some("client gave up".to_owned())).await.expect("cancellation is sent");
-    wait_for_event_count(&gateway.backend_state.cancellations, 1).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

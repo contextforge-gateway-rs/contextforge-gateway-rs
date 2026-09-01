@@ -13,26 +13,50 @@ CI runs these on every change; run them locally before pushing:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo nextest run --locked --workspace
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo nextest run --locked --workspace --all-features
+cargo shear --check-test-targets --deny-warnings --locked
 ```
 
 Use `cargo test` when nextest is unavailable. For wiki changes, also run `mdbook build _context/wiki` and `mdbook test _context/wiki`.
 
-Protocol-sensitive tests and fixtures must cover MCP `2026-07-28` and `2025-11-25` in all four incoming-client/selected-backend combinations. The same-version paths are supported directly; the two cross-version paths are best effort and tests must cover both successful adaptation and explicit failure for semantics that cannot be translated without state. Every case must prove request independence: no required `Mcp-Session-Id`, session affinity, or retained backend transport. Keep `2026-07-28` coverage for `server/discover` and required per-request client metadata, and retain `initialize` coverage as a stateless compatibility request. SSE remains outside the external-dataplane contract.
+New protocol-sensitive tests target MCP `2026-07-28`, connect through
+`server/discover`, and send the required per-request client metadata. A small
+`compatibility` module retains the active `2025-11-25`/`initialize` cases until
+that production compatibility surface is removed in a dedicated change; do not
+add new behavior to that lane. Every case must remain request-independent, with
+no required `Mcp-Session-Id`, session affinity, or retained backend transport.
+SSE remains outside the external-dataplane contract.
 
 ## In-Repo Integration Tests
 
-`crates/contextforge-data-plane-lib/tests/` exercises the gateway against in-process mock MCP backends (shared helpers live in `tests/support/`):
+`crates/contextforge-data-plane-lib/tests/gateway.rs` is the single library
+integration target. It exercises the public gateway API against in-process MCP
+backends without recompiling a shared support tree for every feature file.
 
-| Test file | Covers |
+| Area | Covers |
 | --- | --- |
-| `gateway_list_tools.rs` | List fanout, prefixing, and merged output. |
-| `gateway_prompts.rs` | Prompt listing and prefixed `get_prompt` routing. |
-| `gateway_resource_templates.rs` | Template fanout with prefixed names and URI templates, plus `read_resource` round-trips. |
-| `gateway_plugins.rs` | Request-scoped parameter-header validation/forwarding, CPEX pre/post tool hooks around `call_tool` and stream events, and prompt hooks around `get_prompt`. |
+| `gateway/{tools,prompts,resources,subscriptions}.rs` | Active routed operations and exact routing failures. |
+| `gateway/plugins.rs` | Gateway-owned CPEX ordering, mutation, denial, progress, and prompt seams using deterministic recording plugins. Concrete plugin behavior stays in each plugin crate. |
+| `gateway/harness/` | Authentication, modern and compatibility clients, in-memory configuration, concrete mock backends, and owned server fixtures. |
+| `gateway/future_contracts/` | Deferred fanout, pagination, TLS, completions, subscriptions, and cancellation contracts. |
 
-These run in `cargo nextest run` with no Docker dependencies.
+`TestServer` binds `127.0.0.1:0` before spawning, uses cooperative
+cancellation, and has a `Drop` fallback. `GatewayFixture` owns the gateway and
+all backend servers. Tests should request the minimum topology: one virtual host
+and one backend by default, with extra backends declared explicitly by the case.
+
+The workspace currently keeps 13 ignored tests: 11 library future contracts
+and two real-process Redis/binary E2E tests. Ignored tests are not dead tests:
+keep them compiling, keep their intended assertions, give each a concrete
+blocker reason, and list them with:
+
+```bash
+cargo nextest list --locked --workspace --all-features --run-ignored only
+```
+
+The two binary E2E tests and `tests/conformance/` remain separate infrastructure
+boundaries. Active in-process tests run with no Docker or Redis dependency.
 
 Parameter-header integration tests verify that calls without a published tool
 schema skip local `Mcp-Param-*` validation and still reach the backend. Unit and
