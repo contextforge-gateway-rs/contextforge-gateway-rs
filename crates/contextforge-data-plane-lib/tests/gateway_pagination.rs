@@ -1,9 +1,6 @@
 mod support;
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
@@ -32,9 +29,6 @@ fn paginating_backend(port: u16) -> BackendMCPGateway {
         add_headers: HashMap::new(),
         remove_headers: Vec::new(),
         tool_schemas: HashMap::new(),
-        tool_name_aliases: HashSet::new(),
-        resource_uri_aliases: HashSet::new(),
-        prompt_name_aliases: HashSet::new(),
         completion: HashMap::new(),
     }
 }

@@ -1,11 +1,8 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, NameAlias, ServiceRoute, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, ServiceRoute, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
@@ -58,17 +55,12 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
 }
 
 pub fn construct_services(backend_name: &str, service_names: &[&str]) -> HashMap<String, ServiceRoute> {
-    let aliases: HashSet<NameAlias> =
-        service_names.iter().map(|n| NameAlias::new(n.to_string(), n.to_string())).collect();
-    let mut result: HashMap<String, ServiceRoute> = HashMap::new();
-
-    for alias in aliases {
-        result.insert(
-            alias.get_downstream_prefixed_name().to_owned(),
-            ServiceRoute { backend_name: backend_name.to_owned(), upstream_name: alias.get_upstream_name().to_owned() },
-        );
-    }
-    result
+    service_names
+        .iter()
+        .map(|&name| {
+            (name.to_owned(), ServiceRoute { backend_name: backend_name.to_owned(), upstream_name: name.to_owned() })
+        })
+        .collect()
 }
 
 fn create_services_from_ports(ports: &[u16], service_names: &[&str]) -> HashMap<String, ServiceRoute> {
@@ -235,28 +227,6 @@ fn create_backends(
                     tool_schemas: MOCK_COUNTER_TOOL_NAMES
                         .iter()
                         .map(|name| ((*name).to_owned(), serde_json::Map::new()))
-                        .collect(),
-                    tool_name_aliases: MOCK_COUNTER_TOOL_NAMES
-                        .iter()
-                        .map(|tool_name| {
-                            let backend_id = backend_id.clone();
-                            NameAlias::new(format!("{backend_id}-{tool_name}"), tool_name.to_string())
-                        })
-                        .collect(),
-
-                    resource_uri_aliases: MOCK_COUNTER_RESOURCE_URIS
-                        .iter()
-                        .map(|resource_uri| {
-                            let backend_id = backend_id.clone();
-                            NameAlias::new(format!("{backend_id}-{resource_uri}"), resource_uri.to_string())
-                        })
-                        .collect(),
-                    prompt_name_aliases: MOCK_COUNTER_PROMPT_NAMES
-                        .iter()
-                        .map(|prompt_name| {
-                            let backend_id = backend_id.clone();
-                            NameAlias::new(format!("{backend_id}-{prompt_name}"), prompt_name.to_string())
-                        })
                         .collect(),
 
                     completion: HashMap::new(),
