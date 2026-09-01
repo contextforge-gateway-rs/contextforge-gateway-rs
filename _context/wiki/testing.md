@@ -35,7 +35,11 @@ Protocol-sensitive tests and fixtures must cover MCP `2026-07-28` and `2025-11-2
 These run in `cargo nextest run` with no Docker dependencies.
 
 Parameter-header integration tests verify that calls without a published tool
-schema skip local `Mcp-Param-*` validation and still reach the backend.
+schema skip local `Mcp-Param-*` validation and still reach the backend. Unit and
+integration coverage also includes missing, malformed, unexpected, repeated,
+and mismatched recognized headers; Base64 encoding; nested paths; numerically
+equivalent integers; and invalid annotation names, types, duplicates, and
+non-`properties` paths.
 
 ## MCP Conformance
 

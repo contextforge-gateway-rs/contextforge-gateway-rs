@@ -139,7 +139,12 @@ BackendMCPGateway
 annotations without calling backend `tools/list`. The control plane may omit the
 field or individual unannotated tools. Without a published schema, parameter
 headers are forwarded as unrecognized intermediary headers and are not locally
-validated.
+validated. A published annotation must name a non-empty, case-insensitively
+unique HTTP token on a `string`, `integer`, or `boolean` property reachable from
+the schema root through `properties` keys only. Nested properties use their
+exact property path. For a recognized annotation, a non-null argument requires
+an equal header; an absent or null argument requires the header to be absent.
+Integer values are limited to the IEEE 754 safe range.
 
 **Header apply order:** `passthrough_headers` → `add_headers` (override passthrough) → `remove_headers` (applied last).
 

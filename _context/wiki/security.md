@@ -95,9 +95,14 @@ Backend header policy cannot add, remove, or replace MCP standard or parameter
 headers. For modern `tools/call`, the dataplane resolves the authenticated
 user, virtual host, backend, and original tool name before validating
 recognized `Mcp-Param-*` against the control-plane-published input schema. A
-recognized header/body mismatch fails closed with JSON-RPC `-32020`. When no
-schema is published, parameter headers are unrecognized and forwarded without
-local validation; their absence does not block the tool call.
+recognized missing, malformed, unexpected, conflicting repeated, or mismatched header fails closed
+with JSON-RPC `-32020`. Schema annotations also fail closed unless their names
+are non-empty, case-insensitively unique HTTP tokens, their properties have an
+allowed primitive type, and their paths are statically reachable through
+`properties` only. Nested values are checked at their exact path, and integers
+must remain in the IEEE 754 safe range. When no schema is published, parameter
+headers are unrecognized and forwarded without local validation; their absence
+does not block the tool call.
 Validation does not call backend `tools/list`. Parameter values are forwarded
 unchanged, while RMCP regenerates method, routed-name, and protocol-version
 headers. If a plugin later changes an annotated argument, the original header

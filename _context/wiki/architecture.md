@@ -85,6 +85,10 @@ backend and original tool name. When `UserConfig` contains that tool's input
 schema, it validates recognized `Mcp-Param-*` headers against the request body;
 it does not call backend `tools/list`. Without a published schema, parameter
 headers are unrecognized and forwarded without local validation.
+Published annotations are validated for MCP token, uniqueness, primitive type,
+and properties-only reachability constraints. Nested annotations read the exact
+argument path. Present non-null values require a matching header; absent or
+null values require no header.
 Parameter headers are forwarded unchanged; request plugins run afterward, so a
 plugin that changes an annotated argument also owns any resulting upstream
 mismatch.
