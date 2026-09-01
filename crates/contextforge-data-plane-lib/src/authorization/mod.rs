@@ -91,6 +91,7 @@ pub struct Idp {
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationClaims {
     pub iss: String,
+    pub jti: String,
     pub aud: String,
     pub exp: u64,
     pub iat: Option<u64>,
@@ -106,6 +107,13 @@ pub struct AuthorizationClaims {
     pub groups: Option<Vec<String>>,
     pub roles: Option<Vec<String>>,
     pub idp_unique_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teams: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Scopes>,
+    pub token_use: Option<String>,
 }
 
 impl AuthorizationClaims {
@@ -119,6 +127,7 @@ impl AuthorizationClaims {
             aud: audience,
             exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
             iat: Some(now),
+            nbf: Some(now - Duration::minutes(5).num_seconds().cast_unsigned()),
             idp_unique_id: user_id.to_owned(),
             tenant_id: tenant_id.to_owned(),
             groups: Some(vec!["team_awesome".to_owned()]),

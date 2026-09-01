@@ -1,5 +1,3 @@
-use std::fs;
-
 use axum::{
     Json,
     body::Body,
@@ -7,7 +5,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{Router, get, post},
 };
-use chrono::Duration;
 use contextforge_data_plane_apis::{User as CFUser, user_store::UserConfig};
 use http::{
     StatusCode,
@@ -15,55 +12,19 @@ use http::{
 };
 use jsonwebtoken::jwk::{Jwk, JwkSet};
 use serde::Deserialize;
-use uuid::Uuid;
+use std::fs;
 
-//use tracing::debug;
-use crate::{
-    common::{ContextForgeClaims, ContextForgeDataPlaneAppState, Scopes, User},
-    const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
-};
+use crate::{authorization::AuthorizationClaims, common::ContextForgeDataPlaneAppState};
 
 const DEFAULT_TOKEN_EMAIL: &str = "admin@example.com";
 const JWKS_CACHE_CONTROL: &str = "public, max-age=300, must-revalidate";
 const TOKEN_PATH: &str = "/admin/tokens/{tenant_id}/{user_id}";
 const JWKS_PATH: &str = "/admin/.well-known/jwks.json";
-const CONFIGURE_USER_PATH: &str = "admin/userconfigs/{user_id}";
+const CONFIGURE_USER_PATH: &str = "/admin/userconfigs/{user_id}";
 
 #[derive(Debug, Deserialize)]
 pub struct TokenQuery {
     email: Option<String>,
-}
-
-impl ContextForgeClaims {
-    pub fn new(user_id: &str, user_email: &str) -> Self {
-        let audience = CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
-        let start = std::time::SystemTime::now();
-        let now = start.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
-        Self {
-            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
-            sub: user_id.to_owned(),
-            aud: audience,
-            exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
-            iat: Some(now),
-            jti: Uuid::new_v4().to_string(),
-            token_use: Some("api".to_owned()),
-            teams: Some(vec!["team_awesome".to_owned()]),
-            user: User::builder()
-                .email(user_email.to_owned())
-                .auth_provider("api_token".to_owned())
-                .full_name(Some("API Token User".to_owned()))
-                .is_admin(true)
-                .build(),
-            scopes: Some(
-                Scopes::builder()
-                    .server_id(Some("my_id".to_owned()))
-                    .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
-                    .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
-                    .time_restrictions(None)
-                    .build(),
-            ),
-        }
-    }
 }
 
 async fn get_jwks(State(state): State<ContextForgeDataPlaneAppState>) -> Response {
@@ -101,7 +62,7 @@ pub async fn health() -> Response {
 
 pub async fn get_token(
     State(state): State<ContextForgeDataPlaneAppState>,
-    Path(user_id): Path<String>,
+    Path((tenant_id, user_id)): Path<(String, String)>,
     Query(query): Query<TokenQuery>,
 ) -> Response {
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(
@@ -110,10 +71,11 @@ pub async fn get_token(
     .expect("Expecting this to work");
 
     let user_email = query.email.as_deref().unwrap_or(DEFAULT_TOKEN_EMAIL);
-    let claims = ContextForgeClaims::new(&user_id, user_email);
+    let mut claims = AuthorizationClaims::new(&user_id, user_email);
+    claims.tenant_id = tenant_id;
     let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
     header.kid = Some("test".to_owned());
-    let token = jsonwebtoken::encode::<ContextForgeClaims>(&header, &claims, &key).expect("Expecting this to work");
+    let token = jsonwebtoken::encode::<AuthorizationClaims>(&header, &claims, &key).expect("Expecting this to work");
 
     token.into_response()
 }
@@ -143,11 +105,11 @@ pub async fn configure_user(
 mod tests {
     use serde_json::Value;
 
-    use super::ContextForgeClaims;
+    use crate::authorization::AuthorizationClaims;
 
     #[test]
     fn new_claims_keeps_subject_and_email_metadata_separate() {
-        let claims = ContextForgeClaims::new("11111111-1111-1111-1111-111111111111", "admin@example.com");
+        let claims = AuthorizationClaims::new("11111111-1111-1111-1111-111111111111", "admin@example.com");
 
         let payload = serde_json::to_value(claims).expect("claims should serialize");
 

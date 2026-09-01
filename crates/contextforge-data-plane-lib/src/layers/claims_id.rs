@@ -36,6 +36,9 @@ pub async fn claims_layer(
 #[cfg(test)]
 mod test {
 
+    const GATEWAY_AUDIENCE: &str = "audience";
+    const GATEWAY_ISSUER: &str = "issuer";
+
     use std::sync::{Arc, Once};
 
     use async_trait::async_trait;
@@ -49,9 +52,8 @@ mod test {
 
     use crate::{
         Config,
-        authorization::{AuthorizationClaims, AuthorizationService},
-        common::{self, ContextForgeClaims, ContextForgeDataPlaneAppState, Scopes},
-        const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
+        authorization::{AuthorizationClaims, AuthorizationService, Scopes},
+        common::ContextForgeDataPlaneAppState,
         layers::claims_id::claims_layer,
         user_config_store::{ConfigStoreError, UserConfigStore},
     };
@@ -73,26 +75,25 @@ mod test {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs()
     }
 
-    fn active_test_claims() -> ContextForgeClaims {
+    fn active_test_claims() -> AuthorizationClaims {
         let now = now_epoch_seconds();
         let user_id = "11111111-1111-1111-1111-111111111111".to_owned();
-        let user_email = "admin@example.com".to_owned();
 
-        ContextForgeClaims {
-            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
+        AuthorizationClaims {
+            iss: GATEWAY_ISSUER.to_owned(),
             sub: user_id.clone(),
-            aud: CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned(),
+            aud: GATEWAY_AUDIENCE.to_owned(),
             exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
             iat: Some(now),
             jti: Uuid::new_v4().to_string(),
             token_use: Some("api".to_owned()),
             teams: Some(vec!["team_awesome".to_owned()]),
-            user: common::User::builder()
-                .email(user_email)
-                .auth_provider("api_token".to_owned())
-                .full_name(Some("API Token User".to_owned()))
-                .is_admin(true)
-                .build(),
+            user: Some(
+                crate::authorization::User::builder()
+                    .tenant_id("team_awesome".to_owned())
+                    .user_id(user_id.clone())
+                    .build(),
+            ),
             scopes: Some(
                 Scopes::builder()
                     .server_id(Some("my_id".to_owned()))
@@ -101,14 +102,15 @@ mod test {
                     .time_restrictions(None)
                     .build(),
             ),
+            ..Default::default()
         }
     }
 
-    fn get_hmac_token_for_claims(claims: &ContextForgeClaims) -> String {
+    fn get_hmac_token_for_claims(claims: &AuthorizationClaims) -> String {
         let key = EncodingKey::from_secret(HMAC_SECRET);
         let header = Header::new(Algorithm::HS256);
 
-        encode::<ContextForgeClaims>(&header, claims, &key).expect("Expecting this to work")
+        encode::<AuthorizationClaims>(&header, claims, &key).expect("Expecting this to work")
     }
 
     struct MockedUserConfigStore;
@@ -197,20 +199,18 @@ mod test {
         CRYPTO.call_once(|| {
             _ = rustls::crypto::ring::default_provider().install_default();
         });
+        let user_id = "11111111-1111-1111-1111-111111111111".to_owned();
 
         async fn handle(_: HeaderMap) -> Response {
             Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
         }
 
-        let user_email = "admin@example.com".to_owned();
         let mut claims = active_test_claims();
         claims.token_use = None;
-        claims.user = common::User::builder()
-            .email(user_email)
-            .auth_provider("local".to_owned())
-            .full_name(None)
-            .is_admin(true)
-            .build();
+
+        claims.user = Some(
+            crate::authorization::User::builder().tenant_id("team_awesome".to_owned()).user_id(user_id.clone()).build(),
+        );
         let token = get_hmac_token_for_claims(&claims);
 
         let decoding_key = DecodingKey::from_secret(HMAC_SECRET);

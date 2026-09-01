@@ -48,22 +48,6 @@ pub struct Scopes {
     time_restrictions: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, TypedBuilder)]
-pub struct ContextForgeClaims {
-    pub sub: String,
-    pub jti: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_use: Option<String>,
-    pub iat: Option<u64>,
-    pub iss: String,
-    pub aud: String,
-    pub exp: u64,
-    pub teams: Option<Vec<String>>,
-    pub user: User,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scopes: Option<Scopes>,
-}
-
 pub type RedisClient = redis::Client;
 
 #[derive(Debug, Clone)]
@@ -283,6 +267,7 @@ pub struct Config {
     pub mcp_allowed_hosts: Option<Vec<Authority>>,
 
     #[cfg(feature = "with_tools")]
+    #[arg(long)]
     pub token_verification_private_key: PathBuf,
 }
 

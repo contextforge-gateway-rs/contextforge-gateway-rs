@@ -1,6 +1,5 @@
-mod claims;
 mod jwks_authorization;
+mod principal;
 mod remote_jwks;
-mod verification;
 
 pub use jwks_authorization::JwtAuthorizationService;

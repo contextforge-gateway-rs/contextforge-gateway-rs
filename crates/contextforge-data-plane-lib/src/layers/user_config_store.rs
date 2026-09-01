@@ -5,8 +5,7 @@ use http::{StatusCode, header};
 use tracing::{debug, info, warn};
 
 use crate::{
-    common::{ContextForgeClaims, ContextForgeDataPlaneAppState},
-    user_config_store::ConfigStoreError,
+    authorization::AuthorizationClaims, common::ContextForgeDataPlaneAppState, user_config_store::ConfigStoreError,
 };
 
 pub async fn user_config_store_layer(
@@ -16,7 +15,7 @@ pub async fn user_config_store_layer(
 ) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
-    let maybe_claims = request.extensions().get::<ContextForgeClaims>();
+    let maybe_claims = request.extensions().get::<AuthorizationClaims>();
     if let Some(claims) = maybe_claims {
         let subject = claims.sub.clone();
         debug!(

@@ -5,11 +5,11 @@ use crate::authorization::jwks::remote_jwks::RemoteJwks;
 use crate::authorization::{AuthorizationClaims, AuthorizationError, AuthorizationService};
 use async_trait::async_trait;
 
-use jsonwebtoken::{Validation, decode_header};
+use jsonwebtoken::decode_header;
 use url::Url;
 
 pub struct JwtAuthorizationService {
-    jwks: RemoteJwks,
+    jwks: RemoteJwks<super::principal::DefaultPrincipalExtractor>,
 }
 
 impl JwtAuthorizationService {
@@ -21,13 +21,7 @@ impl JwtAuthorizationService {
         let header = decode_header(token).ok()?;
         header.kid.as_deref()?;
 
-        let mut validation = Validation::new(header.alg);
-        validation.required_spec_claims.clear();
-        validation.validate_aud = false;
-        validation.validate_exp = true;
-        validation.validate_nbf = true;
-
-        self.jwks.decode(token, &header, &validation).await
+        self.jwks.validate(token, &header).await
     }
 }
 
@@ -48,7 +42,7 @@ impl AuthorizationService for JwtAuthorizationService {
         let claims = self.authorize_token(token).await;
 
         if claims.is_none() {
-            tracing::debug!(component = "Authorization", operation = "validate_saas_jwt", "SaaS JWT was rejected");
+            tracing::debug!("validate_saas_jwt  SaaS JWT was rejected");
         }
 
         claims

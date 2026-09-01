@@ -3,7 +3,7 @@ use http::request::Parts;
 use rmcp::{ErrorData, RoleServer, model::ErrorCode, service::RequestContext};
 use tracing::debug;
 
-use crate::{common::ContextForgeClaims, layers::virtual_host_id::VirtualHostId};
+use crate::{authorization::AuthorizationClaims, layers::virtual_host_id::VirtualHostId};
 
 pub struct AuthorizedCallValidator<'a> {
     call_name: &'a str,
@@ -15,10 +15,10 @@ impl<'a> AuthorizedCallValidator<'a> {
         Self { call_name, ctx }
     }
 
-    pub fn validate_stateless(self) -> Result<(&'a VirtualHost, &'a ContextForgeClaims), ErrorData> {
+    pub fn validate_stateless(self) -> Result<(&'a VirtualHost, &'a AuthorizationClaims), ErrorData> {
         let maybe_parts = self.ctx.extensions.get::<Parts>();
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
+        let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<AuthorizationClaims>());
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
         let call_name = self.call_name;
         let has_user_config = maybe_user_config.is_some();
