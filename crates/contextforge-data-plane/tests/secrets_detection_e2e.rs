@@ -4,7 +4,7 @@
 #![cfg(feature = "plugins")]
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     net::TcpStream as StdTcpStream,
     path::PathBuf,
@@ -385,9 +385,6 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                             ("sum".to_owned(), Map::new()),
                             ("reflect_text".to_owned(), Map::new()),
                         ]),
-                        tool_name_aliases: HashSet::new(),
-                        resource_uri_aliases: HashSet::new(),
-                        prompt_name_aliases: HashSet::new(),
                         completion: HashMap::new(),
                     },
                 )]),
