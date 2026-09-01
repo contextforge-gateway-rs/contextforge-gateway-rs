@@ -19,7 +19,7 @@ pub(super) async fn get_prompt(
 ) -> Result<GetPromptResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
-    let Some((backend_name, prompt_name)) = virtual_host.prompts.get(&request.name) else {
+    let Some(route) = virtual_host.prompts.get(&request.name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... prompt not found".into(),
@@ -27,8 +27,8 @@ pub(super) async fn get_prompt(
         });
     };
 
-    let backend_name = backend_name.to_owned();
-    let prompt_name = prompt_name.to_owned();
+    let backend_name = route.backend_name.clone();
+    let prompt_name = route.upstream_name.clone();
 
     let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
         code: ErrorCode::INVALID_PARAMS,

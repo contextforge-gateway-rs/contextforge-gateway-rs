@@ -417,6 +417,7 @@ async fn start_gateway_with_state(
                         )]),
                         tools: construct_services(&backend_name, TOOL_NAMES),
                         resources: construct_services(&backend_name, RESOURCE_URIS),
+                        resources_templates: HashMap::new(),
                         prompts: construct_services(&backend_name, PROMPT_NAMES),
                     },
                 )]),

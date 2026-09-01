@@ -72,14 +72,22 @@ pub struct BackendMCPGateway {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct ServiceRoute {
+    pub backend_name: String,
+    pub upstream_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualHost {
     pub backends: HashMap<String, BackendMCPGateway>,
     #[serde(default)]
-    pub tools: HashMap<String, (String, String)>,
+    pub tools: HashMap<String, ServiceRoute>,
     #[serde(default)]
-    pub resources: HashMap<String, (String, String)>,
+    pub resources: HashMap<String, ServiceRoute>,
     #[serde(default)]
-    pub prompts: HashMap<String, (String, String)>,
+    pub resources_templates: HashMap<String, ServiceRoute>,
+    #[serde(default)]
+    pub prompts: HashMap<String, ServiceRoute>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

@@ -97,7 +97,13 @@ async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
     let user_config = UserConfig {
         virtual_hosts: HashMap::from([(
             virtual_host_id.to_owned(),
-            VirtualHost { backends, tools: HashMap::new(), resources: HashMap::new(), prompts: HashMap::new() },
+            VirtualHost {
+                backends,
+                tools: HashMap::new(),
+                resources: HashMap::new(),
+                resources_templates: HashMap::new(),
+                prompts: HashMap::new(),
+            },
         )]),
     };
 
@@ -155,7 +161,13 @@ async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
     let user_config = UserConfig {
         virtual_hosts: HashMap::from([(
             virtual_host_id.to_owned(),
-            VirtualHost { backends, tools: HashMap::new(), resources: HashMap::new(), prompts: HashMap::new() },
+            VirtualHost {
+                backends,
+                tools: HashMap::new(),
+                resources: HashMap::new(),
+                resources_templates: HashMap::new(),
+                prompts: HashMap::new(),
+            },
         )]),
     };
 

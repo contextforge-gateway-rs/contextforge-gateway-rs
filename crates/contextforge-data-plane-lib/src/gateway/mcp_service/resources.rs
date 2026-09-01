@@ -22,7 +22,7 @@ pub(super) async fn read_resource(
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let dowstream_name = request.uri.clone();
 
-    let Some((backend_name, resource_uri)) = virtual_host.resources.get(&dowstream_name) else {
+    let Some(route) = virtual_host.resources.get(&dowstream_name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... resource not found".into(),
@@ -30,13 +30,16 @@ pub(super) async fn read_resource(
         });
     };
 
-    let backend = virtual_host.backends.get(backend_name).ok_or_else(|| ErrorData {
+    let backend_name = route.backend_name.clone();
+    let resource_uri = route.upstream_name.clone();
+
+    let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
         code: ErrorCode::INVALID_PARAMS,
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
 
-    let mut backend_service = connect_backend_for_request(mcp_service, backend_name, backend, &cx).await?;
+    let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
     let mut routed_request = request;
 
     routed_request.uri = resource_uri.clone();
@@ -44,7 +47,7 @@ pub(super) async fn read_resource(
     if let Err(error) = backend_service.close().await {
         tracing::warn!("read_resource: backend cleanup failed backend_name = {backend_name} error = {error:?}");
     }
-    let response = response.map_err(|error| backend_forward_error("read_resource", backend_name, &error))?;
+    let response = response.map_err(|error| backend_forward_error("read_resource", &backend_name, &error))?;
 
     info!("read_resource: backend {backend_name} returned {} contents", response.contents.len());
 

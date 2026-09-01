@@ -60,6 +60,7 @@ mod tests {
                     backends: HashMap::new(),
                     tools: HashMap::new(),
                     resources: HashMap::new(),
+                    resources_templates: HashMap::new(),
                     prompts: HashMap::new(),
                 },
             )]),

@@ -5,7 +5,7 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, NameAlias, ServiceRoute, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
@@ -57,21 +57,21 @@ pub(crate) fn create_ports(ports: usize) -> Vec<u16> {
     selected
 }
 
-pub fn construct_services(backend_name: &str, service_names: &[&str]) -> HashMap<String, (String, String)> {
+pub fn construct_services(backend_name: &str, service_names: &[&str]) -> HashMap<String, ServiceRoute> {
     let aliases: HashSet<NameAlias> =
         service_names.iter().map(|n| NameAlias::new(n.to_string(), n.to_string())).collect();
-    let mut result: HashMap<String, (String, String)> = HashMap::new();
+    let mut result: HashMap<String, ServiceRoute> = HashMap::new();
 
     for alias in aliases {
         result.insert(
             alias.get_downstream_prefixed_name().to_owned(),
-            (backend_name.to_owned(), alias.get_upstream_name().to_owned()),
+            ServiceRoute { backend_name: backend_name.to_owned(), upstream_name: alias.get_upstream_name().to_owned() },
         );
     }
     result
 }
 
-fn create_services_from_ports(ports: &[u16], service_names: &[&str]) -> HashMap<String, (String, String)> {
+fn create_services_from_ports(ports: &[u16], service_names: &[&str]) -> HashMap<String, ServiceRoute> {
     let mut services = HashMap::new();
 
     for &port in ports {
@@ -79,12 +79,11 @@ fn create_services_from_ports(ports: &[u16], service_names: &[&str]) -> HashMap<
 
         for &service_name in service_names {
             let key = format!("{backend_id}-{service_name}");
-            let value = (backend_id.clone(), service_name.to_owned());
+            let value = ServiceRoute { backend_name: backend_id.clone(), upstream_name: service_name.to_owned() };
 
             services.insert(key, value);
         }
     }
-
     services
 }
 
@@ -141,6 +140,7 @@ async fn create_gateway_with_four_counters_and_custom_config(
                 backends: gateway_one_backends,
                 tools: gateway_one_tools,
                 resources: gateway_one_resources,
+                resources_templates: HashMap::new(),
                 prompts: gateway_one_prompts,
             },
         ),
@@ -150,6 +150,7 @@ async fn create_gateway_with_four_counters_and_custom_config(
                 backends: gateway_two_backends,
                 tools: HashMap::new(),
                 resources: HashMap::new(),
+                resources_templates: HashMap::new(),
                 prompts: HashMap::new(),
             },
         ),
