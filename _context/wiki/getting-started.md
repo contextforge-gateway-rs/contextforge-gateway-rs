@@ -26,18 +26,18 @@ docker compose -f docker/docker-compose.yml logs -f register_fast_time
 
 Teardown: `make compose-down` (stops containers; volumes kept).
 
-## cf-integration Harness (full end-to-end)
+## cf-integration Conformance
 
 ```bash
-scripts/cf-integration.sh up        # checkout Python control/built-in repo, pull external-dataplane image, start full stack
-scripts/cf-integration.sh probe     # smoke: 401 check → initialize → tools/list → tools/call
-scripts/cf-integration.sh test-all  # all lanes: live-mcp, live-rbac, live-protocol
-scripts/cf-integration.sh down
+cargo binstall cf-integration@0.1.0 --no-confirm
+make conformance
 ```
 
-Admin UI (control-plane): `http://localhost:8080/admin` — `admin@example.com` / `changeme`
-
-Key env overrides: `CF_DATAPLANE_IMAGE`, `CF_DATAPLANE_VERSION`, `NGINX_PORT` (default `8080`).
+This runs the modern client and modern server eras through the committed
+external-dataplane `HEAD`, including fixture-direct server comparison and the
+scoped client suite. Use `make conformance-bless` to replace all selected
+baselines transactionally after a fully successful run. Generated checkouts,
+results, reports, and logs stay under `.integration/`.
 
 ## Local Cargo Dev Workflow
 

@@ -34,115 +34,44 @@ Protocol-sensitive tests and fixtures must cover MCP `2026-07-28` and `2025-11-2
 
 These run in `cargo nextest run` with no Docker dependencies.
 
-## MCP Conformance CI
+## MCP Conformance
 
-`.github/workflows/mcp_conformance.yml` runs the pinned official conformance
-suite `0.2.0-alpha.11` for MCP `2026-07-28` in both directions. The server leg
-is official client → nginx → checked-out external dataplane → fixture proxy
-→ official server, with the newest available image built from the control plane's `main`
-branch registering and publishing the fixture through Redis. The backend-only
-proxy rewrites `Host` to
-`localhost:3000`, which the official fixture's DNS-rebinding protection
-requires, while leaving external-dataplane header protections unchanged. The
-control plane uses ephemeral SQLite, so PostgreSQL is unnecessary. The harness lives
-in `tests/conformance/`.
+[`cf-integration`](https://crates.io/crates/cf-integration)
+owns the official fixture, control-plane registration, Compose topology, server
+and client runners, result rendering, and transactional baseline handling. This
+repository keeps only the CI invocation, Make targets, and expected findings.
 
-The scoped client leg then treats the external dataplane as an MCP client: the
-official runner starts a scenario backend, the adapter publishes an isolated
-route to Redis, and a downstream `tools/call` makes the external dataplane
-connect to that backend. It covers tool calls, per-request client metadata and
-protocol-version retry, standard MCP headers, and custom parameter headers. The
-control plane is stopped first so its periodic publisher cannot replace the
-scenario route or probe the observation backend. OAuth client scenarios remain
-a control-plane responsibility. Server and client results are written below
-`server/` and `client/`, with separate `expected-failures.yml` and
-`client-expected-failures.yml` baselines.
-
-The official fixture keeps some diagnostic tools out of `tools/list`. Because
-the external dataplane fails closed unless the control plane publishes a tool
-schema, checks that require those hidden tools remain explicit server-leg
-baseline entries rather than bypassing schema validation in the harness.
-
-`make conformance` runs both legs locally, while `make conformance-bless` runs
-both and refreshes both expected-failure baselines from that run.
-
-Because this conformance CLI cannot set a bearer header, nginx adds an
-ephemeral control-plane token when one is absent; there is no auth proxy or
-repository-owned JavaScript. A route probe prevents built-in-dataplane fallback.
-Counts and the official fixture log appear directly in the Actions log. The
-job does not retain a separate conformance artifact.
-`upstream-fixture-failures.yml` records the pinned fixture's seven scored
-failures and one warning; its other 47 failures are extension or pending
-scenarios and are already unscored. CI prints the exact server
-actual-versus-baseline diff, adds annotations for unexpected and stale entries,
-and writes the same comparison to the job summary.
-
-## Full-Stack Integration Harness
-
-[`cf-integration`](https://github.com/contextforge-org/contextforge-dev-tools)
-wires the ContextForge control plane, built-in dataplane, and this ContextForge
-external dataplane together. The stock Python Compose stack contains both the
-control plane and built-in dataplane. The harness adds two intentional
-differences: nginx routes the selected `/servers/{virtual_host_id}/mcp` path to
-the external dataplane as `/contextforge-rs/servers/{virtual_host_id}/mcp`, and
-the control plane runs with `DATAPLANE_PUBLISHER=true` so virtual-server config
-reaches the external dataplane through Redis.
-
-### Quick Start
+Comment exactly `/conformance` on a pull request to run the **Conformance**
+Actions workflow. Only repository owners, members, and collaborators can start
+it. The workflow acknowledges the command, tests the pull request merge commit,
+and reports the final result back to the pull request. It runs the modern client
+and modern server eras through the external dataplane. Selecting that lane also
+runs the fixture-direct server leg and the scoped external-dataplane client leg:
 
 ```bash
-scripts/cf-integration.sh up
+cargo binstall cf-integration@0.1.0 --no-confirm
+make conformance
 ```
 
-This checks out the Python control-plane/built-in-dataplane repository under
-`.integration/mcp-context-forge`, pulls the published external-dataplane image,
-and starts the combined stack plus a local MCP counter backend. The admin UI is
-at `http://localhost:8080/admin` (`admin@example.com` / `changeme`). A Fast Time
-backend is auto-registered as a fixed virtual server, so the commands below
-work with no manual UI step.
-
-### Route Probe
+The Make target tests the committed data-plane `HEAD`. It rejects tracked
+uncommitted changes because the CLI clones the selected repository and commit
+into `.integration/`. To use another local CLI binary:
 
 ```bash
-scripts/cf-integration.sh probe
+CF_INTEGRATION=/path/to/cf-integration \
+  make conformance
 ```
 
-Verifies the public nginx-to-external-dataplane route end to end: a 401 negative check, `initialize`, session reuse, `tools/list`, and `tools/call`.
-
-### Full Test Runs
-
-| Command | What it runs |
-| --- | --- |
-| `scripts/cf-integration.sh test-all` | Every live lane against the running stack, with per-test result rows and full output in a timestamped log under `.integration/test-logs/`. |
-| `CF_TEST_ALL_LOCUST=true scripts/cf-integration.sh test-all` | Same, plus the full Locust load run as a final lane. |
-| `scripts/cf-integration.sh test-all-up` | Start or update the stack, then `test-all` without the load lane. |
-| `scripts/cf-integration.sh test-all-up-load` | Start or update the stack, then `test-all` with the load lane. |
-
-Individual lanes: `live-mcp`, `live-rbac`, `live-protocol`, and `live-all`.
-`live-mcp` is the green lane: the full MCP protocol end-to-end suite passes
-against this harness. Remaining failures in other lanes measure known
-external-dataplane feature gaps; the harness `reports/` directory keeps the
-current classification.
-
-### Built-In-Dataplane Baseline
-
-To separate external-dataplane regressions from Python behavior, the harness
-can run the stock `IBM/mcp-context-forge` stack. MCP traffic then uses the
-ContextForge built-in dataplane; the external dataplane, nginx split, and
-publisher are absent:
+Update every selected baseline atomically only after all operational work and
+baseline evaluation succeeds:
 
 ```bash
-scripts/cf-integration.sh down                    # frees the shared host ports
-scripts/cf-integration.sh controlplane-test-all   # up + live core + locust
+make conformance-bless
 ```
 
-Individual steps: `controlplane-up`, `controlplane-live-core`, `controlplane-live-all`, `controlplane-locust`, and `controlplane-down`. The baseline load run is covered in [Performance](performance.md).
-
-### Key Settings
-
-| Variable | Purpose |
-| --- | --- |
-| `CF_DATAPLANE_IMAGE` / `CF_DATAPLANE_VERSION` | Which published external-dataplane image the stack runs. |
-| `CF_CONTROLPLANE_IMAGE` / `CF_CONTROLPLANE_REF` | Which `IBM/mcp-context-forge` Python image and git ref to use for the control plane and built-in dataplane. |
-| `NGINX_PORT` | Public front-door port (default `8080`). |
-| `CF_TEST_LOG_DIR` | Where `test-all` writes timestamped logs. |
+Baselines are partitioned beneath
+`tests/conformance/baselines/<client-version>/<server-era>/`. Server findings
+use `fixture-direct.yml` and `external-data-plane.yml`; scoped client findings
+use `client/external-data-plane.yml`. Operational failures are always failures
+and cannot be blessed. Runtime checkouts, logs, results, and reports remain
+beneath `.integration/`.
