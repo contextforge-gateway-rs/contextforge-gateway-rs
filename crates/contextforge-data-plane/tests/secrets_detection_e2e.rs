@@ -391,6 +391,9 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                         completion: HashMap::new(),
                     },
                 )]),
+                tools: HashMap::new(),
+                resources: HashMap::new(),
+                prompts: HashMap::new(),
             },
         )]),
     };

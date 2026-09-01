@@ -64,8 +64,8 @@ pub fn construct_services(backend_name: &str, service_names: &[&str]) -> HashMap
 
     for alias in aliases {
         result.insert(
-            alias.get_downstream_prefixed_name().to_string(),
-            (backend_name.to_string(), alias.get_upstream_name().to_string()),
+            alias.get_downstream_prefixed_name().to_owned(),
+            (backend_name.to_owned(), alias.get_upstream_name().to_owned()),
         );
     }
     result
@@ -79,7 +79,7 @@ fn create_services_from_ports(ports: &[u16], service_names: &[&str]) -> HashMap<
 
         for &service_name in service_names {
             let key = format!("{backend_id}-{service_name}");
-            let value = (backend_id.clone(), service_name.to_string());
+            let value = (backend_id.clone(), service_name.to_owned());
 
             services.insert(key, value);
         }
