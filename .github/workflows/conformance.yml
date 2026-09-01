@@ -18,27 +18,48 @@ env:
 
 jobs:
   acknowledge:
-    name: acknowledge command
+    name: mark conformance pending
     if: >-
       github.event.issue.pull_request &&
       github.event.comment.body == '/conformance' &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    outputs:
+      head_sha: ${{ steps.revision.outputs.head_sha }}
+      merge_sha: ${{ steps.revision.outputs.merge_sha }}
     permissions:
-      issues: write
-      pull-requests: write
+      pull-requests: read
+      statuses: write
     runs-on: ubuntu-latest
     steps:
-      - name: Acknowledge the command
-        continue-on-error: true
+      - name: Resolve the exact PR revision
+        id: revision
         env:
-          COMMENT_ID: ${{ github.event.comment.id }}
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
           REPOSITORY: ${{ github.repository }}
-        run: gh api --method POST "repos/$REPOSITORY/issues/comments/$COMMENT_ID/reactions" -f content=eyes
+        run: >-
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER"
+          --jq '"head_sha=\(.head.sha)\nmerge_sha=\(.merge_commit_sha)"'
+          >> "$GITHUB_OUTPUT"
+
+      - name: Publish the pending PR status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.revision.outputs.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA"
+          -f state=pending
+          -f context=conformance
+          -f description='Conformance is running'
+          -f target_url="$RUN_URL"
 
   conformance:
     name: conformance
+    needs: acknowledge
     if: >-
+      always() &&
       github.event.issue.pull_request &&
       github.event.comment.body == '/conformance' &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
@@ -50,7 +71,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: refs/pull/${{ github.event.issue.number }}/merge
+          ref: ${{ needs.acknowledge.outputs.merge_sha }}
 
       - uses: taiki-e/install-action@v2.75.27
         with:
@@ -93,30 +114,26 @@ jobs:
           retention-days: 7
 
   report:
-    name: report conformance result
+    name: publish conformance result
     if: >-
       always() &&
       needs.conformance.result != 'skipped'
-    needs: conformance
+    needs: [acknowledge, conformance]
     permissions:
-      issues: write
-      pull-requests: write
+      statuses: write
     runs-on: ubuntu-latest
     steps:
-      - name: Report the result
-        continue-on-error: true
+      - name: Publish the final PR status
         env:
+          DESCRIPTION: Conformance ${{ needs.conformance.result }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.issue.number }}
+          HEAD_SHA: ${{ needs.acknowledge.outputs.head_sha }}
           REPOSITORY: ${{ github.repository }}
-          RESULT: ${{ needs.conformance.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          case "$RESULT" in
-            success) marker="✅" ;;
-            failure) marker="❌" ;;
-            cancelled) marker="⚪" ;;
-            *) marker="⚠️" ;;
-          esac
-          body="$marker Conformance **$RESULT** — [view workflow run]($RUN_URL)."
-          gh api --method POST "repos/$REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body"
+          STATE: ${{ needs.conformance.result == 'success' && 'success' || needs.conformance.result == 'failure' && 'failure' || 'error' }}
+        run: >-
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA"
+          -f state="$STATE"
+          -f context=conformance
+          -f description="$DESCRIPTION"
+          -f target_url="$RUN_URL"
