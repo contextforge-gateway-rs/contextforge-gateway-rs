@@ -393,7 +393,7 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                 )]),
                 tools: HashMap::new(),
                 resources: HashMap::new(),
-                resources_templates: HashMap::new(),
+                resource_templates: HashMap::new(),
                 prompts: HashMap::new(),
             },
         )]),

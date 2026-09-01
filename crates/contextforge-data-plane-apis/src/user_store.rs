@@ -85,7 +85,7 @@ pub struct VirtualHost {
     #[serde(default)]
     pub resources: HashMap<String, ServiceRoute>,
     #[serde(default)]
-    pub resources_templates: HashMap<String, ServiceRoute>,
+    pub resource_templates: HashMap<String, ServiceRoute>,
     #[serde(default)]
     pub prompts: HashMap<String, ServiceRoute>,
 }
