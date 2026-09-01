@@ -29,6 +29,8 @@ use rmcp::{
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex as TokioMutex;
 
+use crate::support::test_gateways::construct_services;
+
 use super::{MemoryUserConfigStore, token};
 
 pub(crate) const BACKEND_PROMPT_RESOURCE: &str = "token=secret";
@@ -413,6 +415,9 @@ async fn start_gateway_with_state(
                                 completion: HashMap::new(),
                             },
                         )]),
+                        tools: construct_services(&backend_name, TOOL_NAMES),
+                        resources: construct_services(&backend_name, RESOURCE_URIS),
+                        prompts: construct_services(&backend_name, PROMPT_NAMES),
                     },
                 )]),
             },
