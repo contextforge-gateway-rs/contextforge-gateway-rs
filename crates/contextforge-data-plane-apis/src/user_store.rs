@@ -3,6 +3,13 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub type DownstreamBackendName = String;
+pub type DownstreamToolName = String;
+pub type DownstreamResourceName = String;
+pub type DownstreamResourceTemplateName = String;
+pub type DownstreamPromptName = String;
+pub type VirtualHostId = String;
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 pub enum IntegrationType {
     #[serde(rename = "REST")]
@@ -37,12 +44,6 @@ pub struct ServiceRoute {
     pub upstream_name: String,
 }
 
-pub type DownstreamBackendName = String;
-pub type DownstreamToolName = String;
-pub type DownstreamResourceName = String;
-pub type DownstreamResourceTemplateName = String;
-pub type DownstreamPromptName = String;
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualHost {
     pub backends: HashMap<DownstreamBackendName, BackendMCPGateway>,
@@ -58,5 +59,5 @@ pub struct VirtualHost {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct UserConfig {
-    pub virtual_hosts: HashMap<String, VirtualHost>,
+    pub virtual_hosts: HashMap<VirtualHostId, VirtualHost>,
 }
