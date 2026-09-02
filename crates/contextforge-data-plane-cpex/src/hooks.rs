@@ -52,6 +52,16 @@ pub struct PromptPreFetchResult {
     pub state: Option<RuntimeHookState>,
 }
 
+pub struct ResourcePreFetchResult {
+    pub state: Option<RuntimeHookState>,
+}
+
+impl ResourcePreFetchResult {
+    pub fn unchanged() -> Self {
+        Self { state: None }
+    }
+}
+
 impl PromptPreFetchResult {
     pub fn unchanged() -> Self {
         Self { arguments: PromptArgumentsUpdate::Unchanged, state: None }

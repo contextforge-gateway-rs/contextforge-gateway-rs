@@ -147,7 +147,7 @@ Architecture context lives in the wiki. Key pages:
 | User config Redis key | `MessagePack(User::new(jwt_subject))` — key type plus subject, not the raw subject string. |
 | User config Redis value | `MessagePack(UserConfig)`. JSON schema at `schemas/user_config.json`. |
 | User key Redis schema | `schemas/user.json`. |
-| Plugin config key | `ContextForgeGatewayRuntimePluginConfig`, JSON or MessagePack, `version: 1` with a `cpex` section. |
+| Plugin config key | `ContextForgeGatewayRuntimePluginConfig`, JSON or MessagePack, `version: 2` with matching `revision` and `cpex` fields. Principal/vhost target bindings live in `UserConfig.plugin_bindings`. |
 
 **Coordination rule:** changing any row above is a cross-repo change. The external dataplane, the control-plane publisher (`dataplane_publisher.py`), and the `cf-integration` harness all need updating together.
 

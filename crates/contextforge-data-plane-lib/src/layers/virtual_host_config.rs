@@ -42,7 +42,7 @@ mod tests {
     use std::collections::HashMap;
 
     use axum::{Router, body::to_bytes, middleware, routing::get};
-    use contextforge_data_plane_apis::user_store::VirtualHost;
+    use contextforge_data_plane_apis::user_store::{PluginBindings, VirtualHost};
     use http::Request;
     use tower::ServiceExt;
 
@@ -54,7 +54,10 @@ mod tests {
 
     fn user_config_with_virtual_host(virtual_host_id: &str) -> UserConfig {
         UserConfig {
-            virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends: HashMap::new() })]),
+            virtual_hosts: HashMap::from([(
+                virtual_host_id.to_owned(),
+                VirtualHost { backends: HashMap::new(), plugin_bindings: PluginBindings::default() },
+            )]),
         }
     }
 

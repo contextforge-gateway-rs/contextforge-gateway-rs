@@ -22,10 +22,15 @@
           "additionalProperties": {
             "$ref": "#/$defs/BackendMCPGateway"
           }
+        },
+        "plugin_bindings": {
+          "description": "Effective, ordered runtime-plugin bindings compiled for this principal and virtual host.",
+          "$ref": "#/$defs/PluginBindings"
         }
       },
       "required": [
-        "backends"
+        "backends",
+        "plugin_bindings"
       ]
     },
     "BackendMCPGateway": {
@@ -129,6 +134,58 @@
       "required": [
         "downstream_prefixed_name",
         "upstream_name"
+      ]
+    },
+    "PluginBindings": {
+      "description": "Canonical backend-local targets mapped to ordered CPEX plugin instance names.",
+      "type": "object",
+      "properties": {
+        "revision": {
+          "description": "Control-plane revision used to replace the snapshot atomically.",
+          "type": "string"
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "prompts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "tools",
+        "resources",
+        "prompts"
       ]
     }
   }

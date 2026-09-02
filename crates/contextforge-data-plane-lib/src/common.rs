@@ -432,3 +432,9 @@ fn extract_identity(config: &Config) -> crate::Result<reqwest::Identity> {
         _ => Err("Invalid/missing configuration".into()),
     }
 }
+
+impl Scopes {
+    pub(crate) fn permissions(&self) -> &[String] {
+        &self.permissions
+    }
+}

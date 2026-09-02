@@ -13,17 +13,23 @@ use cpex::cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, ErrorCode, GetPromptRequestParams, GetPromptResult},
+    model::{
+        CallToolRequestParams, CallToolResult, ErrorCode, GetPromptRequestParams, GetPromptResult, ReadResourceResult,
+    },
     serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::task::JoinHandle;
 
 use crate::{
     config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config},
+    context::ScopedMcpHook,
     error::GatewayPluginRuntimeError,
-    hooks::{PromptPreFetchResult, RuntimeHookError, RuntimeHookState, ToolPreCallResult},
+    hooks::{PromptPreFetchResult, ResourcePreFetchResult, RuntimeHookError, RuntimeHookState, ToolPreCallResult},
     runtime::GatewayPluginRuntime,
 };
+
+#[cfg(test)]
+use crate::context::McpHookContext;
 
 const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_mins(10);
 
@@ -81,8 +87,12 @@ impl CpexRuntimeRegistry {
         reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await.map(|_| ())
     }
 
-    pub async fn apply_config(&self, config: Option<CpexConfig>) -> Result<(), GatewayPluginRuntimeError> {
-        apply_runtime_config(&self.runtime, &self.factories, config).await
+    pub async fn apply_config(
+        &self,
+        revision: impl Into<String>,
+        config: Option<CpexConfig>,
+    ) -> Result<(), GatewayPluginRuntimeError> {
+        apply_runtime_config(&self.runtime, &self.factories, config.map(|config| (revision.into(), config))).await
     }
 
     pub fn handle(&self) -> GatewayPluginRuntimeHandle {
@@ -161,7 +171,9 @@ async fn reload_runtime(
     }
 }
 
-fn config_to_cpex(config: &LoadedRuntimePluginConfig) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
+fn config_to_cpex(
+    config: &LoadedRuntimePluginConfig,
+) -> Result<Option<(String, CpexConfig)>, GatewayPluginRuntimeError> {
     cpex_config(&config.document).map(Some)
 }
 
@@ -181,7 +193,16 @@ impl CpexRuntimeRegistry {
         tool_name: &str,
         backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
-        self.handle().before_tool_call(request, tool_name, backend_name).await
+        self.handle().before_tool_call_for_test(request, tool_name, backend_name).await
+    }
+
+    async fn before_get_prompt(
+        &self,
+        request: &GetPromptRequestParams,
+        prompt_name: &str,
+        backend_name: &str,
+    ) -> Result<PromptPreFetchResult, ErrorData> {
+        self.handle().before_get_prompt_for_test(request, prompt_name, backend_name).await
     }
 
     async fn after_tool_call(
@@ -197,17 +218,15 @@ impl CpexRuntimeRegistry {
 async fn apply_runtime_config(
     runtime: &ArcSwap<RuntimeState>,
     factories: &PluginFactoryRegistry,
-    config: Option<CpexConfig>,
+    config: Option<(String, CpexConfig)>,
 ) -> Result<(), GatewayPluginRuntimeError> {
-    let Some(config) = config else {
+    let Some((revision, config)) = config else {
         drop(runtime.swap(Arc::new(RuntimeState::Active(Arc::new(GatewayPluginRuntime::default())))));
         return Ok(());
     };
-    drop(
-        runtime.swap(Arc::new(RuntimeState::Active(Arc::new(
-            GatewayPluginRuntime::from_config(config, factories).await?,
-        )))),
-    );
+    drop(runtime.swap(Arc::new(RuntimeState::Active(Arc::new(
+        GatewayPluginRuntime::from_config(revision, config, factories).await?,
+    )))));
     Ok(())
 }
 
@@ -218,7 +237,7 @@ async fn load_runtime_config(
     let config = config_store.get_config().await?.ok_or(GatewayPluginRuntimeError::ConfigMissing)?;
     let fingerprint = Some(config.fingerprint.clone());
     let runtime = match config_to_cpex(&config)? {
-        Some(config) => GatewayPluginRuntime::from_config(config, factories).await?,
+        Some((revision, config)) => GatewayPluginRuntime::from_config(revision, config, factories).await?,
         None => GatewayPluginRuntime::default(),
     };
     Ok((runtime, fingerprint))
@@ -240,22 +259,29 @@ impl GatewayPluginRuntimeHandle {
         self.runtime.load_full()
     }
 
+    pub fn configured_binding_snapshot(&self) -> Result<(String, Vec<String>), ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        Ok((runtime.binding_revision().to_owned(), runtime.plugin_names().to_vec()))
+    }
+
     pub async fn before_tool_call(
         &self,
         request: &CallToolRequestParams,
         tool_name: &str,
         backend_name: &str,
+        scope: ScopedMcpHook<'_>,
     ) -> Result<ToolPreCallResult, ErrorData> {
         let state = self.current();
         let RuntimeState::Active(runtime) = state.as_ref() else {
             return Err(runtime_failed_error(state.as_ref()));
         };
-        let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
-        if runtime.has_post_hook() {
+        let mut result = runtime.before_tool_call(request, tool_name, backend_name, scope).await?;
+        if result.state.is_some() {
             let state = result.state.take();
             result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
-        } else {
-            result.state = None;
         }
         Ok(result)
     }
@@ -265,17 +291,33 @@ impl GatewayPluginRuntimeHandle {
         request: &GetPromptRequestParams,
         prompt_name: &str,
         backend_name: &str,
+        scope: ScopedMcpHook<'_>,
     ) -> Result<PromptPreFetchResult, ErrorData> {
         let state = self.current();
         let RuntimeState::Active(runtime) = state.as_ref() else {
             return Err(runtime_failed_error(state.as_ref()));
         };
-        let mut result = runtime.before_get_prompt(request, prompt_name, backend_name).await?;
-        if runtime.has_prompt_post_hook() {
+        let mut result = runtime.before_get_prompt(request, prompt_name, backend_name, scope).await?;
+        if result.state.is_some() {
             let state = result.state.take();
             result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
-        } else {
-            result.state = None;
+        }
+        Ok(result)
+    }
+
+    pub async fn before_read_resource(
+        &self,
+        resource_uri: &str,
+        scope: ScopedMcpHook<'_>,
+    ) -> Result<ResourcePreFetchResult, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let mut result = runtime.before_read_resource(resource_uri, scope).await?;
+        if result.state.is_some() {
+            let state = result.state.take();
+            result.state = Some(Arc::new(RegistryCallState { runtime: Arc::clone(runtime), state }));
         }
         Ok(result)
     }
@@ -288,6 +330,17 @@ impl GatewayPluginRuntimeHandle {
     ) -> Result<GetPromptResult, ErrorData> {
         match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
             Some(state) => state.runtime.after_get_prompt(prompt_name, response, state.state.clone()).await,
+            None => Ok(response),
+        }
+    }
+
+    pub async fn after_read_resource(
+        &self,
+        response: ReadResourceResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
+            Some(state) => state.runtime.after_read_resource(response, state.state.clone()).await,
             None => Ok(response),
         }
     }
@@ -320,6 +373,90 @@ impl GatewayPluginRuntimeHandle {
             None => Ok(Some(event)),
         }
     }
+
+    #[cfg(test)]
+    async fn before_tool_call_for_test(
+        &self,
+        request: &CallToolRequestParams,
+        tool_name: &str,
+        backend_name: &str,
+    ) -> Result<ToolPreCallResult, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        self.before_tool_call(
+            request,
+            tool_name,
+            backend_name,
+            ScopedMcpHook::new(
+                runtime.binding_revision(),
+                runtime.plugin_names(),
+                test_hook_context(crate::context::HookTarget::Tool {
+                    name: tool_name.to_owned(),
+                    backend: backend_name.to_owned(),
+                }),
+            ),
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    async fn before_get_prompt_for_test(
+        &self,
+        request: &GetPromptRequestParams,
+        prompt_name: &str,
+        backend_name: &str,
+    ) -> Result<PromptPreFetchResult, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        self.before_get_prompt(
+            request,
+            prompt_name,
+            backend_name,
+            ScopedMcpHook::new(
+                runtime.binding_revision(),
+                runtime.plugin_names(),
+                test_hook_context(crate::context::HookTarget::Prompt {
+                    name: prompt_name.to_owned(),
+                    backend: backend_name.to_owned(),
+                }),
+            ),
+        )
+        .await
+    }
+}
+
+#[cfg(test)]
+fn test_hook_context(target: crate::context::HookTarget) -> McpHookContext {
+    use std::collections::{HashMap, HashSet};
+
+    use crate::context::{HookHttpRequest, HookOperation, HookRequestMetadata, HookSubject};
+
+    McpHookContext::new(
+        HookRequestMetadata { request_id: "test-request".to_owned(), trace_id: None, span_id: None },
+        HookSubject { id: "test-subject".to_owned(), teams: HashSet::new(), permissions: HashSet::new() },
+        HookHttpRequest {
+            method: "POST".to_owned(),
+            path: "/mcp".to_owned(),
+            authority: Some("gateway.test".to_owned()),
+            scheme: Some("https".to_owned()),
+            headers: HashMap::new(),
+        },
+        HookOperation {
+            mcp_method: match &target {
+                crate::context::HookTarget::Tool { .. } => "tools/call",
+                crate::context::HookTarget::Resource { .. } => "resources/read",
+                crate::context::HookTarget::Prompt { .. } => "prompts/get",
+            }
+            .to_owned(),
+            virtual_host: "test-vhost".to_owned(),
+            downstream_target: "test-target".to_owned(),
+            target,
+        },
+    )
 }
 
 fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
@@ -332,7 +469,7 @@ fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         sync::{
             Arc, Mutex,
             atomic::{AtomicUsize, Ordering},
@@ -407,6 +544,46 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct ExtensionObservation {
+        request_id: Option<String>,
+        trace_id: Option<String>,
+        span_id: Option<String>,
+        subject_id: Option<String>,
+        teams: HashSet<String>,
+        permissions: HashSet<String>,
+        http_method: Option<String>,
+        headers: HashMap<String, String>,
+        tool_name: Option<String>,
+        backend: Option<String>,
+        virtual_host: Option<String>,
+        downstream_target: Option<String>,
+    }
+
+    impl ExtensionObservation {
+        fn from_extensions(extensions: &Extensions) -> Self {
+            let subject = extensions.security.as_ref().and_then(|security| security.subject.as_ref());
+            let tool = extensions.mcp.as_ref().and_then(|mcp| mcp.tool.as_ref());
+            Self {
+                request_id: extensions.request.as_ref().and_then(|request| request.request_id.clone()),
+                trace_id: extensions.request.as_ref().and_then(|request| request.trace_id.clone()),
+                span_id: extensions.request.as_ref().and_then(|request| request.span_id.clone()),
+                subject_id: subject.and_then(|subject| subject.id.clone()),
+                teams: subject.map(|subject| subject.teams.clone()).unwrap_or_default(),
+                permissions: subject.map(|subject| subject.permissions.clone()).unwrap_or_default(),
+                http_method: extensions.http.as_ref().and_then(|http| http.method.clone()),
+                headers: extensions.http.as_ref().map(|http| http.request_headers.clone()).unwrap_or_default(),
+                tool_name: tool.map(|tool| tool.name.clone()),
+                backend: tool.and_then(|tool| tool.server_id.clone()),
+                virtual_host: extensions.meta.as_ref().and_then(|meta| meta.scope.clone()),
+                downstream_target: extensions
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.properties.get("downstream_target").cloned()),
+            }
+        }
+    }
+
     #[derive(Default)]
     struct Observations {
         pre_calls: usize,
@@ -414,6 +591,8 @@ mod tests {
         shutdown_calls: usize,
         pre_tool_call_id: Option<String>,
         post_tool_call_id: Option<String>,
+        pre_extensions: Option<ExtensionObservation>,
+        post_extensions: Vec<ExtensionObservation>,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -422,6 +601,7 @@ mod tests {
         Allow,
         Rewrite,
         SetContext,
+        MutateHttpIdentity,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -492,6 +672,16 @@ mod tests {
             self
         }
 
+        fn with_http_identity_mutation(mut self) -> Self {
+            self.pre_behavior = PreBehavior::MutateHttpIdentity;
+            self
+        }
+
+        fn with_capabilities(mut self, capabilities: &[&str]) -> Self {
+            self.config.capabilities = capabilities.iter().map(|capability| (*capability).to_owned()).collect();
+            self
+        }
+
         fn observations(&self) -> Arc<Mutex<Observations>> {
             Arc::clone(&self.observations)
         }
@@ -514,7 +704,7 @@ mod tests {
         async fn handle(
             &self,
             payload: &MessagePayload,
-            _extensions: &Extensions,
+            extensions: &Extensions,
             ctx: &mut PluginContext,
         ) -> PluginResult<MessagePayload> {
             let is_post = payload.message.role == Role::Tool;
@@ -523,10 +713,12 @@ mod tests {
                 observations.post_calls += 1;
                 observations.post_tool_call_id =
                     payload.message.get_tool_results().first().map(|result| result.tool_call_id.clone());
+                observations.post_extensions.push(ExtensionObservation::from_extensions(extensions));
             } else {
                 observations.pre_calls += 1;
                 observations.pre_tool_call_id =
                     payload.message.get_tool_calls().first().map(|call| call.tool_call_id.clone());
+                observations.pre_extensions = Some(ExtensionObservation::from_extensions(extensions));
             }
             drop(observations);
 
@@ -604,6 +796,13 @@ mod tests {
                         ctx.set_global("pre_seen", json!(true));
                         PluginResult::allow()
                     },
+                    PreBehavior::MutateHttpIdentity => {
+                        let mut modified = extensions.cow_copy();
+                        if let (Some(http), Some(token)) = (&mut modified.http, &modified.http_write_token) {
+                            http.write(token).method = Some("DELETE".to_owned());
+                        }
+                        PluginResult::modify_extensions(modified)
+                    },
                 }
             }
         }
@@ -669,9 +868,40 @@ mod tests {
             .with_message("step 1/2")
     }
 
+    fn trusted_tool_context() -> McpHookContext {
+        use crate::context::{HookHttpRequest, HookOperation, HookRequestMetadata, HookSubject, HookTarget};
+
+        McpHookContext::new(
+            HookRequestMetadata {
+                request_id: "trusted-request-id".to_owned(),
+                trace_id: Some("4bf92f3577b34da6a3ce929d0e0e4736".to_owned()), // pragma: allowlist secret
+                span_id: Some("00f067aa0ba902b7".to_owned()),                  // pragma: allowlist secret
+            },
+            HookSubject {
+                id: "subject-123".to_owned(),
+                teams: HashSet::from(["security".to_owned()]),
+                permissions: HashSet::from(["tools:call".to_owned()]),
+            },
+            HookHttpRequest {
+                method: "POST".to_owned(),
+                path: "/mcp".to_owned(),
+                authority: Some("gateway.test".to_owned()),
+                scheme: Some("https".to_owned()),
+                headers: HashMap::from([("content-type".to_owned(), "application/json".to_owned())]),
+            },
+            HookOperation {
+                mcp_method: "tools/call".to_owned(),
+                virtual_host: "virtual-host-1".to_owned(),
+                downstream_target: "backend__sum".to_owned(),
+                target: HookTarget::Tool { name: "sum".to_owned(), backend: "backend".to_owned() },
+            },
+        )
+    }
+
     fn config_document(cpex: Value) -> RuntimePluginConfigDocument {
         RuntimePluginConfigDocument {
             version: RUNTIME_PLUGIN_CONFIG_VERSION,
+            revision: "test-bindings-v1".to_owned(),
             cpex: serde_json::from_value(cpex).expect("test CPEX config parses"),
         }
     }
@@ -688,6 +918,7 @@ mod tests {
                     "name": plugin.config.name.clone(),
                     "kind": plugin.config.kind.clone(),
                     "hooks": plugin.config.hooks.clone(),
+                    "capabilities": plugin.config.capabilities.clone(),
                 })
             }).collect::<Vec<_>>()
         }))
@@ -731,7 +962,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn invalid_runtime_plugin_config_documents_are_rejected() {
-        for config in [RuntimePluginConfigDocument { version: 2, cpex: CpexConfig::default() }] {
+        for config in [RuntimePluginConfigDocument {
+            version: 3,
+            revision: "invalid-version".to_owned(),
+            cpex: CpexConfig::default(),
+        }] {
             let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
             let error = runtime.initialize().await.expect_err("invalid config is rejected");
 
@@ -753,6 +988,14 @@ mod tests {
                 }]
             }),
             json!({ "plugins": [{ "name": "llm", "kind": "test", "hooks": [cmf_hook_names::LLM_INPUT] }] }),
+            json!({
+                "plugins": [{
+                    "name": "overprivileged",
+                    "kind": "test",
+                    "hooks": [cmf_hook_names::TOOL_PRE_INVOKE],
+                    "capabilities": ["read_everything"]
+                }]
+            }),
         ] {
             let runtime =
                 CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config_document(cpex))));
@@ -818,7 +1061,6 @@ mod tests {
         runtime.initialize().await.expect("runtime initializes");
 
         let result = runtime
-            .handle()
             .before_get_prompt(&review_request("weather"), "review", "backend")
             .await
             .expect("prompt pre hook runs");
@@ -846,7 +1088,6 @@ mod tests {
 
         let tool = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("tool pre hook runs");
         let prompt = runtime
-            .handle()
             .before_get_prompt(&review_request("weather"), "review", "backend")
             .await
             .expect("prompt pre hook runs");
@@ -894,7 +1135,13 @@ mod tests {
             .expect("test factory registers");
         runtime.initialize().await.expect("runtime initializes");
 
-        config_store.set_config(RuntimePluginConfigDocument { version: 2, cpex: CpexConfig::default() }).await;
+        config_store
+            .set_config(RuntimePluginConfigDocument {
+                version: 3,
+                revision: "invalid-version".to_owned(),
+                cpex: CpexConfig::default(),
+            })
+            .await;
         runtime.reload().await.expect_err("invalid reload fails");
         let error = expect_runtime_failed(runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await);
         assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
@@ -936,6 +1183,230 @@ mod tests {
         let observations = observations.lock().expect("observations lock poisoned");
         assert_eq!(1, observations.post_calls);
         assert_eq!(observations.pre_tool_call_id, observations.post_tool_call_id);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn typed_extensions_are_capability_gated_and_stable_across_tool_lifecycle() {
+        let plugin = Arc::new(
+            TestPlugin::new("trusted-context", vec![cmf_hook_names::TOOL_PRE_INVOKE, cmf_hook_names::TOOL_POST_INVOKE])
+                .with_context_roundtrip()
+                .with_capabilities(&["read_subject", "read_teams", "read_permissions", "read_headers"]),
+        );
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+        let plugin_names = vec!["trusted-context".to_owned()];
+
+        let pre = runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &plugin_names, trusted_tool_context()),
+            )
+            .await
+            .expect("pre hook runs");
+        runtime
+            .handle()
+            .after_stream_event("sum", progress_event(), pre.state.clone())
+            .await
+            .expect("stream post hook runs");
+        runtime
+            .after_tool_call("sum", CallToolResult::success(vec![ContentBlock::text("3")]), pre.state)
+            .await
+            .expect("post hook runs");
+
+        let observations = observations.lock().expect("observations lock poisoned");
+        let pre = observations.pre_extensions.as_ref().expect("pre extensions observed");
+        assert_eq!(2, observations.post_extensions.len());
+        assert!(observations.post_extensions.iter().all(|post| post == pre));
+        let post = &observations.post_extensions[1];
+        assert_eq!(Some("trusted-request-id"), pre.request_id.as_deref());
+        assert_eq!(pre.request_id, post.request_id);
+        assert_eq!(pre.trace_id, post.trace_id);
+        assert_eq!(pre.span_id, post.span_id);
+        assert_eq!(Some("subject-123"), pre.subject_id.as_deref());
+        assert_eq!(pre.subject_id, post.subject_id);
+        assert_eq!(HashSet::from(["security".to_owned()]), pre.teams);
+        assert_eq!(HashSet::from(["tools:call".to_owned()]), pre.permissions);
+        assert_eq!(Some("POST"), pre.http_method.as_deref());
+        assert_eq!(Some("application/json"), pre.headers.get("content-type").map(String::as_str));
+        assert_eq!(Some("sum"), pre.tool_name.as_deref());
+        assert_eq!(Some("backend"), pre.backend.as_deref());
+        assert_eq!(Some("virtual-host-1"), pre.virtual_host.as_deref());
+        assert_eq!(Some("backend__sum"), pre.downstream_target.as_deref());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn plugins_without_capabilities_cannot_see_subject_or_http() {
+        let plugin = Arc::new(TestPlugin::new("least-privilege", vec![cmf_hook_names::TOOL_PRE_INVOKE]));
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+        let plugin_names = vec!["least-privilege".to_owned()];
+
+        runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &plugin_names, trusted_tool_context()),
+            )
+            .await
+            .expect("pre hook runs");
+
+        let observations = observations.lock().expect("observations lock poisoned");
+        let extensions = observations.pre_extensions.as_ref().expect("extensions observed");
+        assert_eq!(Some("trusted-request-id"), extensions.request_id.as_deref());
+        assert_eq!(Some("sum"), extensions.tool_name.as_deref());
+        assert_eq!(Some("virtual-host-1"), extensions.virtual_host.as_deref());
+        assert!(extensions.subject_id.is_none());
+        assert!(extensions.teams.is_empty());
+        assert!(extensions.permissions.is_empty());
+        assert!(extensions.http_method.is_none());
+        assert!(extensions.headers.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn scoped_bindings_select_distinct_plugin_lineups() {
+        let mut first = TestPlugin::new("first", vec![cmf_hook_names::TOOL_PRE_INVOKE]);
+        first.config.kind = "first-kind".to_owned();
+        let first = Arc::new(first);
+        let first_observations = first.observations();
+        let mut second = TestPlugin::new("second", vec![cmf_hook_names::TOOL_PRE_INVOKE]);
+        second.config.kind = "second-kind".to_owned();
+        let second = Arc::new(second);
+        let second_observations = second.observations();
+        let config = plugin_config(&[Arc::clone(&first), Arc::clone(&second)]);
+        let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
+        runtime
+            .register_factory("first-kind", Box::new(TestPluginFactory::from_plugin(&first)))
+            .expect("first factory registers");
+        runtime
+            .register_factory("second-kind", Box::new(TestPluginFactory::from_plugin(&second)))
+            .expect("second factory registers");
+        runtime.initialize().await.expect("runtime initializes");
+
+        runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &["first".to_owned()], trusted_tool_context()),
+            )
+            .await
+            .expect("first scoped call runs");
+        runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &["second".to_owned()], trusted_tool_context()),
+            )
+            .await
+            .expect("second scoped call runs");
+
+        assert_eq!(1, first_observations.lock().expect("first observations lock poisoned").pre_calls);
+        assert_eq!(1, second_observations.lock().expect("second observations lock poisoned").pre_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn unknown_scoped_plugin_binding_fails_closed() {
+        let plugin = Arc::new(TestPlugin::new("known", vec![cmf_hook_names::TOOL_PRE_INVOKE]));
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let result = runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &["unknown".to_owned()], trusted_tool_context()),
+            )
+            .await;
+        let Err(error) = result else { panic!("unknown binding is accepted") };
+
+        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
+        assert_eq!(0, observations.lock().expect("observations lock poisoned").pre_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn stale_scoped_plugin_binding_fails_closed() {
+        let plugin = Arc::new(TestPlugin::new("known", vec![cmf_hook_names::TOOL_PRE_INVOKE]));
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let result = runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("stale-revision", &["known".to_owned()], trusted_tool_context()),
+            )
+            .await;
+        let Err(error) = result else { panic!("stale binding is accepted") };
+
+        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
+        assert_eq!(0, observations.lock().expect("observations lock poisoned").pre_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn plugin_cannot_mutate_trusted_http_route_identity() {
+        let plugin = Arc::new(
+            TestPlugin::new("route-mutator", vec![cmf_hook_names::TOOL_PRE_INVOKE])
+                .with_http_identity_mutation()
+                .with_capabilities(&["read_headers", "write_headers"]),
+        );
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let result = runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &["route-mutator".to_owned()], trusted_tool_context()),
+            )
+            .await;
+        let Err(error) = result else { panic!("trusted HTTP identity mutation is accepted") };
+
+        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn post_only_binding_receives_initial_typed_extensions() {
+        let plugin = Arc::new(
+            TestPlugin::new("post-only", vec![cmf_hook_names::TOOL_POST_INVOKE])
+                .with_capabilities(&["read_subject", "read_headers"]),
+        );
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        let pre = runtime
+            .handle()
+            .before_tool_call(
+                &sum_request(1, 2),
+                "sum",
+                "backend",
+                ScopedMcpHook::new("test-bindings-v1", &["post-only".to_owned()], trusted_tool_context()),
+            )
+            .await
+            .expect("post-only binding prepares state");
+        runtime
+            .after_tool_call("sum", CallToolResult::success(vec![ContentBlock::text("3")]), pre.state)
+            .await
+            .expect("post hook runs");
+
+        let observations = observations.lock().expect("observations lock poisoned");
+        let extensions = observations.post_extensions.first().expect("post extensions observed");
+        assert_eq!(Some("trusted-request-id"), extensions.request_id.as_deref());
+        assert_eq!(Some("subject-123"), extensions.subject_id.as_deref());
+        assert_eq!(Some("POST"), extensions.http_method.as_deref());
+        assert_eq!(Some("sum"), extensions.tool_name.as_deref());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

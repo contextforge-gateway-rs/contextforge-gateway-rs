@@ -6,7 +6,7 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, NameAlias, PluginBindings, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
@@ -17,7 +17,8 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, GetPromptRequestParams,
         GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, NumberOrString,
-        ProgressNotificationParam, ProgressToken, PromptMessage, ResourceContents, Role, ServerCapabilities,
+        ProgressNotificationParam, ProgressToken, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
+        ReadResourceResult, ResourceContents, Role, ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -33,6 +34,7 @@ use super::{MemoryUserConfigStore, token};
 
 pub(crate) const BACKEND_PROMPT_RESOURCE: &str = "token=secret";
 pub(crate) const BACKEND_PROMPT_IMAGE: &str = "aW1hZ2UtYnl0ZXM=";
+pub(crate) const BACKEND_RESOURCE_SECRET: &str = "AWS_ACCESS_KEY_ID=AKIAFAKE12345EXAMPLE"; // pragma: allowlist secret
 
 static GATEWAY_PORT_LOCK: OnceLock<Arc<TokioMutex<()>>> = OnceLock::new();
 const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -92,8 +94,18 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
-            .with_server_info(Implementation::new("test-backend", "0.1.0")))
+        Ok(InitializeResult::new(
+            ServerCapabilities::builder().enable_tools().enable_prompts().enable_resources().build(),
+        )
+        .with_server_info(Implementation::new("test-backend", "0.1.0")))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(BACKEND_RESOURCE_SECRET, request.uri)]).into())
     }
 
     async fn get_prompt(
@@ -237,7 +249,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "reflect_text",
     "wait_for_cancellation",
 ];
-pub const RESOURCE_URIS: &[&str] = &[""];
+pub const RESOURCE_URIS: &[&str] = &["file:///password.env"];
 pub const PROMPT_NAMES: &[&str] = &["review_bundle", "review"];
 
 pub(crate) struct RunningGateway {
@@ -369,6 +381,8 @@ async fn start_gateway_with_state(
     let backend_name = format!("backend-{backend_port}");
     let virtual_host_id = "vh-cpex-test";
     let parameter_headers = backend_state.parameter_headers;
+    let (plugin_revision, plugin_names) =
+        plugin_runtime.handle().configured_binding_snapshot().expect("plugin runtime is active");
 
     let backend_service = StreamableHttpService::new(
         {
@@ -413,6 +427,21 @@ async fn start_gateway_with_state(
                                 completion: HashMap::new(),
                             },
                         )]),
+                        plugin_bindings: PluginBindings {
+                            revision: plugin_revision,
+                            tools: HashMap::from([(
+                                backend_name.clone(),
+                                TOOL_NAMES.iter().map(|name| (name.to_string(), plugin_names.clone())).collect(),
+                            )]),
+                            resources: HashMap::from([(
+                                backend_name.clone(),
+                                RESOURCE_URIS.iter().map(|uri| (uri.to_string(), plugin_names.clone())).collect(),
+                            )]),
+                            prompts: HashMap::from([(
+                                backend_name.clone(),
+                                PROMPT_NAMES.iter().map(|name| (name.to_string(), plugin_names.clone())).collect(),
+                            )]),
+                        },
                     },
                 )]),
             },

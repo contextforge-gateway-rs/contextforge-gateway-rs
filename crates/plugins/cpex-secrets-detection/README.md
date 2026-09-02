@@ -15,7 +15,8 @@ Example config:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "revision": "secrets-detection-v1",
   "cpex": {
     "plugins": [
       {
@@ -33,14 +34,15 @@ Example config:
 }
 ```
 
-The dataplane integration currently wires the tool-call path:
+The dataplane integration supports:
 
 - `cmf.tool_pre_invoke`: scans tool arguments before the backend receives them.
 - `cmf.tool_post_invoke`: scans tool results before the client receives them.
+- `cmf.prompt_pre_fetch`: scans prompt arguments before rendering.
+- `cmf.resource_post_fetch`: scans text resource contents before returning them.
 
-The crate also keeps prompt/resource stage handling for CPEX parity and future
-hosts, but the current dataplane runtime config only uses the tool pre/post
-hooks.
+Each principal/virtual-host snapshot must bind the canonical backend-local
+target to this plugin name with the same runtime `revision`.
 
 ## Behavior
 

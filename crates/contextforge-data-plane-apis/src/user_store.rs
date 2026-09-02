@@ -74,6 +74,40 @@ pub struct BackendMCPGateway {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualHost {
     pub backends: HashMap<String, BackendMCPGateway>,
+    /// Effective, ordered runtime-plugin bindings compiled for this principal and virtual host.
+    pub plugin_bindings: PluginBindings,
+}
+
+/// Canonical backend-local targets mapped to ordered CPEX plugin instance names.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub struct PluginBindings {
+    /// Control-plane revision used to replace the snapshot atomically.
+    pub revision: String,
+    pub tools: HashMap<String, HashMap<String, Vec<String>>>,
+    pub resources: HashMap<String, HashMap<String, Vec<String>>>,
+    pub prompts: HashMap<String, HashMap<String, Vec<String>>>,
+}
+
+impl PluginBindings {
+    pub fn tool_plugins(&self, backend: &str, tool: &str) -> Option<&[String]> {
+        target_plugins(&self.tools, backend, tool)
+    }
+
+    pub fn resource_plugins(&self, backend: &str, resource: &str) -> Option<&[String]> {
+        target_plugins(&self.resources, backend, resource)
+    }
+
+    pub fn prompt_plugins(&self, backend: &str, prompt: &str) -> Option<&[String]> {
+        target_plugins(&self.prompts, backend, prompt)
+    }
+}
+
+fn target_plugins<'a>(
+    bindings: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    backend: &str,
+    target: &str,
+) -> Option<&'a [String]> {
+    bindings.get(backend)?.get(target).map(Vec::as_slice)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

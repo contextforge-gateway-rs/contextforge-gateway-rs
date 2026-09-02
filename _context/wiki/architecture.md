@@ -154,7 +154,7 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - `initialize` opens one backend transport per configured backend concurrently (`futures::future::join_all`); a failed backend degrades that backend only.
 - List methods fan out to all connected backends concurrently and merge.
 - Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
-- `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, runs pre/post plugin hooks, executes the call, then explicitly closes the connection before returning.
+- Targeted tool, prompt, and resource calls resolve principal/vhost/target plugin bindings after canonical routing and run the selected pre/post hooks. `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, then explicitly closes it before returning.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow
@@ -180,7 +180,7 @@ Response unwind order (Tower layers execute outside-in, so unwind is inside-out)
 
 ```text
 backend response
-  -> response plugin hooks (call_tool only)
+  -> selected response plugin hooks (tool, prompt, and resource calls)
   -> merge / namespace / pass through
   -> virtual_host_config_layer response side
   -> user_config_store_layer response side
@@ -227,7 +227,7 @@ Do not bury transport security decisions inside MCP method handlers. They belong
 
 ## Plugin Hook Expansion Requirements
 
-Current supported hooks are intentionally narrow (`cmf.tool_pre_invoke`, `cmf.tool_post_invoke`). Before adding any new hook point, define all of the following:
+Current supported hooks cover tool, prompt, and resource pre/post lifecycles. Selection comes from the principal-bound `UserConfig` snapshot, not CPEX global routing. Before adding any new hook point, define all of the following:
 
 | Requirement | Why |
 | --- | --- |

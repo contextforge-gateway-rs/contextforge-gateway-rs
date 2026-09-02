@@ -22,7 +22,7 @@ pub(crate) async fn runtime_with_prompt_plugin(plugin: Arc<PromptTestPlugin>) ->
         }]
     }))
     .expect("prompt CPEX config parses");
-    runtime.apply_config(Some(config)).await.expect("prompt runtime config applies");
+    runtime.apply_config("test-bindings-v1", Some(config)).await.expect("prompt runtime config applies");
     Arc::new(runtime)
 }
 
@@ -48,7 +48,7 @@ pub(crate) async fn runtime_with_plugins(plugins: &[Arc<TestPlugin>]) -> Arc<Cpe
             .register_factory(format!("test-{index}"), Box::new(TestPluginFactory::from_plugin(plugin)))
             .expect("test factory registers");
     }
-    runtime.apply_config(Some(cpex_config(plugins))).await.expect("test runtime config applies");
+    runtime.apply_config("test-bindings-v1", Some(cpex_config(plugins))).await.expect("test runtime config applies");
     Arc::new(runtime)
 }
 

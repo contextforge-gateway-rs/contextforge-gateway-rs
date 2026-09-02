@@ -69,11 +69,13 @@ impl RuntimePluginConfigStore for RedisRuntimePluginConfigStore {
     }
 }
 
-pub(crate) fn cpex_config(document: &RuntimePluginConfigDocument) -> Result<CpexConfig, GatewayPluginRuntimeError> {
-    if document.version != RUNTIME_PLUGIN_CONFIG_VERSION {
+pub(crate) fn cpex_config(
+    document: &RuntimePluginConfigDocument,
+) -> Result<(String, CpexConfig), GatewayPluginRuntimeError> {
+    if document.version != RUNTIME_PLUGIN_CONFIG_VERSION || document.revision.is_empty() {
         return Err(GatewayPluginRuntimeError::ConfigWrongFormat);
     }
-    Ok(document.cpex.clone())
+    Ok((document.revision.clone(), document.cpex.clone()))
 }
 
 pub(crate) fn decode_config_document(config: &[u8]) -> Result<RuntimePluginConfigDocument, GatewayPluginRuntimeError> {
@@ -92,16 +94,19 @@ mod tests {
 
     #[test]
     fn decode_config_document_accepts_json_bytes() {
-        let document = br#" { "version": 1, "cpex": { "plugins": [] } }"#;
+        let document = br#" { "version": 2, "revision": "revision-1", "cpex": { "plugins": [] } }"#;
 
         let document = decode_config_document(document).expect("JSON document decodes");
 
-        assert!(cpex_config(&document).expect("config version is valid").plugins.is_empty());
+        let (revision, config) = cpex_config(&document).expect("config version is valid");
+        assert_eq!("revision-1", revision);
+        assert!(config.plugins.is_empty());
     }
 
     #[test]
     fn decode_config_document_accepts_messagepack_bytes() {
-        let expected = RuntimePluginConfigDocument { version: 1, cpex: CpexConfig::default() };
+        let expected =
+            RuntimePluginConfigDocument { version: 2, revision: "revision-1".to_owned(), cpex: CpexConfig::default() };
         let document = rmp_serde::to_vec_named(&expected).expect("MessagePack document encodes");
 
         assert!(cpex_config(&decode_config_document(&document).expect("MessagePack document decodes")).is_ok());

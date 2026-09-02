@@ -7,7 +7,7 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, PluginBindings, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{Config, Gateway, Result, UserConfigStore, UserConfigStoreType};
 use rmcp::{
@@ -94,8 +94,12 @@ async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
 
     let virtual_host_id = "22222222-2222-2222-2222-222222222222";
     let backends = HashMap::from([(backend_id(backend_port), paginating_backend(backend_port))]);
-    let user_config =
-        UserConfig { virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends })]) };
+    let user_config = UserConfig {
+        virtual_hosts: HashMap::from([(
+            virtual_host_id.to_owned(),
+            VirtualHost { backends, plugin_bindings: PluginBindings::default() },
+        )]),
+    };
 
     let backend_listener = bind_backend_port(backend_port).await;
     tokio::spawn(serve_paginating_backend(backend_listener));
@@ -148,8 +152,12 @@ async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
         (backend_id(port_a), paginating_backend(port_a)),
         (backend_id(port_b), paginating_backend(port_b)),
     ]);
-    let user_config =
-        UserConfig { virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends })]) };
+    let user_config = UserConfig {
+        virtual_hosts: HashMap::from([(
+            virtual_host_id.to_owned(),
+            VirtualHost { backends, plugin_bindings: PluginBindings::default() },
+        )]),
+    };
 
     let listener_a = bind_backend_port(port_a).await;
     let listener_b = bind_backend_port(port_b).await;

@@ -11,18 +11,18 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ContentBlock, ErrorCode,
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, ProgressNotificationParam,
-        Request, ResourceContents, Role as McpRole, ServerResult,
+        ReadResourceRequestParams, Request, ResourceContents, Role as McpRole, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
 use serde_json::{Map, Value, json};
 
 use support::{
-    BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE,
-    PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT,
-    REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID, TestPlugin, error_code,
-    error_parts, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin,
-    start_gateway, start_gateway_with_events, start_gateway_with_json_backend_responses,
+    BACKEND_PROMPT_IMAGE, BACKEND_PROMPT_RESOURCE, BACKEND_RESOURCE_SECRET, POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE,
+    PROMPT_ERROR_MESSAGE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE,
+    REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID,
+    TestPlugin, error_code, error_parts, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post,
+    runtime_with_prompt_plugin, start_gateway, start_gateway_with_events, start_gateway_with_json_backend_responses,
     start_gateway_with_parameter_headers, sum_request, text, token,
 };
 
@@ -184,7 +184,7 @@ async fn runtime_with_secrets_detection(hooks: Vec<&'static str>, plugin_config:
         }]
     }))
     .expect("secrets detection CPEX config parses");
-    runtime.apply_config(Some(config)).await.expect("secrets detection runtime applies");
+    runtime.apply_config("secrets-detection-v1", Some(config)).await.expect("secrets detection runtime applies");
     Arc::new(runtime)
 }
 
@@ -665,6 +665,33 @@ async fn secrets_detection_pre_hook_respects_field_allowlist() {
     let args = backend_calls[0].args.as_ref().expect("backend call has args");
     assert_eq!(Some(&Value::from("[redacted]")), args.get("credential"));
     assert_eq!(Some(&Value::from(ignored_secret)), args.get("ignored"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn secrets_detection_resource_post_hook_redacts_password_resource() {
+    let runtime = runtime_with_secrets_detection(
+        vec![cmf_hook_names::RESOURCE_POST_FETCH],
+        json!({
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": false,
+        }),
+    )
+    .await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let result = service
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect("resource is returned");
+
+    let Some(ResourceContents::TextResourceContents { text, uri, .. }) = result.contents.first() else {
+        panic!("expected text resource contents");
+    };
+    assert_eq!("file:///password.env", uri);
+    assert_ne!(BACKEND_RESOURCE_SECRET, text);
+    assert!(text.contains("[redacted]"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

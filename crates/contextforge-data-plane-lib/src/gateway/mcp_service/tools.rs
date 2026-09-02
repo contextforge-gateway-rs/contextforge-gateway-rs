@@ -1,4 +1,4 @@
-use contextforge_data_plane_cpex::ToolPreCallResult;
+use contextforge_data_plane_cpex::{HookTarget, ScopedMcpHook, ToolPreCallResult};
 use http::request::Parts;
 use rmcp::{
     ErrorData, RoleServer,
@@ -13,6 +13,7 @@ use crate::gateway::{
     identifier_routing::{backend_forward_error, resolve_tool_route},
     mcp_call_validator::AuthorizedCallValidator,
     mcp_service::initialization::connect_backend_for_request,
+    plugin_context::{build_plugin_context, require_plugin_binding},
 };
 use crate::mcp_standard_headers;
 
@@ -22,7 +23,9 @@ pub(super) async fn call_tool(
     cx: RequestContext<RoleServer>,
 ) -> Result<CallToolResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
-    let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
+    let authorized = mcp_call_validator.validate_stateless()?;
+    let virtual_host = authorized.virtual_host;
+    let downstream_tool_name = request.name.to_string();
     let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
     let Some((backend_name, tool_name)) =
         resolve_tool_route(virtual_host, &request.name, &backend_names).map_err(|e| ErrorData {
@@ -61,7 +64,18 @@ pub(super) async fn call_tool(
 
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
-        plugin_runtime.before_tool_call(&request, &tool_name, &service_name).await?
+        let plugin_names = require_plugin_binding(
+            &virtual_host.plugin_bindings.revision,
+            virtual_host.plugin_bindings.tool_plugins(&backend_name, &tool_name),
+        )?;
+        let context = build_plugin_context(
+            &authorized,
+            "tools/call",
+            &downstream_tool_name,
+            HookTarget::Tool { name: tool_name.clone(), backend: backend_name.clone() },
+        );
+        let scope = ScopedMcpHook::new(&virtual_host.plugin_bindings.revision, plugin_names, context);
+        plugin_runtime.before_tool_call(&request, &tool_name, &service_name, scope).await?
     } else {
         ToolPreCallResult::unchanged()
     };

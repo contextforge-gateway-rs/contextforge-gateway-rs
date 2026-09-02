@@ -16,7 +16,7 @@ use std::{
 use contextforge_data_plane_apis::{
     User,
     runtime_plugin_config::{RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION},
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, PluginBindings, UserConfig, VirtualHost},
 };
 use http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -391,6 +391,18 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                         completion: HashMap::new(),
                     },
                 )]),
+                plugin_bindings: PluginBindings {
+                    revision: "secrets-detection-v1".to_owned(),
+                    tools: HashMap::from([(
+                        "backend".to_owned(),
+                        HashMap::from([
+                            ("sum".to_owned(), vec!["secrets-detection".to_owned()]),
+                            ("reflect_text".to_owned(), vec!["secrets-detection".to_owned()]),
+                        ]),
+                    )]),
+                    resources: HashMap::new(),
+                    prompts: HashMap::new(),
+                },
             },
         )]),
     };
@@ -411,6 +423,7 @@ async fn write_runtime_plugin_config(redis_port: u16, plugin_config: Value) {
         .expect("redis connection opens");
     let document = json!({
         "version": RUNTIME_PLUGIN_CONFIG_VERSION,
+        "revision": "secrets-detection-v1",
         "cpex": {
             "plugins": [{
                 "name": "secrets-detection",

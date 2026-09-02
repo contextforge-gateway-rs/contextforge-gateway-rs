@@ -6,9 +6,9 @@
 | --- | --- | --- |
 | Downstream client | Untrusted. Every request must present a valid bearer JWT; session id alone grants nothing without matching principal state. | `claims_layer`, validators, and principal-scoped backend session keys. |
 | JWT verification material | Trust anchor. The RSA public key or HMAC secret in process config decides which tokens are accepted. | Process config; loaded at startup. |
-| Redis | Control-plane trust boundary. Whoever can write Redis controls routing (`UserConfig`) and, when runtime plugins are enabled, which registered hooks execute (`ContextForgeGatewayRuntimePluginConfig`). | Redis TLS/mTLS connection modes; the external dataplane never writes user config in production builds. |
+| Redis | Control-plane trust boundary. Whoever can write Redis controls routing and principal/vhost plugin bindings (`UserConfig`) plus the registered runtime definitions (`ContextForgeGatewayRuntimePluginConfig`). | Redis TLS/mTLS connection modes; exact target lookup and matching revisions fail closed; the external dataplane never writes user config in production builds. |
 | Backend MCP servers | Trusted per configured URL. The gateway forwards caller traffic to them and merges their responses. | `UserConfig` backend URLs plus the upstream connection mode. |
-| Plugins | Fully trusted code. Hooks run in-process and can read and mutate tool payloads. | Compiled-in factories only; Redis config activates registered factories, it cannot load new code. |
+| Plugins | Trusted in-process code, but contextual visibility is least-privilege. Hooks can inspect or mutate only the payload/extension surface granted by CPEX mode and capabilities. | Compiled-in factories only; Redis config activates registered factories, validates capabilities, and cannot load new code. |
 
 ## Authentication And Authorization
 
@@ -114,3 +114,4 @@ These routes are registered **outside the authentication middleware** — unauth
 
 - The HMAC secret is held as a `SecretString`; key and certificate material is read from disk paths at startup.
 - Never log: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig` documents, or backend credentials.
+- Hook extensions never contain bearer credentials or raw JWT claims. Subject ID, approved teams/permissions, and a three-header nonsecret HTTP allowlist are capability-gated. Canonical route/request identity is checked after every hook phase and cannot be replaced by client `_meta` or plugin edits.

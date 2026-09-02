@@ -74,6 +74,18 @@ pub fn inject_current_context(headers: &mut HashMap<http::HeaderName, http::Head
     global::get_text_map_propagator(|propagator| propagator.inject_context(&context, &mut HeaderInjector(headers)));
 }
 
+/// Returns the current validated OpenTelemetry trace and span identifiers.
+pub(crate) fn current_trace_ids() -> (Option<String>, Option<String>) {
+    let context = Span::current().context();
+    let span = opentelemetry::trace::TraceContextExt::span(&context);
+    let span_context = span.span_context();
+    if span_context.is_valid() {
+        (Some(span_context.trace_id().to_string()), Some(span_context.span_id().to_string()))
+    } else {
+        (None, None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use opentelemetry::propagation::TextMapPropagator;

@@ -121,6 +121,13 @@ UserConfig
 
 VirtualHost
   backends: HashMap<String, BackendMCPGateway>   ← map key = routing prefix
+  plugin_bindings: PluginBindings                ← principal/vhost effective snapshot
+
+PluginBindings
+  revision: String                               ← must equal active runtime-plugin revision
+  tools: backend → canonical tool → ordered plugin names
+  resources: backend → canonical resource URI → ordered plugin names
+  prompts: backend → canonical prompt → ordered plugin names
 
 BackendMCPGateway
   name: String
@@ -170,14 +177,26 @@ cargo run -p contextforge-data-plane-apis
 
 ```text
 RuntimePluginConfigDocument
-  version: 1
+  version: 2
+  revision: String
   cpex: CpexConfig
 ```
 
-Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke`, `cmf.prompt_pre_fetch`, `cmf.prompt_post_fetch` only.
-Rejected: routing-based selection, plugin dirs, global policies, resource and LLM hooks, plugin conditions.
+Supported: tool, prompt, and resource pre/post CMF hooks.
+Rejected: CPEX routing-based selection, plugin dirs, global policies, LLM hooks, and plugin conditions. The dataplane resolves scope from the principal-bound `UserConfig` snapshot instead.
 Config validation and `CmfPluginFactory` registration must agree on that list: a hook accepted by validation but not registered leaves the plugin loaded and silently inert.
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
+
+After authentication, authorization, and alias/prefix resolution, the handler looks up the exact backend-local target in `PluginBindings`. A missing target, empty or duplicate plugin name, unknown/incompatible plugin, empty revision, or revision mismatch fails before backend traffic. An explicit empty plugin list means the target intentionally has no hooks. The selected `HookEntry` set and runtime snapshot are pinned for the whole pre/stream/post lifecycle.
+
+Hooks receive CPEX typed extensions built by the host, separately from `PluginContextTable` state:
+
+- `RequestExtension`: gateway request ID plus current validated trace/span IDs.
+- `SecurityExtension`: authenticated subject ID and approved teams/permissions; never the bearer token or raw JWT claims.
+- `MCPExtension` and `MetaExtension`: canonical backend-local entity, backend, MCP method, downstream identifier, and virtual host.
+- `HttpExtension`: validated method/path and only `Accept`, `Content-Type`, and `User-Agent`. Authorization, cookies, API keys, hop-by-hop headers, MCP headers, raw `Host`, and client-supplied URI authority/scheme are excluded.
+
+CPEX capabilities gate subject and HTTP visibility. Unknown capabilities reject the runtime config. Request/MCP/meta identity is immutable; the dataplane also rejects changes to subject identity, auth method, or HTTP method/path/authority/scheme while carrying permitted extension changes and plugin context forward.
 
 ### Tool Call Hook Behavior
 
@@ -203,6 +222,10 @@ MCP prompt results carry no error flag, so a plugin setting `is_error` on the CM
 
 Binary resource blobs reach plugins by URI and MIME type but not by content: CMF stores decoded bytes while MCP sends base64. A plugin can deny such a message; editing one fails the write-back.
 
+### Resource Read Hook Behavior
+
+`resources/read` resolves bindings against the canonical backend-local URI. The pre hook may allow or deny but cannot change that route. The post hook can redact text resources or deny the response. URI, MIME type, item count, and blob identity must remain stable; unsupported or lossy edits fail closed. A post-only binding still receives the original trusted extensions and a fresh plugin context table.
+
 ### Demo Plugin Workflow
 
 The optional `test-plugins` feature compiles demo factories from the `cpex-plugins-rs` repository. Redis configuration activates factories already present in the binary; it never loads new Rust code into a running process.
@@ -218,7 +241,8 @@ Register payload-marker configuration before starting the ContextForge external 
 ```bash
 docker compose -f docker/docker-compose-local.yaml exec -T redis \
   redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
-    "version": 1,
+    "version": 2,
+    "revision": "payload-marker-v1",
     "cpex": {
       "plugins": [
         {

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, NameAlias, PluginBindings, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_lib::{
     Config, Gateway, Result, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
@@ -97,8 +97,14 @@ async fn create_gateway_with_four_counters_and_custom_config(
     let virtual_host_two_id = uuid::Uuid::new_v4().to_string();
 
     let virtual_hosts = HashMap::from([
-        (virtual_host_one_id.clone(), VirtualHost { backends: gateway_one_backends }),
-        (virtual_host_two_id, VirtualHost { backends: gateway_two_backends }),
+        (
+            virtual_host_one_id.clone(),
+            VirtualHost { backends: gateway_one_backends, plugin_bindings: PluginBindings::default() },
+        ),
+        (
+            virtual_host_two_id,
+            VirtualHost { backends: gateway_two_backends, plugin_bindings: PluginBindings::default() },
+        ),
     ]);
 
     let user_config = UserConfig { virtual_hosts };

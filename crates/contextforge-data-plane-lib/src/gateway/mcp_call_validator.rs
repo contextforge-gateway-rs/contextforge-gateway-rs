@@ -10,12 +10,19 @@ pub struct AuthorizedCallValidator<'a> {
     ctx: &'a RequestContext<RoleServer>,
 }
 
+pub struct AuthorizedCallContext<'a> {
+    pub(crate) virtual_host: &'a VirtualHost,
+    pub(crate) claims: &'a ContextForgeClaims,
+    pub(crate) virtual_host_id: &'a VirtualHostId,
+    pub(crate) parts: &'a Parts,
+}
+
 impl<'a> AuthorizedCallValidator<'a> {
     pub fn new(call_name: &'a str, ctx: &'a RequestContext<RoleServer>) -> Self {
         Self { call_name, ctx }
     }
 
-    pub fn validate_stateless(self) -> Result<(&'a VirtualHost, &'a ContextForgeClaims), ErrorData> {
+    pub fn validate_stateless(self) -> Result<AuthorizedCallContext<'a>, ErrorData> {
         let maybe_parts = self.ctx.extensions.get::<Parts>();
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
         let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
@@ -67,6 +74,10 @@ impl<'a> AuthorizedCallValidator<'a> {
             });
         };
 
-        Ok((virtual_host, claims))
+        let Some(parts) = maybe_parts else {
+            return Err(ErrorData::internal_error("Routing problem... request metadata not found", None));
+        };
+
+        Ok(AuthorizedCallContext { virtual_host, claims, virtual_host_id, parts })
     }
 }

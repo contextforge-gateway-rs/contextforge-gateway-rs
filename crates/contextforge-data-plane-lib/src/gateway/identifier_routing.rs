@@ -156,6 +156,12 @@ mod tests {
     #[test]
     fn control_plane_alias_is_advertised_and_routes_to_original_name() {
         let config_json = serde_json::json!({
+            "plugin_bindings": {
+                "revision": "test",
+                "tools": {},
+                "resources": {},
+                "prompts": {}
+            },
             "backends": {
                 "79fabb70-2188-4de8-95ed-dc1e976e14d4": {
                     "name": "compliance_reference",
@@ -186,6 +192,12 @@ mod tests {
     #[test]
     fn multi_backend_tool_routing_falls_back_to_legacy_prefixed_names() {
         let config_json = serde_json::json!({
+            "plugin_bindings": {
+                "revision": "test",
+                "tools": {},
+                "resources": {},
+                "prompts": {}
+            },
             "backends": {
                 "compliance-reference": {
                     "name": "compliance_reference",
