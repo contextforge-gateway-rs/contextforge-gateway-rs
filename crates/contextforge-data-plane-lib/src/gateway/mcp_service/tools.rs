@@ -22,8 +22,8 @@ pub(super) async fn call_tool(
     let mcp_call_validator = AuthorizedCallValidator::new("call_tool", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
 
-    let dowstream_name = request.name.to_string();
-    let Some(route) = virtual_host.tools.get(&dowstream_name) else {
+    let downstream_name = request.name.to_string();
+    let Some(route) = virtual_host.tools.get(&downstream_name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... tool not found".into(),

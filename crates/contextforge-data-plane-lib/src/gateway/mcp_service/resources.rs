@@ -20,9 +20,9 @@ pub(super) async fn read_resource(
 ) -> Result<ReadResourceResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
-    let dowstream_name = request.uri.clone();
+    let downstream_name = request.uri.clone();
 
-    let Some(route) = virtual_host.resources.get(&dowstream_name) else {
+    let Some(route) = virtual_host.resources.get(&downstream_name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... resource not found".into(),
