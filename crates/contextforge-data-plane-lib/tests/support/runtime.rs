@@ -52,6 +52,28 @@ pub(crate) async fn runtime_with_plugins(plugins: &[Arc<TestPlugin>]) -> Arc<Cpe
     Arc::new(runtime)
 }
 
+pub(crate) async fn runtime_with_revision_plugins(plugins: &[(&str, Arc<TestPlugin>)]) -> Arc<CpexRuntimeRegistry> {
+    let mut runtime = CpexRuntimeRegistry::default();
+    let mut configs = Vec::with_capacity(plugins.len());
+    for (index, (revision, plugin)) in plugins.iter().enumerate() {
+        let kind = format!("test-{index}");
+        runtime
+            .register_factory(kind.clone(), Box::new(TestPluginFactory::from_plugin(plugin)))
+            .expect("test factory registers");
+        let config = serde_json::from_value(json!({
+            "plugins": [{
+                "name": plugin.config.name.clone(),
+                "kind": kind,
+                "hooks": plugin.config.hooks.clone(),
+            }]
+        }))
+        .expect("test CPEX config parses");
+        configs.push(((*revision).to_owned(), config));
+    }
+    runtime.apply_configs(configs).await.expect("revision runtime configs apply");
+    Arc::new(runtime)
+}
+
 fn cpex_config(plugins: &[Arc<TestPlugin>]) -> CpexConfig {
     serde_json::from_value(json!({
         "plugins": plugins.iter().enumerate().map(|(index, plugin)| {

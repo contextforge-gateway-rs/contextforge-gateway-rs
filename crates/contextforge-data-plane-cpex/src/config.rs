@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::error::GatewayPluginRuntimeError;
 use contextforge_data_plane_apis::runtime_plugin_config::{
-    RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION, RuntimePluginConfigDocument,
+    RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION, RuntimePluginConfigDocument, RuntimeRevision,
 };
 use cpex::cpex_core::config::CpexConfig;
 
@@ -69,13 +69,19 @@ impl RuntimePluginConfigStore for RedisRuntimePluginConfigStore {
     }
 }
 
-pub(crate) fn cpex_config(
+pub(crate) fn cpex_configs(
     document: &RuntimePluginConfigDocument,
-) -> Result<(String, CpexConfig), GatewayPluginRuntimeError> {
-    if document.version != RUNTIME_PLUGIN_CONFIG_VERSION || document.revision.is_empty() {
+) -> Result<Vec<(RuntimeRevision, CpexConfig)>, GatewayPluginRuntimeError> {
+    if document.version != RUNTIME_PLUGIN_CONFIG_VERSION || document.snapshots.is_empty() {
         return Err(GatewayPluginRuntimeError::ConfigWrongFormat);
     }
-    Ok((document.revision.clone(), document.cpex.clone()))
+    let mut configs = document
+        .snapshots
+        .iter()
+        .map(|(revision, snapshot)| (revision.clone(), snapshot.clone().into_cpex()))
+        .collect::<Vec<_>>();
+    configs.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    Ok(configs)
 }
 
 pub(crate) fn decode_config_document(config: &[u8]) -> Result<RuntimePluginConfigDocument, GatewayPluginRuntimeError> {
@@ -86,30 +92,45 @@ pub(crate) fn decode_config_document(config: &[u8]) -> Result<RuntimePluginConfi
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use cpex::cpex_core::config::CpexConfig;
 
-    use contextforge_data_plane_apis::runtime_plugin_config::RuntimePluginConfigDocument;
+    use contextforge_data_plane_apis::runtime_plugin_config::{
+        RuntimePluginConfigDocument, RuntimePluginSnapshot, RuntimeRevision,
+    };
 
-    use super::{cpex_config, decode_config_document};
+    use super::{cpex_configs, decode_config_document};
 
     #[test]
     fn decode_config_document_accepts_json_bytes() {
-        let document = br#" { "version": 2, "revision": "revision-1", "cpex": { "plugins": [] } }"#;
+        let document = br#"{
+            "version": 3,
+            "snapshots": {
+                "revision-1": { "plugins": [] }
+            }
+        }"#;
 
         let document = decode_config_document(document).expect("JSON document decodes");
 
-        let (revision, config) = cpex_config(&document).expect("config version is valid");
-        assert_eq!("revision-1", revision);
+        let mut configs = cpex_configs(&document).expect("config version is valid");
+        let (revision, config) = configs.pop().expect("one runtime snapshot");
+        assert_eq!("revision-1", revision.as_str());
         assert!(config.plugins.is_empty());
     }
 
     #[test]
     fn decode_config_document_accepts_messagepack_bytes() {
-        let expected =
-            RuntimePluginConfigDocument { version: 2, revision: "revision-1".to_owned(), cpex: CpexConfig::default() };
+        let expected = RuntimePluginConfigDocument {
+            version: 3,
+            snapshots: HashMap::from([(
+                RuntimeRevision::try_from("revision-1".to_owned()).expect("valid revision"),
+                RuntimePluginSnapshot::try_from(CpexConfig::default()).expect("supported CPEX config"),
+            )]),
+        };
         let document = rmp_serde::to_vec_named(&expected).expect("MessagePack document encodes");
 
-        assert!(cpex_config(&decode_config_document(&document).expect("MessagePack document decodes")).is_ok());
+        assert!(cpex_configs(&decode_config_document(&document).expect("MessagePack document decodes")).is_ok());
     }
 
     #[test]
@@ -124,5 +145,61 @@ mod tests {
         let error = decode_config_document(b"{not-json").expect_err("invalid JSON bytes are rejected");
 
         assert_eq!("runtime plugin config is in wrong format", error.to_string());
+    }
+
+    #[test]
+    fn decode_config_document_rejects_unknown_or_unsupported_fields() {
+        for document in [
+            br#"{
+                "version": 3,
+                "snapshots": {"revision-1": {"plugins": [], "typo": true}}
+            }"#
+            .as_slice(),
+            br#"{
+                "version": 3,
+                "snapshots": {"revision-1": {
+                    "plugins": [{"name": "plugin", "kind": "test", "conditions": []}]
+                }}
+            }"#
+            .as_slice(),
+            br#"{
+                "version": 3,
+                "snapshots": {"revision-1": {
+                    "plugins": [],
+                    "plugin_settings": {"routing_enabled": false}
+                }}
+            }"#
+            .as_slice(),
+        ] {
+            assert!(decode_config_document(document).is_err());
+        }
+    }
+
+    #[test]
+    fn decode_config_document_rejects_empty_and_duplicate_names() {
+        for document in [
+            br#"{
+                "version": 3,
+                "snapshots": {" ": {"plugins": []}}
+            }"#
+            .as_slice(),
+            br#"{
+                "version": 3,
+                "snapshots": {"revision-1": {
+                    "plugins": [{"name": "", "kind": "test"}]
+                }}
+            }"#
+            .as_slice(),
+            br#"{
+                "version": 3,
+                "snapshots": {"revision-1": {"plugins": [
+                    {"name": "same", "kind": "test"},
+                    {"name": "same", "kind": "test"}
+                ]}}
+            }"#
+            .as_slice(),
+        ] {
+            assert!(decode_config_document(document).is_err());
+        }
     }
 }

@@ -6,6 +6,7 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
+    runtime_plugin_config::{RuntimePluginName, RuntimeRevision},
     user_store::{BackendMCPGateway, NameAlias, PluginBindings, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
@@ -325,7 +326,7 @@ pub(crate) async fn start_gateway_with_parameter_headers(
     plugin_runtime: Arc<CpexRuntimeRegistry>,
 ) -> RunningGateway {
     start_gateway_with_state(
-        user,
+        TestBindings::Single(user.to_owned()),
         runtime_plugins_enabled,
         plugin_runtime,
         false,
@@ -339,7 +340,14 @@ pub(crate) async fn start_gateway_with_events(
     plugin_runtime: Arc<CpexRuntimeRegistry>,
     events: Arc<StdMutex<Vec<&'static str>>>,
 ) -> RunningGateway {
-    start_gateway_with_state(user, true, plugin_runtime, false, BackendState { events, ..Default::default() }).await
+    start_gateway_with_state(
+        TestBindings::Single(user.to_owned()),
+        true,
+        plugin_runtime,
+        false,
+        BackendState { events, ..Default::default() },
+    )
+    .await
 }
 
 pub(crate) async fn start_gateway_with_json_backend_responses(
@@ -357,7 +365,7 @@ async fn start_gateway_with_runtime(
     json_backend_responses: bool,
 ) -> RunningGateway {
     start_gateway_with_state(
-        user,
+        TestBindings::Single(user.to_owned()),
         runtime_plugins_enabled,
         plugin_runtime,
         json_backend_responses,
@@ -366,8 +374,32 @@ async fn start_gateway_with_runtime(
     .await
 }
 
+pub(crate) async fn start_gateway_with_bindings(
+    plugin_runtime: Arc<CpexRuntimeRegistry>,
+    bindings: Vec<(String, String, Vec<String>)>,
+) -> RunningGateway {
+    let bindings = bindings
+        .into_iter()
+        .map(|(user, revision, plugin_names)| {
+            let revision = RuntimeRevision::try_from(revision).expect("valid configured runtime revision");
+            let plugin_names = plugin_names
+                .into_iter()
+                .map(|name| RuntimePluginName::try_from(name).expect("valid configured runtime plugin name"))
+                .collect();
+            (user, revision, plugin_names)
+        })
+        .collect();
+    start_gateway_with_state(TestBindings::Explicit(bindings), true, plugin_runtime, false, BackendState::default())
+        .await
+}
+
+enum TestBindings {
+    Single(String),
+    Explicit(Vec<(String, RuntimeRevision, Vec<RuntimePluginName>)>),
+}
+
 async fn start_gateway_with_state(
-    user: &str,
+    bindings: TestBindings,
     runtime_plugins_enabled: bool,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
     json_backend_responses: bool,
@@ -381,8 +413,23 @@ async fn start_gateway_with_state(
     let backend_name = format!("backend-{backend_port}");
     let virtual_host_id = "vh-cpex-test";
     let parameter_headers = backend_state.parameter_headers;
-    let (plugin_revision, plugin_names) =
-        plugin_runtime.handle().configured_binding_snapshot().expect("plugin runtime is active");
+    let bindings = match (bindings, runtime_plugins_enabled) {
+        (TestBindings::Explicit(bindings), _) => {
+            bindings.into_iter().map(|(user, revision, plugin_names)| (user, Some(revision), plugin_names)).collect()
+        },
+        (TestBindings::Single(user), true) => {
+            let (plugin_revision, plugin_names) =
+                plugin_runtime.handle().configured_binding_snapshot().expect("plugin runtime is active");
+            let plugin_revision =
+                RuntimeRevision::try_from(plugin_revision).expect("configured runtime revision remains valid");
+            let plugin_names = plugin_names
+                .into_iter()
+                .map(|name| RuntimePluginName::try_from(name).expect("configured runtime plugin name remains valid"))
+                .collect::<Vec<_>>();
+            vec![(user, Some(plugin_revision), plugin_names)]
+        },
+        (TestBindings::Single(user), false) => vec![(user, None, Vec::new())],
+    };
 
     let backend_service = StreamableHttpService::new(
         {
@@ -395,59 +442,77 @@ async fn start_gateway_with_state(
     let backend_router = axum::Router::new().route_service("/mcp", backend_service);
 
     let user_store = MemoryUserConfigStore::default();
-    user_store
-        .set_config(
-            &User::new(user),
-            &UserConfig {
-                virtual_hosts: HashMap::from([(
-                    virtual_host_id.to_owned(),
-                    VirtualHost {
-                        backends: HashMap::from([(
-                            backend_name.clone(),
-                            BackendMCPGateway {
-                                url: format!("http://127.0.0.1:{backend_port}/mcp").parse().expect("backend URL"),
-                                name: String::new(),
-                                mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
-                                passthrough_headers: Vec::new(),
-                                add_headers: HashMap::default(),
-                                remove_headers: Vec::new(),
-                                tool_schemas: published_tool_schemas(parameter_headers),
-                                tool_name_aliases: TOOL_NAMES
-                                    .iter()
-                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
-                                    .collect(),
-                                resource_uri_aliases: RESOURCE_URIS
-                                    .iter()
-                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
-                                    .collect(),
-                                prompt_name_aliases: PROMPT_NAMES
-                                    .iter()
-                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
-                                    .collect(),
-                                completion: HashMap::new(),
-                            },
-                        )]),
-                        plugin_bindings: PluginBindings {
-                            revision: plugin_revision,
-                            tools: HashMap::from([(
+    for (user, plugin_revision, plugin_names) in bindings {
+        let plugin_bindings = plugin_revision.map_or_else(PluginBindings::default, |plugin_revision| PluginBindings {
+            revision: Some(plugin_revision),
+            tools: HashMap::from([(
+                backend_name.clone(),
+                TOOL_NAMES.iter().map(|name| (name.to_string(), plugin_names.clone())).collect(),
+            )]),
+            resources: HashMap::from([(
+                backend_name.clone(),
+                RESOURCE_URIS.iter().map(|uri| (uri.to_string(), plugin_names.clone())).collect(),
+            )]),
+            prompts: HashMap::from([(
+                backend_name.clone(),
+                PROMPT_NAMES.iter().map(|name| (name.to_string(), plugin_names.clone())).collect(),
+            )]),
+        });
+        user_store
+            .set_config(
+                &User::new(&user),
+                &UserConfig {
+                    virtual_hosts: HashMap::from([(
+                        virtual_host_id.to_owned(),
+                        VirtualHost {
+                            backends: HashMap::from([(
                                 backend_name.clone(),
-                                TOOL_NAMES.iter().map(|name| (name.to_string(), plugin_names.clone())).collect(),
+                                BackendMCPGateway {
+                                    url: format!("http://127.0.0.1:{backend_port}/mcp").parse().expect("backend URL"),
+                                    name: String::new(),
+                                    mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
+                                    passthrough_headers: Vec::new(),
+                                    add_headers: HashMap::default(),
+                                    remove_headers: Vec::new(),
+                                    tool_schemas: published_tool_schemas(parameter_headers),
+                                    tool_name_aliases: TOOL_NAMES
+                                        .iter()
+                                        .flat_map(|name| {
+                                            [
+                                                NameAlias::new(name.to_string(), name.to_string()),
+                                                NameAlias::new(format!("{backend_name}__{name}"), name.to_string()),
+                                            ]
+                                        })
+                                        .collect(),
+                                    resource_uri_aliases: RESOURCE_URIS
+                                        .iter()
+                                        .flat_map(|uri| {
+                                            [
+                                                NameAlias::new(uri.to_string(), uri.to_string()),
+                                                NameAlias::new(format!("{backend_name}__{uri}"), uri.to_string()),
+                                            ]
+                                        })
+                                        .collect(),
+                                    prompt_name_aliases: PROMPT_NAMES
+                                        .iter()
+                                        .flat_map(|name| {
+                                            [
+                                                NameAlias::new(name.to_string(), name.to_string()),
+                                                NameAlias::new(format!("{backend_name}__{name}"), name.to_string()),
+                                            ]
+                                        })
+                                        .collect(),
+                                    completion: HashMap::new(),
+                                },
                             )]),
-                            resources: HashMap::from([(
-                                backend_name.clone(),
-                                RESOURCE_URIS.iter().map(|uri| (uri.to_string(), plugin_names.clone())).collect(),
-                            )]),
-                            prompts: HashMap::from([(
-                                backend_name.clone(),
-                                PROMPT_NAMES.iter().map(|name| (name.to_string(), plugin_names.clone())).collect(),
-                            )]),
+                            plugin_bindings,
                         },
-                    },
-                )]),
-            },
-        )
-        .await
-        .expect("user config is stored");
+                    )]),
+                },
+            )
+            .await
+            .expect("user config is stored");
+    }
 
     let gateway = Gateway::builder()
         .with_config(Config {

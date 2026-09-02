@@ -155,6 +155,7 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - List methods fan out to all connected backends concurrently and merge.
 - Targeted calls (except `call_tool`) resolve exactly one backend service handle from `BackendTransports`.
 - Targeted tool, prompt, and resource calls resolve principal/vhost/target plugin bindings after canonical routing and run the selected pre/post hooks. `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, then explicitly closes it before returning.
+- Runtime plugins are stored as an atomically swapped revision catalog. A request selects and pins its exact revision, then reuses a bounded cached dispatch plan for its ordered target binding; catalog reloads never change an in-flight lifecycle.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
 ## Startup And Response Flow

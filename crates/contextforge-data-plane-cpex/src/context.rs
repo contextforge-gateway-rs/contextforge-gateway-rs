@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use contextforge_data_plane_apis::runtime_plugin_config::{RuntimePluginName, RuntimeRevision};
 use cpex::cpex_core::extensions::{
     Extensions, HttpExtension, MCPExtension, MetaExtension, PromptMetadata, RequestExtension, ResourceMetadata,
     SecurityExtension, SubjectExtension, SubjectType, ToolMetadata,
@@ -154,17 +155,25 @@ impl McpHookContext {
 }
 
 pub struct ScopedMcpHook<'a> {
-    binding_revision: &'a str,
-    plugin_names: &'a [String],
+    binding_revision: &'a RuntimeRevision,
+    plugin_names: &'a [RuntimePluginName],
     context: McpHookContext,
 }
 
 impl<'a> ScopedMcpHook<'a> {
-    pub fn new(binding_revision: &'a str, plugin_names: &'a [String], context: McpHookContext) -> Self {
+    pub fn new(
+        binding_revision: &'a RuntimeRevision,
+        plugin_names: &'a [RuntimePluginName],
+        context: McpHookContext,
+    ) -> Self {
         Self { binding_revision, plugin_names, context }
     }
 
-    pub(crate) fn into_parts(self) -> (&'a str, &'a [String], McpHookContext) {
-        (self.binding_revision, self.plugin_names, self.context)
+    pub(crate) fn binding_revision(&self) -> &RuntimeRevision {
+        self.binding_revision
+    }
+
+    pub(crate) fn into_parts(self) -> (&'a [RuntimePluginName], McpHookContext) {
+        (self.plugin_names, self.context)
     }
 }

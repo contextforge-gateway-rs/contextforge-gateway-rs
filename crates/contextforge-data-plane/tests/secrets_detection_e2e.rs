@@ -15,7 +15,9 @@ use std::{
 
 use contextforge_data_plane_apis::{
     User,
-    runtime_plugin_config::{RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION},
+    runtime_plugin_config::{
+        RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION, RuntimePluginName, RuntimeRevision,
+    },
     user_store::{BackendMCPGateway, PluginBindings, UserConfig, VirtualHost},
 };
 use http::{HeaderMap, HeaderValue};
@@ -392,12 +394,26 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                     },
                 )]),
                 plugin_bindings: PluginBindings {
-                    revision: "secrets-detection-v1".to_owned(),
+                    revision: Some(
+                        RuntimeRevision::try_from("secrets-detection-v1".to_owned()).expect("valid runtime revision"),
+                    ),
                     tools: HashMap::from([(
                         "backend".to_owned(),
                         HashMap::from([
-                            ("sum".to_owned(), vec!["secrets-detection".to_owned()]),
-                            ("reflect_text".to_owned(), vec!["secrets-detection".to_owned()]),
+                            (
+                                "sum".to_owned(),
+                                vec![
+                                    RuntimePluginName::try_from("secrets-detection".to_owned())
+                                        .expect("valid plugin name"),
+                                ],
+                            ),
+                            (
+                                "reflect_text".to_owned(),
+                                vec![
+                                    RuntimePluginName::try_from("secrets-detection".to_owned())
+                                        .expect("valid plugin name"),
+                                ],
+                            ),
                         ]),
                     )]),
                     resources: HashMap::new(),
@@ -423,14 +439,15 @@ async fn write_runtime_plugin_config(redis_port: u16, plugin_config: Value) {
         .expect("redis connection opens");
     let document = json!({
         "version": RUNTIME_PLUGIN_CONFIG_VERSION,
-        "revision": "secrets-detection-v1",
-        "cpex": {
-            "plugins": [{
-                "name": "secrets-detection",
-                "kind": "validator/secrets-detection",
-                "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
-                "config": plugin_config,
-            }]
+        "snapshots": {
+            "secrets-detection-v1": {
+                "plugins": [{
+                    "name": "secrets-detection",
+                    "kind": "validator/secrets-detection",
+                    "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
+                    "config": plugin_config,
+                }]
+            }
         }
     });
     redis::cmd("SET")

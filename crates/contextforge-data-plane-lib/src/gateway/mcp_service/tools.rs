@@ -64,8 +64,8 @@ pub(super) async fn call_tool(
 
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
-        let plugin_names = require_plugin_binding(
-            &virtual_host.plugin_bindings.revision,
+        let (revision, plugin_names) = require_plugin_binding(
+            virtual_host.plugin_bindings.revision.as_ref(),
             virtual_host.plugin_bindings.tool_plugins(&backend_name, &tool_name),
         )?;
         let context = build_plugin_context(
@@ -74,7 +74,7 @@ pub(super) async fn call_tool(
             &downstream_tool_name,
             HookTarget::Tool { name: tool_name.clone(), backend: backend_name.clone() },
         );
-        let scope = ScopedMcpHook::new(&virtual_host.plugin_bindings.revision, plugin_names, context);
+        let scope = ScopedMcpHook::new(revision, plugin_names, context);
         plugin_runtime.before_tool_call(&request, &tool_name, &service_name, scope).await?
     } else {
         ToolPreCallResult::unchanged()

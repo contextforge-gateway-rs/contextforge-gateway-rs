@@ -1,8 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -24,6 +24,8 @@ use rmcp::{
 };
 use tokio::sync::Semaphore;
 
+use contextforge_data_plane_apis::runtime_plugin_config::RuntimePluginName;
+
 use crate::{
     cmf::{
         prompt_request_payload, prompt_result_payload, resource_request_payload, resource_result_payload,
@@ -42,17 +44,19 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct GatewayPluginRuntime {
     manager: PluginManager,
-    binding_revision: String,
-    plugin_names: Vec<String>,
+    plugin_names: Vec<RuntimePluginName>,
+    dispatch_plans: Mutex<HashMap<DispatchPlanKey, Arc<ResolvedHookPair>>>,
+    dispatch_plan_cache_max_entries: usize,
+    dispatch_plan_cache_full_warned: AtomicBool,
 }
 
 struct ToolCallLifecycle {
-    context_table: PluginContextTable,
+    context_table: Option<PluginContextTable>,
     extensions: Extensions,
 }
 
 struct SharedToolCallState {
-    post_entries: Vec<HookEntry>,
+    post_entries: Arc<[HookEntry]>,
     tool_call_id: String,
     gate: Semaphore,
     lifecycle: Mutex<ToolCallLifecycle>,
@@ -65,9 +69,9 @@ fn next_tool_call_id() -> String {
 }
 
 fn new_tool_call_state(
-    post_entries: Vec<HookEntry>,
+    post_entries: Arc<[HookEntry]>,
     tool_call_id: String,
-    context_table: PluginContextTable,
+    context_table: Option<PluginContextTable>,
     extensions: Extensions,
 ) -> RuntimeHookState {
     Arc::new(SharedToolCallState {
@@ -83,15 +87,15 @@ fn next_prompt_request_id() -> String {
 }
 
 struct PromptCallState {
-    post_entries: Vec<HookEntry>,
-    context_table: PluginContextTable,
+    post_entries: Arc<[HookEntry]>,
+    context_table: Option<PluginContextTable>,
     extensions: Extensions,
     prompt_request_id: String,
 }
 
 fn new_prompt_call_state(
-    post_entries: Vec<HookEntry>,
-    context_table: PluginContextTable,
+    post_entries: Arc<[HookEntry]>,
+    context_table: Option<PluginContextTable>,
     extensions: Extensions,
     prompt_request_id: String,
 ) -> RuntimeHookState {
@@ -99,8 +103,8 @@ fn new_prompt_call_state(
 }
 
 struct ResourceCallState {
-    post_entries: Vec<HookEntry>,
-    context_table: PluginContextTable,
+    post_entries: Arc<[HookEntry]>,
+    context_table: Option<PluginContextTable>,
     extensions: Extensions,
     resource_request_id: String,
 }
@@ -110,8 +114,8 @@ fn next_resource_request_id() -> String {
 }
 
 fn new_resource_call_state(
-    post_entries: Vec<HookEntry>,
-    context_table: PluginContextTable,
+    post_entries: Arc<[HookEntry]>,
+    context_table: Option<PluginContextTable>,
     extensions: Extensions,
     resource_request_id: String,
 ) -> RuntimeHookState {
@@ -120,34 +124,74 @@ fn new_resource_call_state(
 
 impl GatewayPluginRuntime {
     pub(crate) async fn from_config(
-        binding_revision: String,
         config: CpexConfig,
         factories: &PluginFactoryRegistry,
     ) -> Result<Self, GatewayPluginRuntimeError> {
-        if binding_revision.is_empty() {
-            return Err(GatewayPluginRuntimeError::ConfigWrongFormat);
-        }
         validate_gateway_supported_config(&config)?;
 
-        let plugin_names = config.plugins.iter().map(|plugin| plugin.name.clone()).collect();
+        let plugin_names = config
+            .plugins
+            .iter()
+            .map(|plugin| RuntimePluginName::try_from(plugin.name.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)?;
+        let dispatch_plan_cache_max_entries = config.plugin_settings.route_cache_max_entries;
         let manager = PluginManager::from_config(config, factories)
             .map_err(|source| GatewayPluginRuntimeError::Configuration { hook: "config", source })?;
         manager.initialize().await.map_err(|source| GatewayPluginRuntimeError::Initialization { source })?;
-        Ok(Self { manager, binding_revision, plugin_names })
+        Ok(Self {
+            manager,
+            plugin_names,
+            dispatch_plans: Mutex::new(HashMap::new()),
+            dispatch_plan_cache_max_entries,
+            dispatch_plan_cache_full_warned: AtomicBool::new(false),
+        })
     }
 
-    pub(crate) fn plugin_names(&self) -> &[String] {
+    pub(crate) fn plugin_names(&self) -> &[RuntimePluginName] {
         &self.plugin_names
     }
 
-    pub(crate) fn binding_revision(&self) -> &str {
-        &self.binding_revision
+    #[cfg(test)]
+    pub(crate) fn dispatch_plan_count(&self) -> usize {
+        self.dispatch_plans.lock().expect("dispatch plan cache lock poisoned").len()
     }
 }
 
+#[cfg(test)]
+pub(crate) fn tool_state_has_context(state: &RuntimeHookState) -> Option<bool> {
+    Arc::clone(state)
+        .downcast::<SharedToolCallState>()
+        .ok()
+        .map(|state| state.lifecycle.lock().expect("tool lifecycle lock poisoned").context_table.is_some())
+}
+
 struct ResolvedHookPair {
-    pre: Vec<HookEntry>,
-    post: Vec<HookEntry>,
+    pre: Arc<[HookEntry]>,
+    post: Arc<[HookEntry]>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum HookFamily {
+    Tool,
+    Prompt,
+    Resource,
+}
+
+impl HookFamily {
+    fn hook_names(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Tool => (cmf_hook_names::TOOL_PRE_INVOKE, cmf_hook_names::TOOL_POST_INVOKE),
+            Self::Prompt => (cmf_hook_names::PROMPT_PRE_FETCH, cmf_hook_names::PROMPT_POST_FETCH),
+            Self::Resource => (cmf_hook_names::RESOURCE_PRE_FETCH, cmf_hook_names::RESOURCE_POST_FETCH),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct DispatchPlanKey {
+    hook_family: HookFamily,
+    plugin_names: Vec<RuntimePluginName>,
 }
 
 fn binding_error(reason: &str) -> ErrorData {
@@ -226,15 +270,22 @@ const SUPPORTED_HOOKS: [&str; 6] = [
 fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayPluginRuntimeError> {
     if config.routing_enabled()
         || config.plugin_settings.fail_on_plugin_error
+        || config.plugin_settings.parallel_execution_within_band
         || !config.routes.is_empty()
         || !config.plugin_dirs.is_empty()
         || !config.global.policies.is_empty()
         || !config.global.defaults.is_empty()
+        || config.global.identity.is_some()
     {
         return Err(GatewayPluginRuntimeError::ConfigUnsupported);
     }
 
+    let mut plugin_names = HashSet::new();
     for plugin in &config.plugins {
+        if plugin.name.trim().is_empty() || plugin.kind.trim().is_empty() || !plugin_names.insert(plugin.name.as_str())
+        {
+            return Err(GatewayPluginRuntimeError::ConfigWrongFormat);
+        }
         if !plugin.conditions.is_empty() {
             return Err(GatewayPluginRuntimeError::ConfigUnsupported);
         }
@@ -261,23 +312,30 @@ struct HookInvocation {
 impl GatewayPluginRuntime {
     fn resolve_hooks(
         &self,
-        binding_revision: &str,
-        plugin_names: &[String],
-        pre_hook: &str,
-        post_hook: &str,
-    ) -> Result<ResolvedHookPair, ErrorData> {
-        if binding_revision != self.binding_revision {
-            return Err(binding_error("binding revision does not match the active runtime snapshot"));
+        plugin_names: &[RuntimePluginName],
+        hook_family: HookFamily,
+    ) -> Result<Arc<ResolvedHookPair>, ErrorData> {
+        let key = DispatchPlanKey { hook_family, plugin_names: plugin_names.to_vec() };
+        if let Some(plan) = self
+            .dispatch_plans
+            .lock()
+            .map_err(|_| binding_error("runtime dispatch plan cache lock poisoned"))?
+            .get(&key)
+            .cloned()
+        {
+            return Ok(plan);
         }
+
+        let (pre_hook, post_hook) = hook_family.hook_names();
         let mut seen = HashSet::new();
         let mut pre = Vec::new();
         let mut post = Vec::new();
         for plugin_name in plugin_names {
-            if plugin_name.is_empty() || !seen.insert(plugin_name.as_str()) {
-                return Err(binding_error("binding contains an empty or duplicate plugin name"));
+            if !seen.insert(plugin_name) {
+                return Err(binding_error("binding contains a duplicate plugin name"));
             }
 
-            let entries = self.manager.find_plugin_entries(plugin_name);
+            let entries = self.manager.find_plugin_entries(plugin_name.as_str());
             if entries.is_empty() {
                 return Err(binding_error("binding references an unknown plugin"));
             }
@@ -295,7 +353,19 @@ impl GatewayPluginRuntime {
                 return Err(binding_error("binding references a plugin without a compatible hook"));
             }
         }
-        Ok(ResolvedHookPair { pre, post })
+        let plan = Arc::new(ResolvedHookPair { pre: pre.into(), post: post.into() });
+        let mut dispatch_plans =
+            self.dispatch_plans.lock().map_err(|_| binding_error("runtime dispatch plan cache lock poisoned"))?;
+        if dispatch_plans.len() < self.dispatch_plan_cache_max_entries {
+            return Ok(Arc::clone(dispatch_plans.entry(key).or_insert_with(|| Arc::clone(&plan))));
+        }
+        if !self.dispatch_plan_cache_full_warned.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                max_entries = self.dispatch_plan_cache_max_entries,
+                "runtime dispatch plan cache is full; new plans will not be cached"
+            );
+        }
+        Ok(plan)
     }
 
     async fn invoke_hook(
@@ -328,18 +398,13 @@ impl GatewayPluginRuntime {
         backend_name: &str,
         scope: ScopedMcpHook<'_>,
     ) -> Result<ToolPreCallResult, ErrorData> {
-        let (binding_revision, plugin_names, context) = scope.into_parts();
-        let hooks = self.resolve_hooks(
-            binding_revision,
-            plugin_names,
-            cmf_hook_names::TOOL_PRE_INVOKE,
-            cmf_hook_names::TOOL_POST_INVOKE,
-        )?;
+        let (plugin_names, context) = scope.into_parts();
+        let hooks = self.resolve_hooks(plugin_names, HookFamily::Tool)?;
         let tool_call_id = next_tool_call_id();
         let extensions = context.into_extensions();
         if hooks.pre.is_empty() {
             let state = (!hooks.post.is_empty())
-                .then(|| new_tool_call_state(hooks.post, tool_call_id, PluginContextTable::default(), extensions));
+                .then(|| new_tool_call_state(Arc::clone(&hooks.post), tool_call_id, None, extensions));
             return Ok(ToolPreCallResult { arguments: ToolArgumentsUpdate::Unchanged, state });
         }
 
@@ -364,7 +429,7 @@ impl GatewayPluginRuntime {
                 .modified_extensions
                 .take()
                 .ok_or_else(|| binding_error("CPEX pipeline omitted lifecycle extensions"))?;
-            Some(new_tool_call_state(hooks.post, tool_call_id, pre_result.context_table, extensions))
+            Some(new_tool_call_state(Arc::clone(&hooks.post), tool_call_id, Some(pre_result.context_table), extensions))
         };
         Ok(ToolPreCallResult { arguments, state })
     }
@@ -376,20 +441,14 @@ impl GatewayPluginRuntime {
         backend_name: &str,
         scope: ScopedMcpHook<'_>,
     ) -> Result<PromptPreFetchResult, ErrorData> {
-        let (binding_revision, plugin_names, context) = scope.into_parts();
-        let hooks = self.resolve_hooks(
-            binding_revision,
-            plugin_names,
-            cmf_hook_names::PROMPT_PRE_FETCH,
-            cmf_hook_names::PROMPT_POST_FETCH,
-        )?;
+        let (plugin_names, context) = scope.into_parts();
+        let hooks = self.resolve_hooks(plugin_names, HookFamily::Prompt)?;
         let prompt_request_id = next_prompt_request_id();
         let extensions = context.into_extensions();
         if hooks.pre.is_empty() {
             let mut result = PromptPreFetchResult::unchanged();
-            result.state = (!hooks.post.is_empty()).then(|| {
-                new_prompt_call_state(hooks.post, PluginContextTable::default(), extensions, prompt_request_id)
-            });
+            result.state = (!hooks.post.is_empty())
+                .then(|| new_prompt_call_state(Arc::clone(&hooks.post), None, extensions, prompt_request_id));
             return Ok(result);
         }
 
@@ -420,7 +479,12 @@ impl GatewayPluginRuntime {
                 .modified_extensions
                 .take()
                 .ok_or_else(|| binding_error("CPEX pipeline omitted lifecycle extensions"))?;
-            Some(new_prompt_call_state(hooks.post, pre_result.context_table, extensions, prompt_request_id))
+            Some(new_prompt_call_state(
+                Arc::clone(&hooks.post),
+                Some(pre_result.context_table),
+                extensions,
+                prompt_request_id,
+            ))
         };
         Ok(PromptPreFetchResult { arguments, state })
     }
@@ -430,19 +494,13 @@ impl GatewayPluginRuntime {
         resource_uri: &str,
         scope: ScopedMcpHook<'_>,
     ) -> Result<ResourcePreFetchResult, ErrorData> {
-        let (binding_revision, plugin_names, context) = scope.into_parts();
-        let hooks = self.resolve_hooks(
-            binding_revision,
-            plugin_names,
-            cmf_hook_names::RESOURCE_PRE_FETCH,
-            cmf_hook_names::RESOURCE_POST_FETCH,
-        )?;
+        let (plugin_names, context) = scope.into_parts();
+        let hooks = self.resolve_hooks(plugin_names, HookFamily::Resource)?;
         let resource_request_id = next_resource_request_id();
         let extensions = context.into_extensions();
         if hooks.pre.is_empty() {
-            let state = (!hooks.post.is_empty()).then(|| {
-                new_resource_call_state(hooks.post, PluginContextTable::default(), extensions, resource_request_id)
-            });
+            let state = (!hooks.post.is_empty())
+                .then(|| new_resource_call_state(Arc::clone(&hooks.post), None, extensions, resource_request_id));
             return Ok(ResourcePreFetchResult { state });
         }
 
@@ -466,7 +524,12 @@ impl GatewayPluginRuntime {
                 .modified_extensions
                 .take()
                 .ok_or_else(|| binding_error("CPEX pipeline omitted lifecycle extensions"))?;
-            Some(new_resource_call_state(hooks.post, pre_result.context_table, extensions, resource_request_id))
+            Some(new_resource_call_state(
+                Arc::clone(&hooks.post),
+                Some(pre_result.context_table),
+                extensions,
+                resource_request_id,
+            ))
         };
         Ok(ResourcePreFetchResult { state })
     }
@@ -486,10 +549,7 @@ impl GatewayPluginRuntime {
                 cmf_hook_names::PROMPT_POST_FETCH,
                 &state.post_entries,
                 payload,
-                HookInvocation {
-                    extensions: state.extensions.clone(),
-                    context_table: Some(state.context_table.clone()),
-                },
+                HookInvocation { extensions: state.extensions.clone(), context_table: state.context_table.clone() },
             )
             .await?;
         if post_result.is_denied() {
@@ -514,10 +574,7 @@ impl GatewayPluginRuntime {
                 cmf_hook_names::RESOURCE_POST_FETCH,
                 &state.post_entries,
                 payload,
-                HookInvocation {
-                    extensions: state.extensions.clone(),
-                    context_table: Some(state.context_table.clone()),
-                },
+                HookInvocation { extensions: state.extensions.clone(), context_table: state.context_table.clone() },
             )
             .await?;
         if post_result.is_denied() {
@@ -545,7 +602,7 @@ impl GatewayPluginRuntime {
                 cmf_hook_names::TOOL_POST_INVOKE,
                 &state.post_entries,
                 tool_result_payload(tool_name, &response, &state.tool_call_id),
-                HookInvocation { extensions, context_table: Some(context_table) },
+                HookInvocation { extensions, context_table },
             )
             .await?;
         if post_result.is_denied() {
@@ -553,7 +610,7 @@ impl GatewayPluginRuntime {
         }
 
         let mut lifecycle = state.lifecycle.lock().map_err(|_| binding_error("tool hook lifecycle lock poisoned"))?;
-        lifecycle.context_table = post_result.context_table.clone();
+        lifecycle.context_table = Some(post_result.context_table.clone());
         lifecycle.extensions = post_result
             .modified_extensions
             .clone()
@@ -584,7 +641,7 @@ impl GatewayPluginRuntime {
                 cmf_hook_names::TOOL_POST_INVOKE,
                 &state.post_entries,
                 tool_json_result_payload(tool_name, content, false, &state.tool_call_id),
-                HookInvocation { extensions, context_table: Some(context_table) },
+                HookInvocation { extensions, context_table },
             )
             .await?;
         if post_result.is_denied() {
@@ -592,7 +649,7 @@ impl GatewayPluginRuntime {
         }
 
         let mut lifecycle = state.lifecycle.lock().map_err(|_| binding_error("tool hook lifecycle lock poisoned"))?;
-        lifecycle.context_table = post_result.context_table.clone();
+        lifecycle.context_table = Some(post_result.context_table.clone());
         lifecycle.extensions = post_result
             .modified_extensions
             .clone()

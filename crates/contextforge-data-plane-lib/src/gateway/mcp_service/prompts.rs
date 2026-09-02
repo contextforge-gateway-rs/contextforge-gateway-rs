@@ -48,8 +48,8 @@ pub(super) async fn get_prompt(
     })?;
     let service_name = backend_name.clone();
     let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
-        let plugin_names = require_plugin_binding(
-            &virtual_host.plugin_bindings.revision,
+        let (revision, plugin_names) = require_plugin_binding(
+            virtual_host.plugin_bindings.revision.as_ref(),
             virtual_host.plugin_bindings.prompt_plugins(&backend_name, &prompt_name),
         )?;
         let context = build_plugin_context(
@@ -58,7 +58,7 @@ pub(super) async fn get_prompt(
             &downstream_prompt_name,
             HookTarget::Prompt { name: prompt_name.clone(), backend: backend_name.clone() },
         );
-        let scope = ScopedMcpHook::new(&virtual_host.plugin_bindings.revision, plugin_names, context);
+        let scope = ScopedMcpHook::new(revision, plugin_names, context);
         plugin_runtime.before_get_prompt(&request, &prompt_name, &service_name, scope).await?
     } else {
         PromptPreFetchResult::unchanged()

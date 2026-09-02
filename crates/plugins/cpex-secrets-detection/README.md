@@ -15,21 +15,22 @@ Example config:
 
 ```json
 {
-  "version": 2,
-  "revision": "secrets-detection-v1",
-  "cpex": {
-    "plugins": [
-      {
-        "name": "secrets-detection",
-        "kind": "validator/secrets-detection",
-        "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
-        "config": {
-          "redact": true,
-          "redaction_text": "[redacted]",
-          "block_on_detection": false
+  "version": 3,
+  "snapshots": {
+    "secrets-detection-v1": {
+      "plugins": [
+        {
+          "name": "secrets-detection",
+          "kind": "validator/secrets-detection",
+          "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
+          "config": {
+            "redact": true,
+            "redaction_text": "[redacted]",
+            "block_on_detection": false
+          }
         }
-      }
-    ]
+      ]
+    }
   }
 }
 ```

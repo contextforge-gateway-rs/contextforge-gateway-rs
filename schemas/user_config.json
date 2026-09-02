@@ -141,8 +141,11 @@
       "type": "object",
       "properties": {
         "revision": {
-          "description": "Control-plane revision used to replace the snapshot atomically.",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "tools": {
           "type": "object",
@@ -154,7 +157,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "default": {}
         },
         "resources": {
           "type": "object",
@@ -166,7 +170,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "default": {}
         },
         "prompts": {
           "type": "object",
@@ -178,15 +183,11 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "default": {}
         }
       },
-      "required": [
-        "revision",
-        "tools",
-        "resources",
-        "prompts"
-      ]
+      "additionalProperties": false
     }
   }
 }

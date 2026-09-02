@@ -124,7 +124,7 @@ VirtualHost
   plugin_bindings: PluginBindings                ← principal/vhost effective snapshot
 
 PluginBindings
-  revision: String                               ← must equal active runtime-plugin revision
+  revision: Option<RuntimeRevision>              ← required when any target binding exists
   tools: backend → canonical tool → ordered plugin names
   resources: backend → canonical resource URI → ordered plugin names
   prompts: backend → canonical prompt → ordered plugin names
@@ -177,17 +177,21 @@ cargo run -p contextforge-data-plane-apis
 
 ```text
 RuntimePluginConfigDocument
-  version: 2
-  revision: String
-  cpex: CpexConfig
+  version: 3
+  snapshots: RuntimeRevision → RuntimePluginSnapshot
+
+RuntimePluginSnapshot
+  plugins: strict supported CPEX plugin definitions
+  plugin_settings: timeout, deny short-circuit, dispatch-cache bound
 ```
 
-Supported: tool, prompt, and resource pre/post CMF hooks.
-Rejected: CPEX routing-based selection, plugin dirs, global policies, LLM hooks, and plugin conditions. The dataplane resolves scope from the principal-bound `UserConfig` snapshot instead.
+The document is an atomically published catalog. Each key is an immutable runtime revision; the control plane retains revisions while published user configs can still reference them. A request selects exactly the revision named by its principal/vhost binding, and an in-flight lifecycle pins that runtime across pre, stream, and post hooks even if a later catalog removes it.
+
+Supported: tool, prompt, and resource pre/post CMF hooks. The Redis DTO rejects unknown fields and only exposes the CPEX subset the dataplane executes. CPEX routing-based selection, plugin dirs, global policies, LLM hooks, plugin conditions, fail-on-plugin-error, and within-band parallel execution are rejected. The dataplane resolves scope from the principal-bound `UserConfig` snapshot instead.
 Config validation and `CmfPluginFactory` registration must agree on that list: a hook accepted by validation but not registered leaves the plugin loaded and silently inert.
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
 
-After authentication, authorization, and alias/prefix resolution, the handler looks up the exact backend-local target in `PluginBindings`. A missing target, empty or duplicate plugin name, unknown/incompatible plugin, empty revision, or revision mismatch fails before backend traffic. An explicit empty plugin list means the target intentionally has no hooks. The selected `HookEntry` set and runtime snapshot are pinned for the whole pre/stream/post lifecycle.
+After authentication, authorization, and alias/prefix resolution, the handler looks up the exact backend-local target in `PluginBindings`. Missing targets/revisions, empty lists or names, duplicate names, and unknown/incompatible plugins fail before backend traffic. Targets with no hooks are omitted from the maps. Hook entries are resolved once per distinct ordered binding and cached in the selected immutable runtime; the configured cache bound prevents unbounded growth.
 
 Hooks receive CPEX typed extensions built by the host, separately from `PluginContextTable` state:
 
@@ -224,7 +228,7 @@ Binary resource blobs reach plugins by URI and MIME type but not by content: CMF
 
 ### Resource Read Hook Behavior
 
-`resources/read` resolves bindings against the canonical backend-local URI. The pre hook may allow or deny but cannot change that route. The post hook can redact text resources or deny the response. URI, MIME type, item count, and blob identity must remain stable; unsupported or lossy edits fail closed. A post-only binding still receives the original trusted extensions and a fresh plugin context table.
+`resources/read` resolves bindings against the canonical backend-local URI. The pre hook may allow or deny but cannot change that route. The post hook can redact text resources or deny the response. URI, MIME type, item count, and blob identity must remain stable; unsupported or lossy edits fail closed. A post-only binding still receives the original trusted extensions; as required by CPEX lifecycle semantics, its first hook receives no prior `PluginContextTable`.
 
 ### Demo Plugin Workflow
 
@@ -241,16 +245,17 @@ Register payload-marker configuration before starting the ContextForge external 
 ```bash
 docker compose -f docker/docker-compose-local.yaml exec -T redis \
   redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
-    "version": 2,
-    "revision": "payload-marker-v1",
-    "cpex": {
-      "plugins": [
-        {
-          "name": "payload-marker",
-          "kind": "contextforge/payload-marker",
-          "hooks": ["cmf.tool_post_invoke"]
-        }
-      ]
+    "version": 3,
+    "snapshots": {
+      "payload-marker-v1": {
+        "plugins": [
+          {
+            "name": "payload-marker",
+            "kind": "contextforge/payload-marker",
+            "hooks": ["cmf.tool_post_invoke"]
+          }
+        ]
+      }
     }
   }'
 ```

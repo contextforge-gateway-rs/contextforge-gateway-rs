@@ -22,8 +22,9 @@ use support::{
     PROMPT_ERROR_MESSAGE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior, PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE,
     REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A, REWRITTEN_SUM_B, RunningGateway, TEST_USER_ID,
     TestPlugin, error_code, error_parts, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post,
-    runtime_with_prompt_plugin, start_gateway, start_gateway_with_events, start_gateway_with_json_backend_responses,
-    start_gateway_with_parameter_headers, sum_request, text, token,
+    runtime_with_prompt_plugin, runtime_with_revision_plugins, start_gateway, start_gateway_with_bindings,
+    start_gateway_with_events, start_gateway_with_json_backend_responses, start_gateway_with_parameter_headers,
+    sum_request, text, token,
 };
 
 type Recorded<T> = Arc<StdMutex<Vec<T>>>;
@@ -503,6 +504,55 @@ async fn stateless_alias_and_namespaced_tool_names_route() {
     handle.abort();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn plugin_enabled_alias_and_namespaced_tool_names_use_canonical_binding() {
+    let plugin = Arc::new(TestPlugin::new("pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]));
+    let observations = plugin.observations();
+    let runtime = runtime_with_pre(plugin).await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+
+    let alias_result = service.call_tool(sum_request("sum", 1, 2)).await.expect("alias routes through plugin");
+    let namespaced_name = format!("{}__sum", gateway.backend_name);
+    let namespaced_result =
+        service.call_tool(sum_request(&namespaced_name, 3, 4)).await.expect("namespaced alias routes through plugin");
+
+    assert_eq!("3", text(&alias_result));
+    assert_eq!("7", text(&namespaced_result));
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert!(backend_calls.iter().all(|call| call.tool_name == "sum"));
+    let observations = observations.lock().expect("observations lock poisoned");
+    assert_eq!(2, observations.pre_calls);
+    assert_eq!(Some("sum".to_owned()), observations.pre_payload_name);
+    assert_eq!(Some(gateway.backend_name.clone()), observations.pre_payload_namespace);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn two_users_select_distinct_revision_snapshots_for_the_same_target() {
+    let first = Arc::new(TestPlugin::new("first", vec![cmf_hook_names::TOOL_PRE_INVOKE]));
+    let first_observations = first.observations();
+    let second = Arc::new(TestPlugin::new("second", vec![cmf_hook_names::TOOL_PRE_INVOKE]));
+    let second_observations = second.observations();
+    let runtime =
+        runtime_with_revision_plugins(&[("revision-1", Arc::clone(&first)), ("revision-2", Arc::clone(&second))]).await;
+    let gateway = start_gateway_with_bindings(
+        runtime,
+        vec![
+            ("first-user".to_owned(), "revision-1".to_owned(), vec!["first".to_owned()]),
+            ("second-user".to_owned(), "revision-2".to_owned(), vec!["second".to_owned()]),
+        ],
+    )
+    .await;
+
+    let first_service = gateway.connect("first-user").await;
+    first_service.call_tool(sum_request("sum", 1, 2)).await.expect("first user call succeeds");
+    let second_service = gateway.connect("second-user").await;
+    second_service.call_tool(sum_request("sum", 3, 4)).await.expect("second user call succeeds");
+
+    assert_eq!(1, first_observations.lock().expect("first observations lock poisoned").pre_calls);
+    assert_eq!(1, second_observations.lock().expect("second observations lock poisoned").pre_calls);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stateless_concurrent_progress_calls_remain_request_scoped() {
     let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
@@ -681,17 +731,18 @@ async fn secrets_detection_resource_post_hook_redacts_password_resource() {
     let gateway = start_gateway(TEST_USER_ID, true, runtime).await;
     let service = gateway.connect(TEST_USER_ID).await;
 
-    let result = service
-        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
-        .await
-        .expect("resource is returned");
+    for downstream_uri in ["file:///password.env".to_owned(), format!("{}__file:///password.env", gateway.backend_name)]
+    {
+        let result =
+            service.read_resource(ReadResourceRequestParams::new(downstream_uri)).await.expect("resource is returned");
 
-    let Some(ResourceContents::TextResourceContents { text, uri, .. }) = result.contents.first() else {
-        panic!("expected text resource contents");
-    };
-    assert_eq!("file:///password.env", uri);
-    assert_ne!(BACKEND_RESOURCE_SECRET, text);
-    assert!(text.contains("[redacted]"));
+        let Some(ResourceContents::TextResourceContents { text, uri, .. }) = result.contents.first() else {
+            panic!("expected text resource contents");
+        };
+        assert_eq!("file:///password.env", uri);
+        assert_ne!(BACKEND_RESOURCE_SECRET, text);
+        assert!(text.contains("[redacted]"));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
