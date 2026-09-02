@@ -8,6 +8,7 @@ pub type DownstreamToolName = String;
 pub type DownstreamResourceName = String;
 pub type DownstreamResourceTemplateName = String;
 pub type DownstreamPromptName = String;
+pub type UpstreamName = String;
 pub type VirtualHostId = String;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
@@ -40,8 +41,8 @@ pub struct BackendMCPGateway {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ServiceRoute {
-    pub backend_name: String,
-    pub upstream_name: String,
+    pub backend_name: DownstreamBackendName,
+    pub upstream_name: UpstreamName,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
