@@ -37,6 +37,7 @@ pub struct ServiceRoute {
     pub upstream_name: String,
 }
 
+pub type DownstreamBackendName = String;
 pub type DownstreamToolName = String;
 pub type DownstreamResourceName = String;
 pub type DownstreamResourceTemplateName = String;
@@ -44,7 +45,7 @@ pub type DownstreamPromptName = String;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualHost {
-    pub backends: HashMap<String, BackendMCPGateway>,
+    pub backends: HashMap<DownstreamBackendName, BackendMCPGateway>,
     #[serde(default)]
     pub tools: HashMap<DownstreamToolName, ServiceRoute>,
     #[serde(default)]
