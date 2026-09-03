@@ -54,7 +54,16 @@ mod tests {
 
     fn user_config_with_virtual_host(virtual_host_id: &str) -> UserConfig {
         UserConfig {
-            virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends: HashMap::new() })]),
+            virtual_hosts: HashMap::from([(
+                virtual_host_id.to_owned(),
+                VirtualHost {
+                    backends: HashMap::new(),
+                    tools: HashMap::new(),
+                    resources: HashMap::new(),
+                    resource_templates: HashMap::new(),
+                    prompts: HashMap::new(),
+                },
+            )]),
         }
     }
 

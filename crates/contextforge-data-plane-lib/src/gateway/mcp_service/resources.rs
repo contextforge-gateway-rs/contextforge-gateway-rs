@@ -9,9 +9,8 @@ use tracing::info;
 
 use super::McpService;
 use crate::gateway::{
-    identifier_routing::{backend_forward_error, resolve_resources_route},
-    mcp_call_validator::AuthorizedCallValidator,
-    mcp_service::initialization::connect_backend_for_request,
+    mcp_call_validator::AuthorizedCallValidator, mcp_service::initialization::connect_backend_for_request,
+    routing_error::backend_forward_error,
 };
 
 pub(super) async fn read_resource(
@@ -21,22 +20,18 @@ pub(super) async fn read_resource(
 ) -> Result<ReadResourceResponse, ErrorData> {
     let mcp_call_validator = AuthorizedCallValidator::new("read_resource", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
-    let backend_names: Vec<&str> = virtual_host.backends.keys().map(String::as_str).collect();
-    let Some((backend_name, resource_uri)) = resolve_resources_route(virtual_host, &request.uri, &backend_names)
-        .map_err(|e| ErrorData {
-            code: ErrorCode::INVALID_PARAMS,
-            message: format!("Routing problem... {e}").into(),
-            data: None,
-        })?
-    else {
+    let downstream_name = request.uri.clone();
+
+    let Some(route) = virtual_host.resources.get(&downstream_name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... resource not found".into(),
             data: None,
         });
     };
-    let backend_name = backend_name.to_owned();
-    let resource_uri = resource_uri.to_owned();
+
+    let backend_name = route.backend_name.clone();
+    let resource_uri = route.upstream_name.clone();
 
     let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
         code: ErrorCode::INVALID_PARAMS,
@@ -44,19 +39,17 @@ pub(super) async fn read_resource(
         data: None,
     })?;
 
-    let service_name = backend_name.clone();
     let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
-
     let mut routed_request = request;
-    routed_request.uri = resource_uri;
 
+    routed_request.uri = resource_uri.clone();
     let response = backend_service.read_resource(routed_request).await;
     if let Err(error) = backend_service.close().await {
-        tracing::warn!("read_resource: backend cleanup failed backend_name = {service_name} error = {error:?}");
+        tracing::warn!("read_resource: backend cleanup failed backend_name = {backend_name} error = {error:?}");
     }
-    let response = response.map_err(|error| backend_forward_error("read_resource", &service_name, &error))?;
+    let response = response.map_err(|error| backend_forward_error("read_resource", &backend_name, &error))?;
 
-    info!("read_resource: backend {service_name} returned {} contents", response.contents.len());
+    info!("read_resource: backend {backend_name} returned {} contents", response.contents.len());
 
     Ok(response.into())
 }

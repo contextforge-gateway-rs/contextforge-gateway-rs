@@ -167,8 +167,6 @@ fn is_protected_header(name: &http::HeaderName) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
 
     fn backend(passthrough: &[&str], add: &[(&str, &str)], remove: &[&str]) -> BackendMCPGateway {
@@ -180,9 +178,6 @@ mod tests {
             add_headers: add.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
             remove_headers: remove.iter().map(|s| (*s).to_owned()).collect(),
             tool_schemas: HashMap::new(),
-            tool_name_aliases: HashSet::new(),
-            resource_uri_aliases: HashSet::new(),
-            prompt_name_aliases: HashSet::new(),
             completion: HashMap::new(),
         }
     }

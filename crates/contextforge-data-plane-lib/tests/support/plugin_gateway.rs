@@ -1,12 +1,12 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, Mutex as StdMutex, OnceLock},
     time::{Duration, Instant},
 };
 
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, NameAlias, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
 use contextforge_data_plane_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
@@ -28,6 +28,8 @@ use rmcp::{
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex as TokioMutex;
+
+use crate::support::test_gateways::construct_services;
 
 use super::{MemoryUserConfigStore, token};
 
@@ -398,21 +400,13 @@ async fn start_gateway_with_state(
                                 add_headers: HashMap::default(),
                                 remove_headers: Vec::new(),
                                 tool_schemas: published_tool_schemas(parameter_headers),
-                                tool_name_aliases: TOOL_NAMES
-                                    .iter()
-                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
-                                    .collect(),
-                                resource_uri_aliases: RESOURCE_URIS
-                                    .iter()
-                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
-                                    .collect(),
-                                prompt_name_aliases: PROMPT_NAMES
-                                    .iter()
-                                    .map(|n| NameAlias::new(n.to_string(), n.to_string()))
-                                    .collect(),
                                 completion: HashMap::new(),
                             },
                         )]),
+                        tools: construct_services(&backend_name, TOOL_NAMES),
+                        resources: construct_services(&backend_name, RESOURCE_URIS),
+                        resource_templates: HashMap::new(),
+                        prompts: construct_services(&backend_name, PROMPT_NAMES),
                     },
                 )]),
             },

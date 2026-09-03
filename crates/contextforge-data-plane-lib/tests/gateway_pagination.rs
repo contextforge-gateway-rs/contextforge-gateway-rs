@@ -1,9 +1,6 @@
 mod support;
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use contextforge_data_plane_apis::{
     User,
@@ -32,9 +29,6 @@ fn paginating_backend(port: u16) -> BackendMCPGateway {
         add_headers: HashMap::new(),
         remove_headers: Vec::new(),
         tool_schemas: HashMap::new(),
-        tool_name_aliases: HashSet::new(),
-        resource_uri_aliases: HashSet::new(),
-        prompt_name_aliases: HashSet::new(),
         completion: HashMap::new(),
     }
 }
@@ -94,8 +88,18 @@ async fn single_backend_pagination_all_tools_reachable() -> Result<()> {
 
     let virtual_host_id = "22222222-2222-2222-2222-222222222222";
     let backends = HashMap::from([(backend_id(backend_port), paginating_backend(backend_port))]);
-    let user_config =
-        UserConfig { virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends })]) };
+    let user_config = UserConfig {
+        virtual_hosts: HashMap::from([(
+            virtual_host_id.to_owned(),
+            VirtualHost {
+                backends,
+                tools: HashMap::new(),
+                resources: HashMap::new(),
+                resource_templates: HashMap::new(),
+                prompts: HashMap::new(),
+            },
+        )]),
+    };
 
     let backend_listener = bind_backend_port(backend_port).await;
     tokio::spawn(serve_paginating_backend(backend_listener));
@@ -148,8 +152,18 @@ async fn multi_backend_exhausted_backend_not_requeried() -> Result<()> {
         (backend_id(port_a), paginating_backend(port_a)),
         (backend_id(port_b), paginating_backend(port_b)),
     ]);
-    let user_config =
-        UserConfig { virtual_hosts: HashMap::from([(virtual_host_id.to_owned(), VirtualHost { backends })]) };
+    let user_config = UserConfig {
+        virtual_hosts: HashMap::from([(
+            virtual_host_id.to_owned(),
+            VirtualHost {
+                backends,
+                tools: HashMap::new(),
+                resources: HashMap::new(),
+                resource_templates: HashMap::new(),
+                prompts: HashMap::new(),
+            },
+        )]),
+    };
 
     let listener_a = bind_backend_port(port_a).await;
     let listener_b = bind_backend_port(port_b).await;

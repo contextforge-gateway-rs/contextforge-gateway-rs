@@ -1,7 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+pub type DownstreamBackendName = String;
+pub type DownstreamToolName = String;
+pub type DownstreamResourceName = String;
+pub type DownstreamResourceTemplateName = String;
+pub type DownstreamPromptName = String;
+pub type UpstreamName = String;
+pub type VirtualHostId = String;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 pub enum IntegrationType {
@@ -10,40 +18,6 @@ pub enum IntegrationType {
     #[default]
     #[serde(rename = "MCP")]
     Mcp,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, Eq)]
-pub struct NameAlias {
-    downstream_prefixed_name: String,
-    upstream_name: String,
-}
-
-impl PartialEq for NameAlias {
-    fn eq(&self, other: &Self) -> bool {
-        self.downstream_prefixed_name == other.downstream_prefixed_name
-    }
-}
-
-impl std::hash::Hash for NameAlias {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.downstream_prefixed_name.hash(state);
-    }
-}
-
-impl NameAlias {
-    pub fn new(downstream_prefixed_name: String, upstream_name: String) -> Self {
-        Self { downstream_prefixed_name, upstream_name }
-    }
-    pub fn with_downstream_prefixed_name(downstream_prefixed_name: String) -> Self {
-        NameAlias { downstream_prefixed_name, upstream_name: String::new() }
-    }
-    pub fn get_upstream_name(&self) -> &str {
-        &self.upstream_name
-    }
-
-    pub fn get_downstream_prefixed_name(&self) -> &str {
-        &self.downstream_prefixed_name
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -60,23 +34,31 @@ pub struct BackendMCPGateway {
     #[serde(default)]
     pub remove_headers: Vec<String>,
     #[serde(default)]
-    pub tool_name_aliases: HashSet<NameAlias>,
-    #[serde(default)]
-    pub resource_uri_aliases: HashSet<NameAlias>,
-    #[serde(default)]
-    pub prompt_name_aliases: HashSet<NameAlias>,
-    #[serde(default)]
     pub completion: HashMap<String, String>,
     /// Input schemas keyed by the original upstream tool name.
     pub tool_schemas: HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct ServiceRoute {
+    pub backend_name: DownstreamBackendName,
+    pub upstream_name: UpstreamName,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualHost {
-    pub backends: HashMap<String, BackendMCPGateway>,
+    pub backends: HashMap<DownstreamBackendName, BackendMCPGateway>,
+    #[serde(default)]
+    pub tools: HashMap<DownstreamToolName, ServiceRoute>,
+    #[serde(default)]
+    pub resources: HashMap<DownstreamResourceName, ServiceRoute>,
+    #[serde(default)]
+    pub resource_templates: HashMap<DownstreamResourceTemplateName, ServiceRoute>,
+    #[serde(default)]
+    pub prompts: HashMap<DownstreamPromptName, ServiceRoute>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct UserConfig {
-    pub virtual_hosts: HashMap<String, VirtualHost>,
+    pub virtual_hosts: HashMap<VirtualHostId, VirtualHost>,
 }
