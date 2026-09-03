@@ -3,17 +3,8 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use http::{StatusCode, header};
 
-use crate::common::ContextForgeDataPlaneAppState;
-
-fn unauthorized_response(message: &str) -> Response {
-    Response::builder()
-        .status(StatusCode::UNAUTHORIZED)
-        .header(header::CONTENT_TYPE, "text/plain")
-        .body(message.to_owned().into())
-        .expect("Expecting this to work")
-}
+use crate::{common::ContextForgeDataPlaneAppState, errors::unauthorized_response};
 
 pub async fn claims_layer(
     State(state): State<ContextForgeDataPlaneAppState>,

@@ -1,6 +1,8 @@
-use axum::{body::Body, middleware::Next, response::Response};
-use http::{StatusCode, header};
+use axum::{middleware::Next, response::Response};
+
 use tracing::debug;
+
+use crate::errors::bad_request;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct VirtualHostId {
@@ -26,11 +28,7 @@ pub async fn virtual_host_id_layer(mut request: http::Request<axum::body::Body>,
         next.run(request).await
     } else {
         debug!("virtual_host_id_layer - failed to extract virtual host id from request path path = {path}");
-        Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from("Problem occured retrieving the configuration"))
-            .expect("Expecting this to work")
+        bad_request("Problem occured retrieving the configuration")
     }
 }
 

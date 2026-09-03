@@ -1,11 +1,12 @@
-use axum::{body::Body, extract::State, middleware::Next, response::Response};
-use http::{StatusCode, header};
+use axum::{extract::State, middleware::Next, response::Response};
+use http::StatusCode;
 use tracing::debug;
 
 use crate::common::{
     Config, DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT, DEFAULT_MCP_STANDARD_HEADER_MAX_TOTAL_BYTES,
     DEFAULT_MCP_STANDARD_HEADER_MAX_VALUE_BYTES,
 };
+use crate::errors::custom_error;
 use crate::mcp_standard_headers;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,11 +55,7 @@ pub(crate) async fn mcp_header_limits_layer(
         debug!(
             "mcp_header_limits_layer - rejecting request count = {count} value_bytes = {value_bytes} total_bytes = {total_bytes}"
         );
-        return Response::builder()
-            .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
-            .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from("MCP standard header limits exceeded"))
-            .expect("Expecting this to work");
+        return custom_error(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE, "MCP standard header limits exceeded");
     }
 
     next.run(request).await

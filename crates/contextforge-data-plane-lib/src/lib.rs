@@ -13,6 +13,7 @@ use rmcp::transport::{
 mod authorization;
 mod common;
 mod const_values;
+mod errors;
 mod gateway;
 mod layers;
 mod mcp_standard_headers;
@@ -42,6 +43,7 @@ use crate::layers::{
     claims_id::claims_layer,
     mcp_header_limits::{StandardHeaderLimits, mcp_header_limits_layer},
     mcp_origin::mcp_origin_layer,
+    principal_extractor::principal_extractor_layer,
     user_config_store::user_config_store_layer,
     virtual_host_config::virtual_host_config_layer,
     virtual_host_id::virtual_host_id_layer,
@@ -130,7 +132,7 @@ impl Gateway {
 
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
-        let mcp_add_state: ContextForgeDataPlaneAppState = ContextForgeDataPlaneAppState {
+        let mcp_gateway_state: ContextForgeDataPlaneAppState = ContextForgeDataPlaneAppState {
             authorization_service,
             config_store: Arc::clone(&user_config_store),
             config: config.clone(),
@@ -140,8 +142,9 @@ impl Gateway {
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
             .layer(middleware::from_fn(virtual_host_config_layer))
-            .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
-            .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
+            .layer(middleware::from_fn_with_state(mcp_gateway_state.clone(), user_config_store_layer))
+            .layer(middleware::from_fn(principal_extractor_layer))
+            .layer(middleware::from_fn_with_state(mcp_gateway_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
             // Keep this outside auth/config/RMCP work so oversized MCP headers
             // are rejected before JWT validation or body parsing.
@@ -154,7 +157,7 @@ impl Gateway {
         #[cfg(feature = "with_tools")]
         let app = tools::add_tools(app);
 
-        let app = app.with_state(mcp_add_state);
+        let app = app.with_state(mcp_gateway_state);
         let app = axum::Router::new()
             .nest("/contextforge-rs", app)
             .layer(TraceLayer::new_for_http().make_span_with(telemetry::ExtractingMakeSpan))
