@@ -25,8 +25,8 @@ use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ContentBlock, ErrorCode,
-        Implementation, InitializeRequestParams, InitializeResult, ReadResourceRequestParams, ReadResourceResponse,
-        ReadResourceResult, ResourceContents, ServerCapabilities,
+        Implementation, InitializeRequestParams, InitializeResult, ProtocolVersion, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, ResourceContents, ServerCapabilities,
     },
     service::{RequestContext, ServiceError},
     transport::{
@@ -187,7 +187,7 @@ struct E2eEnvironment {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "spawns redis-server and the contextforge-data-plane binary"]
-async fn binary_e2e_redacts_tool_arguments_results_and_resources() {
+async fn binary_e2e_redacts_tool_arguments_and_results() {
     let backend = start_backend().await;
     let env = start_environment(
         backend,
@@ -221,6 +221,32 @@ async fn binary_e2e_redacts_tool_arguments_results_and_resources() {
         .expect("secret result is redacted and call succeeds");
 
     assert_eq!(REDACTED, tool_text(&result));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "spawns redis-server and the contextforge-data-plane binary"]
+async fn binary_e2e_redacts_resource_for_2026_07_28() {
+    assert_binary_e2e_redacts_resource(ProtocolVersion::V_2026_07_28).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "spawns redis-server and the contextforge-data-plane binary"]
+async fn binary_e2e_redacts_resource_for_2025_11_25() {
+    assert_binary_e2e_redacts_resource(ProtocolVersion::V_2025_11_25).await;
+}
+
+async fn assert_binary_e2e_redacts_resource(protocol_version: ProtocolVersion) {
+    let backend = start_backend().await;
+    let env = start_environment(
+        backend,
+        json!({
+            "redact": true,
+            "redaction_text": REDACTED,
+            "block_on_detection": false,
+        }),
+    )
+    .await;
+    let service = connect_client_with_protocol(&env.gateway_url, protocol_version).await;
 
     let result = service
         .read_resource(ReadResourceRequestParams::new("file:///password.env"))
@@ -457,6 +483,13 @@ async fn write_runtime_plugin_config(redis_port: u16, plugin_config: Value) {
 }
 
 async fn connect_client(gateway_url: &str) -> rmcp::service::RunningService<RoleClient, InitializeRequestParams> {
+    connect_client_with_protocol(gateway_url, ProtocolVersion::V_2026_07_28).await
+}
+
+async fn connect_client_with_protocol(
+    gateway_url: &str,
+    protocol_version: ProtocolVersion,
+) -> rmcp::service::RunningService<RoleClient, InitializeRequestParams> {
     let mut headers = HeaderMap::new();
     headers.insert(
         http::header::AUTHORIZATION,
@@ -467,10 +500,20 @@ async fn connect_client(gateway_url: &str) -> rmcp::service::RunningService<Role
         client,
         StreamableHttpClientTransportConfig::with_uri(gateway_url.to_owned()),
     );
-    InitializeRequestParams::new(ClientCapabilities::default(), Implementation::new("secrets-e2e-client", "0.1.0"))
-        .serve(transport)
+    let handler =
+        InitializeRequestParams::new(ClientCapabilities::default(), Implementation::new("secrets-e2e-client", "0.1.0"))
+            .with_protocol_version(protocol_version.clone());
+    if protocol_version == ProtocolVersion::V_2026_07_28 {
+        rmcp::service::serve_client_with_lifecycle(
+            handler,
+            transport,
+            rmcp::ClientLifecycleMode::Discover { preferred_versions: vec![protocol_version] },
+        )
         .await
-        .expect("client connects to gateway")
+        .expect("modern client connects to gateway")
+    } else {
+        handler.serve(transport).await.expect("compatibility client connects to gateway")
+    }
 }
 
 fn sum_request_with_secret(secret_field: &str, secret: String) -> CallToolRequestParams {
