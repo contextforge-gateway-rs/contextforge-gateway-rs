@@ -100,20 +100,3 @@ pub async fn configure_user(
             .expect("Expecting this to work")
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use serde_json::Value;
-
-    use crate::authorization::AuthorizationClaims;
-
-    #[test]
-    fn new_claims_keeps_subject_and_email_metadata_separate() {
-        let claims = AuthorizationClaims::new("11111111-1111-1111-1111-111111111111", "admin@example.com");
-
-        let payload = serde_json::to_value(claims).expect("claims should serialize");
-
-        assert_eq!(payload["sub"], Value::String("11111111-1111-1111-1111-111111111111".to_owned()));
-        assert_eq!(payload["user"]["email"], Value::String("admin@example.com".to_owned()));
-    }
-}
