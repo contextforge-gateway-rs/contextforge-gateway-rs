@@ -80,27 +80,29 @@ pub(crate) fn resource_result_payload(
         .contents
         .iter()
         .map(|content| {
-            let (uri, mime_type, text) = match content {
-                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
-                    (uri.clone(), mime_type.clone(), Some(text.clone()))
-                },
-                ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
-                _ => return None,
-            };
-            Some(ContentPart::Resource {
-                content: CmfResource {
-                    resource_request_id: resource_request_id.to_owned(),
-                    uri,
-                    resource_type: ResourceType::Uri,
-                    content: text,
-                    mime_type,
-                    ..Default::default()
-                },
-            })
+            cmf_resource_content(content, resource_request_id).map(|content| ContentPart::Resource { content })
         })
         .collect::<Option<Vec<_>>>()?;
     Some(MessagePayload {
         message: Message { schema_version: "2.0".to_owned(), role: Role::Assistant, content, channel: None },
+    })
+}
+
+fn cmf_resource_content(content: &ResourceContents, resource_request_id: &str) -> Option<CmfResource> {
+    let (uri, mime_type, text) = match content {
+        ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+            (uri.clone(), mime_type.clone(), Some(text.clone()))
+        },
+        ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
+        _ => return None,
+    };
+    Some(CmfResource {
+        resource_request_id: resource_request_id.to_owned(),
+        uri,
+        resource_type: ResourceType::Uri,
+        content: text,
+        mime_type,
+        ..Default::default()
     })
 }
 
@@ -379,28 +381,7 @@ fn cmf_content_part(block: &ContentBlock, prompt_request_id: &str) -> Option<Con
             },
         },
         ContentBlock::Resource(resource) => {
-            let (uri, mime_type, content) = match &resource.resource {
-                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
-                    (uri.clone(), mime_type.clone(), Some(text.clone()))
-                },
-                ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
-                _ => return None,
-            };
-            ContentPart::Resource {
-                content: CmfResource {
-                    resource_request_id: prompt_request_id.to_owned(),
-                    uri,
-                    name: None,
-                    description: None,
-                    resource_type: ResourceType::Uri,
-                    content,
-                    blob: None,
-                    mime_type,
-                    size_bytes: None,
-                    annotations: HashMap::new(),
-                    version: None,
-                },
-            }
+            ContentPart::Resource { content: cmf_resource_content(&resource.resource, prompt_request_id)? }
         },
         ContentBlock::ResourceLink(link) => ContentPart::ResourceRef {
             content: ResourceReference {

@@ -25,6 +25,7 @@ use crate::{
         tool_call_payload, tool_json_result_payload, tool_result_payload,
     },
     error::GatewayPluginRuntimeError,
+    factory::supported_cmf_hook_name,
     hooks::{PromptPreFetchResult, ResourcePreFetchResult, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
     pipeline::{
         effective_post_json, effective_post_prompt_result, effective_post_resource_result, effective_post_result,
@@ -152,15 +153,6 @@ impl Drop for GatewayPluginRuntime {
     }
 }
 
-const SUPPORTED_HOOKS: [&str; 6] = [
-    cmf_hook_names::TOOL_PRE_INVOKE,
-    cmf_hook_names::TOOL_POST_INVOKE,
-    cmf_hook_names::PROMPT_PRE_FETCH,
-    cmf_hook_names::PROMPT_POST_FETCH,
-    cmf_hook_names::RESOURCE_PRE_FETCH,
-    cmf_hook_names::RESOURCE_POST_FETCH,
-];
-
 fn declares(config: &CpexConfig, hook_name: &str) -> bool {
     config.plugins.iter().any(|plugin| plugin.hooks.iter().any(|hook| hook == hook_name))
 }
@@ -181,7 +173,7 @@ fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayP
             return Err(GatewayPluginRuntimeError::ConfigUnsupported);
         }
 
-        if plugin.hooks.iter().any(|hook| !SUPPORTED_HOOKS.contains(&hook.as_str())) {
+        if plugin.hooks.iter().any(|hook| supported_cmf_hook_name(hook).is_none()) {
             return Err(GatewayPluginRuntimeError::ConfigUnsupported);
         }
     }
@@ -190,26 +182,15 @@ fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayP
 }
 
 impl GatewayPluginRuntime {
-    async fn invoke_tool_pre(&self, payload: MessagePayload) -> PipelineResult {
-        let (result, background_tasks) = self
-            .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::TOOL_PRE_INVOKE, payload, Extensions::default(), None)
-            .await;
-        log_pipeline_errors(cmf_hook_names::TOOL_PRE_INVOKE, &result);
-        drop(background_tasks);
-        result
-    }
-
-    async fn invoke_tool_post(
+    async fn invoke_cmf_hook(
         &self,
+        hook_name: &'static str,
         payload: MessagePayload,
         context_table: Option<PluginContextTable>,
     ) -> PipelineResult {
-        let (result, background_tasks) = self
-            .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::TOOL_POST_INVOKE, payload, Extensions::default(), context_table)
-            .await;
-        log_pipeline_errors(cmf_hook_names::TOOL_POST_INVOKE, &result);
+        let (result, background_tasks) =
+            self.manager.invoke_named::<CmfHook>(hook_name, payload, Extensions::default(), context_table).await;
+        log_pipeline_errors(hook_name, &result);
         drop(background_tasks);
         result
     }
@@ -227,7 +208,7 @@ impl GatewayPluginRuntime {
 
         let tool_call_id = next_tool_call_id();
         let original_payload = tool_call_payload(request, tool_name, backend_name, &tool_call_id);
-        let pre_result = self.invoke_tool_pre(original_payload).await;
+        let pre_result = self.invoke_cmf_hook(cmf_hook_names::TOOL_PRE_INVOKE, original_payload, None).await;
         if pre_result.is_denied() {
             return Err(plugin_denied_error("tool call", pre_result));
         }
@@ -235,30 +216,6 @@ impl GatewayPluginRuntime {
         let arguments = effective_pre_args(request.arguments.as_ref(), &pre_result)?;
         let state = Mutex::new(ToolCallState { context_table: pre_result.context_table, tool_call_id });
         Ok(ToolPreCallResult { arguments, state: Some(Arc::new(state)) })
-    }
-
-    async fn invoke_prompt_pre(&self, payload: MessagePayload) -> PipelineResult {
-        let (result, background_tasks) = self
-            .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::PROMPT_PRE_FETCH, payload, Extensions::default(), None)
-            .await;
-        log_pipeline_errors(cmf_hook_names::PROMPT_PRE_FETCH, &result);
-        drop(background_tasks);
-        result
-    }
-
-    async fn invoke_prompt_post(
-        &self,
-        payload: MessagePayload,
-        context_table: Option<PluginContextTable>,
-    ) -> PipelineResult {
-        let (result, background_tasks) = self
-            .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::PROMPT_POST_FETCH, payload, Extensions::default(), context_table)
-            .await;
-        log_pipeline_errors(cmf_hook_names::PROMPT_POST_FETCH, &result);
-        drop(background_tasks);
-        result
     }
 
     pub(crate) async fn before_get_prompt(
@@ -279,7 +236,7 @@ impl GatewayPluginRuntime {
 
         let prompt_request_id = next_prompt_request_id();
         let payload = prompt_request_payload(request, prompt_name, backend_name, &prompt_request_id);
-        let pre_result = self.invoke_prompt_pre(payload).await;
+        let pre_result = self.invoke_cmf_hook(cmf_hook_names::PROMPT_PRE_FETCH, payload, None).await;
         if pre_result.is_denied() {
             return Err(plugin_denied_error("prompt", pre_result));
         }
@@ -296,30 +253,6 @@ impl GatewayPluginRuntime {
         Ok(PromptPreFetchResult { arguments, state })
     }
 
-    async fn invoke_resource_pre(&self, payload: MessagePayload) -> PipelineResult {
-        let (result, background_tasks) = self
-            .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::RESOURCE_PRE_FETCH, payload, Extensions::default(), None)
-            .await;
-        log_pipeline_errors(cmf_hook_names::RESOURCE_PRE_FETCH, &result);
-        drop(background_tasks);
-        result
-    }
-
-    async fn invoke_resource_post(
-        &self,
-        payload: MessagePayload,
-        context_table: Option<PluginContextTable>,
-    ) -> PipelineResult {
-        let (result, background_tasks) = self
-            .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::RESOURCE_POST_FETCH, payload, Extensions::default(), context_table)
-            .await;
-        log_pipeline_errors(cmf_hook_names::RESOURCE_POST_FETCH, &result);
-        drop(background_tasks);
-        result
-    }
-
     pub(crate) async fn before_read_resource(&self, resource_uri: &str) -> Result<ResourcePreFetchResult, ErrorData> {
         let resource_request_id = next_resource_request_id();
         if !self.hooks.resource.pre {
@@ -328,7 +261,7 @@ impl GatewayPluginRuntime {
         }
 
         let payload = resource_request_payload(resource_uri, &resource_request_id);
-        let pre_result = self.invoke_resource_pre(payload).await;
+        let pre_result = self.invoke_cmf_hook(cmf_hook_names::RESOURCE_PRE_FETCH, payload, None).await;
         if pre_result.is_denied() {
             return Err(plugin_denied_error("resource", pre_result));
         }
@@ -355,7 +288,8 @@ impl GatewayPluginRuntime {
         let Some(state) = state else { return Ok(response) };
 
         let payload = prompt_result_payload(&response, prompt_name, &state.prompt_request_id);
-        let post_result = self.invoke_prompt_post(payload, Some(state.context_table.clone())).await;
+        let post_result =
+            self.invoke_cmf_hook(cmf_hook_names::PROMPT_POST_FETCH, payload, Some(state.context_table.clone())).await;
         if post_result.is_denied() {
             return Err(plugin_denied_error("prompt", post_result));
         }
@@ -376,7 +310,8 @@ impl GatewayPluginRuntime {
         let Some(state) = state else { return Ok(response) };
         let payload = resource_result_payload(&response, &state.resource_request_id)
             .ok_or_else(|| ErrorData::internal_error("Resource response contains an unsupported content type", None))?;
-        let post_result = self.invoke_resource_post(payload, state.context_table.clone()).await;
+        let post_result =
+            self.invoke_cmf_hook(cmf_hook_names::RESOURCE_POST_FETCH, payload, state.context_table.clone()).await;
         if post_result.is_denied() {
             return Err(plugin_denied_error("resource", post_result));
         }
@@ -398,7 +333,8 @@ impl GatewayPluginRuntime {
 
         let mut state = state.lock().await;
         let post_result = self
-            .invoke_tool_post(
+            .invoke_cmf_hook(
+                cmf_hook_names::TOOL_POST_INVOKE,
                 tool_result_payload(tool_name, &response, &state.tool_call_id),
                 Some(state.context_table.clone()),
             )
@@ -430,7 +366,8 @@ impl GatewayPluginRuntime {
         let content = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
         let mut state = state.lock().await;
         let post_result = self
-            .invoke_tool_post(
+            .invoke_cmf_hook(
+                cmf_hook_names::TOOL_POST_INVOKE,
                 tool_json_result_payload(tool_name, content, false, &state.tool_call_id),
                 Some(state.context_table.clone()),
             )

@@ -28,7 +28,7 @@ where
         let handlers = config
             .hooks
             .iter()
-            .filter_map(|hook| cmf_hook_name(hook))
+            .filter_map(|hook| supported_cmf_hook_name(hook))
             .map(|hook| {
                 (hook, Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin))) as Arc<dyn AnyHookHandler>)
             })
@@ -45,7 +45,7 @@ where
     }
 }
 
-fn cmf_hook_name(hook: &str) -> Option<&'static str> {
+pub(crate) fn supported_cmf_hook_name(hook: &str) -> Option<&'static str> {
     match hook {
         cmf_hook_names::TOOL_PRE_INVOKE => Some(cmf_hook_names::TOOL_PRE_INVOKE),
         cmf_hook_names::TOOL_POST_INVOKE => Some(cmf_hook_names::TOOL_POST_INVOKE),
