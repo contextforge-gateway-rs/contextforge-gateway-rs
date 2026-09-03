@@ -46,7 +46,6 @@ rustls-pki-types = { version = "1.14.1", features = ["std", "alloc"] }
 tokio-rustls = "0.26.4"
 typed-builder = "0.23.2"
 url = { workspace = true, features = ["serde"] }
-secret-string = "0.0.2"
 
 
 
@@ -64,8 +63,7 @@ openport.workspace = true
 cpex-secrets-detection.workspace = true
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
-aws-lc-rs = { version = "1.17.1", features = ["ring-io"] }
-tempfile = "3.27.0"
+
 
 [lints]
 workspace = true
