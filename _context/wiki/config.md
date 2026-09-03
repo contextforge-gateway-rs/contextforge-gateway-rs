@@ -212,11 +212,11 @@ Writing plugin edits back follows three rules:
 
 MCP prompt results carry no error flag, so a plugin setting `is_error` on the CMF prompt result is rejecting the prompt rather than describing it. The gateway turns that into an MCP error carrying the plugin's `error_message`, and the rendered content never reaches the client. This differs from tools, where `is_error` is a field on `CallToolResult` and is forwarded as a successful response.
 
-Binary resource blobs reach plugins by URI and MIME type but not by content: CMF stores decoded bytes while MCP sends base64. A plugin can deny such a message; editing one fails the write-back.
+Binary resource blobs reach plugins as decoded CMF bytes and are encoded back to MCP base64 after an edit. Unchanged blobs retain the backend's exact wire representation.
 
 ### Resource Read Hook Behavior
 
-For `resources/read`, the pre hook runs after routing and may allow or deny the canonical backend-local URI, but cannot change it. The post hook can redact text resources or deny the response. URI, MIME type, item count, and blob identity must remain stable; unsupported or lossy edits fail closed.
+For `resources/read`, the pre hook runs after routing and may allow or deny the canonical backend-local URI, but cannot change it. The post hook can redact text resources, transform binary resources, or deny the response. URI, MIME type, item count, CMF schema version, and channel must remain stable; unsupported or lossy edits and invalid hook lifecycle state fail closed.
 
 ### Demo Plugin Workflow
 

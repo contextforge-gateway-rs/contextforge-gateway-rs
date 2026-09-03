@@ -11,6 +11,6 @@ pub use error::GatewayPluginRuntimeError;
 pub use factory::CmfPluginFactory;
 pub use handle::{CpexRuntimeRegistry, GatewayPluginRuntimeHandle};
 pub use hooks::{
-    PromptArgumentsUpdate, PromptPreFetchResult, ResourcePreFetchResult, RuntimeHookError, RuntimeHookState,
-    ToolArgumentsUpdate, ToolPreCallResult,
+    PromptArgumentsUpdate, PromptPreFetchResult, ResourceHookState, ResourcePreFetchResult, RuntimeHookError,
+    RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult,
 };

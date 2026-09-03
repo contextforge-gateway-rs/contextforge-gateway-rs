@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 use cpex::cpex_core::cmf::{
     AudioSource, ContentPart, ImageSource, Message, MessagePayload, PromptRequest, PromptResult,
-    Resource as CmfResource, ResourceReference, ResourceType, Role, ToolCall, ToolResult,
+    Resource as CmfResource, ResourceReference, ResourceType, Role, ToolCall, ToolResult, constants::SCHEMA_VERSION,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult, PromptMessage,
@@ -18,7 +19,7 @@ pub(crate) fn tool_call_payload(
 ) -> MessagePayload {
     MessagePayload {
         message: Message {
-            schema_version: "2.0".to_owned(),
+            schema_version: SCHEMA_VERSION.to_owned(),
             role: Role::Assistant,
             content: vec![ContentPart::ToolCall {
                 content: ToolCall {
@@ -36,7 +37,7 @@ pub(crate) fn tool_call_payload(
 pub(crate) fn resource_request_payload(resource_uri: &str, resource_request_id: &str) -> MessagePayload {
     MessagePayload {
         message: Message {
-            schema_version: "2.0".to_owned(),
+            schema_version: SCHEMA_VERSION.to_owned(),
             role: Role::User,
             content: vec![ContentPart::ResourceRef {
                 content: ResourceReference {
@@ -62,7 +63,7 @@ pub(crate) fn resource_request_matches(
     let [ContentPart::ResourceRef { content }] = payload.message.content.as_slice() else {
         return false;
     };
-    payload.message.role == Role::User
+    canonical_message_envelope(payload, Role::User)
         && content.resource_request_id == resource_request_id
         && content.uri == resource_uri
         && matches!(content.resource_type, ResourceType::Uri)
@@ -84,16 +85,18 @@ pub(crate) fn resource_result_payload(
         })
         .collect::<Option<Vec<_>>>()?;
     Some(MessagePayload {
-        message: Message { schema_version: "2.0".to_owned(), role: Role::Assistant, content, channel: None },
+        message: Message { schema_version: SCHEMA_VERSION.to_owned(), role: Role::Assistant, content, channel: None },
     })
 }
 
 fn cmf_resource_content(content: &ResourceContents, resource_request_id: &str) -> Option<CmfResource> {
-    let (uri, mime_type, text) = match content {
+    let (uri, mime_type, text, blob) = match content {
         ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
-            (uri.clone(), mime_type.clone(), Some(text.clone()))
+            (uri.clone(), mime_type.clone(), Some(text.clone()), None)
         },
-        ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
+        ResourceContents::BlobResourceContents { uri, mime_type, blob, .. } => {
+            (uri.clone(), mime_type.clone(), None, Some(BASE64_STANDARD.decode(blob).ok()?))
+        },
         _ => return None,
     };
     Some(CmfResource {
@@ -101,6 +104,7 @@ fn cmf_resource_content(content: &ResourceContents, resource_request_id: &str) -
         uri,
         resource_type: ResourceType::Uri,
         content: text,
+        blob,
         mime_type,
         ..Default::default()
     })
@@ -111,7 +115,8 @@ pub(crate) fn resource_result_response(
     payload: &MessagePayload,
     resource_request_id: &str,
 ) -> Option<ReadResourceResult> {
-    if payload.message.role != Role::Assistant || payload.message.content.len() != original.contents.len() {
+    if !canonical_message_envelope(payload, Role::Assistant) || payload.message.content.len() != original.contents.len()
+    {
         return None;
     }
 
@@ -123,7 +128,6 @@ pub(crate) fn resource_result_response(
             || !matches!(content.resource_type, ResourceType::Uri)
             || content.name.is_some()
             || content.description.is_some()
-            || content.blob.is_some()
             || content.size_bytes.is_some()
             || !content.annotations.is_empty()
             || content.version.is_some()
@@ -132,20 +136,31 @@ pub(crate) fn resource_result_response(
         }
         match original {
             ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
-                if content.uri != *uri || content.mime_type != *mime_type {
+                if content.uri != *uri || content.mime_type != *mime_type || content.blob.is_some() {
                     return None;
                 }
                 *text = content.content.clone()?;
             },
-            ResourceContents::BlobResourceContents { uri, mime_type, .. } => {
+            ResourceContents::BlobResourceContents { uri, mime_type, blob, .. } => {
                 if content.uri != *uri || content.mime_type != *mime_type || content.content.is_some() {
                     return None;
+                }
+                let modified_blob = content.blob.as_ref()?;
+                let original_blob = BASE64_STANDARD.decode(blob.as_bytes()).ok()?;
+                if modified_blob != &original_blob {
+                    *blob = BASE64_STANDARD.encode(modified_blob);
                 }
             },
             _ => return None,
         }
     }
     Some(original)
+}
+
+fn canonical_message_envelope(payload: &MessagePayload, role: Role) -> bool {
+    payload.message.schema_version == SCHEMA_VERSION
+        && payload.message.role == role
+        && payload.message.channel.is_none()
 }
 
 pub(crate) fn tool_result_payload(tool_name: &str, response: &CallToolResult, tool_call_id: &str) -> MessagePayload {
@@ -165,7 +180,7 @@ pub(crate) fn tool_json_result_payload(
 ) -> MessagePayload {
     MessagePayload {
         message: Message {
-            schema_version: "2.0".to_owned(),
+            schema_version: SCHEMA_VERSION.to_owned(),
             role: Role::Tool,
             content: vec![ContentPart::ToolResult {
                 content: ToolResult {
@@ -241,7 +256,7 @@ pub(crate) fn prompt_request_payload(
 ) -> MessagePayload {
     MessagePayload {
         message: Message {
-            schema_version: "2.0".to_owned(),
+            schema_version: SCHEMA_VERSION.to_owned(),
             role: Role::User,
             content: vec![ContentPart::PromptRequest {
                 content: PromptRequest {
@@ -283,7 +298,7 @@ pub(crate) fn prompt_result_payload(
 
     MessagePayload {
         message: Message {
-            schema_version: "2.0".to_owned(),
+            schema_version: SCHEMA_VERSION.to_owned(),
             role: Role::Assistant,
             content: vec![ContentPart::PromptResult {
                 content: PromptResult {
@@ -352,7 +367,7 @@ pub(crate) fn prompt_result_response(
 
 fn cmf_prompt_message(message: &PromptMessage, prompt_request_id: &str) -> Message {
     Message {
-        schema_version: "2.0".to_owned(),
+        schema_version: SCHEMA_VERSION.to_owned(),
         role: match message.role {
             McpRole::Assistant => Role::Assistant,
             McpRole::User => Role::User,
@@ -422,12 +437,7 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
         ContentPart::Audio { content } => {
             ContentBlock::audio(inline_media_data(&content.source_type, &content.data)?, content.media_type.clone()?)
         },
-        ContentPart::Resource { content } => ContentBlock::resource(ResourceContents::TextResourceContents {
-            uri: content.uri.clone(),
-            mime_type: content.mime_type.clone(),
-            text: content.content.clone()?,
-            meta: None,
-        }),
+        ContentPart::Resource { content } => ContentBlock::resource(mcp_resource_content(content)?),
         ContentPart::ResourceRef { content } => {
             ContentBlock::ResourceLink(McpResource::new(content.uri.clone(), content.name.clone()?))
         },
@@ -437,8 +447,28 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
     Some(PromptMessage::new(role, content))
 }
 
+fn mcp_resource_content(content: &CmfResource) -> Option<ResourceContents> {
+    match (&content.content, &content.blob) {
+        (Some(text), None) => Some(ResourceContents::TextResourceContents {
+            uri: content.uri.clone(),
+            mime_type: content.mime_type.clone(),
+            text: text.clone(),
+            meta: None,
+        }),
+        (None, Some(blob)) => Some(ResourceContents::BlobResourceContents {
+            uri: content.uri.clone(),
+            mime_type: content.mime_type.clone(),
+            blob: BASE64_STANDARD.encode(blob),
+            meta: None,
+        }),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use cpex::cpex_core::cmf::Channel;
+
     use super::*;
 
     #[test]
@@ -448,6 +478,19 @@ mod tests {
             panic!("expected resource reference");
         };
         content.uri = "file:///other.env".to_owned();
+
+        assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
+    }
+
+    #[test]
+    fn resource_request_rejects_modified_envelope() {
+        let mut payload = resource_request_payload("file:///password.env", "resource-1");
+        payload.message.schema_version = "3.0".to_owned();
+
+        assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
+
+        let mut payload = resource_request_payload("file:///password.env", "resource-1");
+        payload.message.channel = Some(Channel::Analysis);
 
         assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
     }
@@ -479,6 +522,65 @@ mod tests {
             panic!("expected resource content");
         };
         content.uri = "file:///other.env".to_owned();
+
+        assert!(resource_result_response(original, &payload, "resource-1").is_none());
+    }
+
+    #[test]
+    fn resource_result_response_decodes_and_applies_blob_changes() {
+        let wire_blob = BASE64_STANDARD.encode(b"AWS_ACCESS_KEY_ID=secret");
+        let original = ReadResourceResult::new(vec![
+            ResourceContents::blob(wire_blob.clone(), "file:///password.bin")
+                .with_mime_type("application/octet-stream"),
+        ]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("valid blob is supported");
+        let ContentPart::Resource { content } = &mut payload.message.content[0] else {
+            panic!("expected resource content");
+        };
+        assert_eq!(Some(b"AWS_ACCESS_KEY_ID=secret".as_slice()), content.blob.as_deref());
+        content.blob = Some(b"AWS_ACCESS_KEY_ID=[redacted]".to_vec());
+
+        let result = resource_result_response(original, &payload, "resource-1").expect("blob edit applies");
+
+        let ResourceContents::BlobResourceContents { blob, uri, .. } = &result.contents[0] else {
+            panic!("expected blob resource");
+        };
+        assert_eq!(b"AWS_ACCESS_KEY_ID=[redacted]", BASE64_STANDARD.decode(blob).expect("valid base64").as_slice());
+        assert_eq!("file:///password.bin", uri);
+        assert_ne!(&wire_blob, blob);
+    }
+
+    #[test]
+    fn resource_result_response_preserves_unchanged_blob_wire_value() {
+        let wire_blob = BASE64_STANDARD.encode(b"unchanged");
+        let original = ReadResourceResult::new(vec![ResourceContents::blob(&wire_blob, "file:///image.bin")]);
+        let payload = resource_result_payload(&original, "resource-1").expect("valid blob is supported");
+
+        let result = resource_result_response(original, &payload, "resource-1").expect("unchanged blob applies");
+
+        let ResourceContents::BlobResourceContents { blob, .. } = &result.contents[0] else {
+            panic!("expected blob resource");
+        };
+        assert_eq!(&wire_blob, blob);
+    }
+
+    #[test]
+    fn resource_result_payload_rejects_invalid_base64_blob() {
+        let original = ReadResourceResult::new(vec![ResourceContents::blob("not base64!", "file:///image.bin")]);
+
+        assert!(resource_result_payload(&original, "resource-1").is_none());
+    }
+
+    #[test]
+    fn resource_result_response_rejects_modified_envelope() {
+        let original = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
+        payload.message.schema_version = "3.0".to_owned();
+
+        assert!(resource_result_response(original.clone(), &payload, "resource-1").is_none());
+
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
+        payload.message.channel = Some(Channel::Final);
 
         assert!(resource_result_response(original, &payload, "resource-1").is_none());
     }
@@ -916,6 +1018,31 @@ mod tests {
         };
         assert_eq!("token=[REDACTED]", text);
         assert_eq!("file:///app.env", uri);
+    }
+
+    #[test]
+    fn prompt_result_response_round_trips_embedded_blob_resource() {
+        let original = GetPromptResult::new(vec![PromptMessage::new(
+            McpRole::User,
+            ContentBlock::resource(ResourceContents::blob(BASE64_STANDARD.encode(b"token=secret"), "file:///app.bin")),
+        )]);
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
+        let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
+            panic!("embedded resource reaches the plugin as a CMF resource part");
+        };
+        assert_eq!(Some(b"token=secret".as_slice()), content.blob.as_deref());
+        content.blob = Some(b"token=[REDACTED]".to_vec());
+
+        let result = prompt_result_response(original, &payload, "review", "prompt-1").expect("resource edit applies");
+
+        let ContentBlock::Resource(resource) = &result.messages[0].content else {
+            panic!("expected an embedded resource");
+        };
+        let ResourceContents::BlobResourceContents { blob, uri, .. } = &resource.resource else {
+            panic!("expected blob resource contents");
+        };
+        assert_eq!(b"token=[REDACTED]", BASE64_STANDARD.decode(blob).expect("valid base64").as_slice());
+        assert_eq!("file:///app.bin", uri);
     }
 
     #[test]

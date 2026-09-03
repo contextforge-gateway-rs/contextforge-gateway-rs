@@ -15,6 +15,7 @@ doctest = false
 [dependencies]
 arc-swap = "1.7"
 async-trait.workspace = true
+base64.workspace = true
 contextforge-data-plane-apis.workspace = true
 cpex.workspace = true
 redis.workspace = true

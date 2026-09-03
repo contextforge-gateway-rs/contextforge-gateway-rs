@@ -26,7 +26,10 @@ use crate::{
     },
     error::GatewayPluginRuntimeError,
     factory::supported_cmf_hook_name,
-    hooks::{PromptPreFetchResult, ResourcePreFetchResult, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
+    hooks::{
+        PromptPreFetchResult, ResourcePreFetchResult, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult,
+        invalid_resource_hook_state_error,
+    },
     pipeline::{
         effective_post_json, effective_post_prompt_result, effective_post_resource_result, effective_post_result,
         effective_pre_args, effective_pre_prompt_args, log_pipeline_errors, plugin_denied_error,
@@ -87,7 +90,7 @@ fn new_prompt_call_state(context_table: PluginContextTable, prompt_request_id: S
 }
 
 struct ResourceCallState {
-    context_table: Option<PluginContextTable>,
+    context_table: PluginContextTable,
     resource_request_id: String,
 }
 
@@ -95,7 +98,7 @@ fn next_resource_request_id() -> String {
     format!("gateway-resource-request-{}", CORRELATION_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-fn new_resource_call_state(context_table: Option<PluginContextTable>, resource_request_id: String) -> RuntimeHookState {
+fn new_resource_call_state(context_table: PluginContextTable, resource_request_id: String) -> RuntimeHookState {
     Arc::new(ResourceCallState { context_table, resource_request_id })
 }
 
@@ -254,10 +257,16 @@ impl GatewayPluginRuntime {
     }
 
     pub(crate) async fn before_read_resource(&self, resource_uri: &str) -> Result<ResourcePreFetchResult, ErrorData> {
+        if !self.hooks.resource.pre && !self.hooks.resource.post {
+            return Ok(ResourcePreFetchResult::unchanged());
+        }
+
         let resource_request_id = next_resource_request_id();
         if !self.hooks.resource.pre {
-            let state = self.hooks.resource.post.then(|| new_resource_call_state(None, resource_request_id));
-            return Ok(ResourcePreFetchResult { state });
+            return Ok(ResourcePreFetchResult::with_post_state(new_resource_call_state(
+                PluginContextTable::default(),
+                resource_request_id,
+            )));
         }
 
         let payload = resource_request_payload(resource_uri, &resource_request_id);
@@ -266,12 +275,14 @@ impl GatewayPluginRuntime {
             return Err(plugin_denied_error("resource", pre_result));
         }
         validate_pre_resource_result(&pre_result, resource_uri, &resource_request_id)?;
-        let state = self
-            .hooks
-            .resource
-            .post
-            .then(|| new_resource_call_state(Some(pre_result.context_table), resource_request_id));
-        Ok(ResourcePreFetchResult { state })
+        if self.hooks.resource.post {
+            Ok(ResourcePreFetchResult::with_post_state(new_resource_call_state(
+                pre_result.context_table,
+                resource_request_id,
+            )))
+        } else {
+            Ok(ResourcePreFetchResult::unchanged())
+        }
     }
 
     pub(crate) async fn after_get_prompt(
@@ -300,18 +311,13 @@ impl GatewayPluginRuntime {
     pub(crate) async fn after_read_resource(
         &self,
         response: ReadResourceResult,
-        state: Option<RuntimeHookState>,
+        state: RuntimeHookState,
     ) -> Result<ReadResourceResult, ErrorData> {
-        if !self.hooks.resource.post {
-            return Ok(response);
-        }
-
-        let state = state.and_then(|state| state.downcast::<ResourceCallState>().ok());
-        let Some(state) = state else { return Ok(response) };
+        let state = state.downcast::<ResourceCallState>().map_err(|_| invalid_resource_hook_state_error())?;
         let payload = resource_result_payload(&response, &state.resource_request_id)
             .ok_or_else(|| ErrorData::internal_error("Resource response contains an unsupported content type", None))?;
         let post_result =
-            self.invoke_cmf_hook(cmf_hook_names::RESOURCE_POST_FETCH, payload, state.context_table.clone()).await;
+            self.invoke_cmf_hook(cmf_hook_names::RESOURCE_POST_FETCH, payload, Some(state.context_table.clone())).await;
         if post_result.is_denied() {
             return Err(plugin_denied_error("resource", post_result));
         }
