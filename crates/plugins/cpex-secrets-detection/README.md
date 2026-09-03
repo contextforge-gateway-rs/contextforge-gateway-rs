@@ -21,7 +21,7 @@ Example config:
       {
         "name": "secrets-detection",
         "kind": "validator/secrets-detection",
-        "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
+        "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke", "cmf.resource_post_fetch"],
         "config": {
           "redact": true,
           "redaction_text": "[redacted]",
@@ -33,14 +33,12 @@ Example config:
 }
 ```
 
-The dataplane integration currently wires the tool-call path:
+The dataplane integration supports:
 
 - `cmf.tool_pre_invoke`: scans tool arguments before the backend receives them.
 - `cmf.tool_post_invoke`: scans tool results before the client receives them.
-
-The crate also keeps prompt/resource stage handling for CPEX parity and future
-hosts, but the current dataplane runtime config only uses the tool pre/post
-hooks.
+- `cmf.prompt_pre_fetch`: scans prompt arguments before rendering.
+- `cmf.resource_post_fetch`: scans text resource contents before returning them.
 
 ## Behavior
 

@@ -60,8 +60,8 @@ Activation requires all three pieces:
 - Runtime flag: `--runtime-plugins-enabled true`
 - Redis config key: `ContextForgeGatewayRuntimePluginConfig`
 
-The plugin kind is `validator/secrets-detection`. The data plane currently
-wires only `cmf.tool_pre_invoke` and `cmf.tool_post_invoke`.
+The plugin kind is `validator/secrets-detection`. The dataplane wires CMF hooks
+for tool calls, prompt fetches, and resource reads.
 
 Example run command:
 

@@ -185,8 +185,8 @@ RuntimePluginConfigDocument
   cpex: CpexConfig
 ```
 
-Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke`, `cmf.prompt_pre_fetch`, `cmf.prompt_post_fetch` only.
-Rejected: routing-based selection, plugin dirs, global policies, resource and LLM hooks, plugin conditions.
+Supported: tool, prompt, and resource pre/post CMF hooks.
+Rejected: routing-based selection, plugin dirs, global policies, LLM hooks, plugin conditions.
 Config validation and `CmfPluginFactory` registration must agree on that list: a hook accepted by validation but not registered leaves the plugin loaded and silently inert.
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
 
@@ -213,6 +213,10 @@ Writing plugin edits back follows three rules:
 MCP prompt results carry no error flag, so a plugin setting `is_error` on the CMF prompt result is rejecting the prompt rather than describing it. The gateway turns that into an MCP error carrying the plugin's `error_message`, and the rendered content never reaches the client. This differs from tools, where `is_error` is a field on `CallToolResult` and is forwarded as a successful response.
 
 Binary resource blobs reach plugins by URI and MIME type but not by content: CMF stores decoded bytes while MCP sends base64. A plugin can deny such a message; editing one fails the write-back.
+
+### Resource Read Hook Behavior
+
+For `resources/read`, the pre hook runs after routing and may allow or deny the canonical backend-local URI, but cannot change it. The post hook can redact text resources or deny the response. URI, MIME type, item count, and blob identity must remain stable; unsupported or lossy edits fail closed.
 
 ### Demo Plugin Workflow
 

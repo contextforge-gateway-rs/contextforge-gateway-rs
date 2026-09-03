@@ -54,8 +54,7 @@ impl Plugin for SecretsDetectionCore {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
-    // The dataplane runtime config currently uses the tool pre/post stages.
-    // Prompt/resource stages are kept for CPEX parity and future hosts.
+    // Runtime configuration registers each stage independently.
     PromptPreFetch,
     ToolPreInvoke,
     ToolPostInvoke,

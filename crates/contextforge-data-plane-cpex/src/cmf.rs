@@ -6,7 +6,7 @@ use cpex::cpex_core::cmf::{
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResult, PromptMessage,
-    Resource as McpResource, ResourceContents, Role as McpRole,
+    ReadResourceResult, Resource as McpResource, ResourceContents, Role as McpRole,
 };
 use serde_json::{Map, Value};
 
@@ -31,6 +31,119 @@ pub(crate) fn tool_call_payload(
             channel: None,
         },
     }
+}
+
+pub(crate) fn resource_request_payload(resource_uri: &str, resource_request_id: &str) -> MessagePayload {
+    MessagePayload {
+        message: Message {
+            schema_version: "2.0".to_owned(),
+            role: Role::User,
+            content: vec![ContentPart::ResourceRef {
+                content: ResourceReference {
+                    resource_request_id: resource_request_id.to_owned(),
+                    uri: resource_uri.to_owned(),
+                    name: None,
+                    resource_type: ResourceType::Uri,
+                    range_start: None,
+                    range_end: None,
+                    selector: None,
+                },
+            }],
+            channel: None,
+        },
+    }
+}
+
+pub(crate) fn resource_request_matches(
+    payload: &MessagePayload,
+    resource_uri: &str,
+    resource_request_id: &str,
+) -> bool {
+    let [ContentPart::ResourceRef { content }] = payload.message.content.as_slice() else {
+        return false;
+    };
+    payload.message.role == Role::User
+        && content.resource_request_id == resource_request_id
+        && content.uri == resource_uri
+        && matches!(content.resource_type, ResourceType::Uri)
+        && content.name.is_none()
+        && content.range_start.is_none()
+        && content.range_end.is_none()
+        && content.selector.is_none()
+}
+
+pub(crate) fn resource_result_payload(
+    response: &ReadResourceResult,
+    resource_request_id: &str,
+) -> Option<MessagePayload> {
+    let content = response
+        .contents
+        .iter()
+        .map(|content| {
+            let (uri, mime_type, text) = match content {
+                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+                    (uri.clone(), mime_type.clone(), Some(text.clone()))
+                },
+                ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
+                _ => return None,
+            };
+            Some(ContentPart::Resource {
+                content: CmfResource {
+                    resource_request_id: resource_request_id.to_owned(),
+                    uri,
+                    resource_type: ResourceType::Uri,
+                    content: text,
+                    mime_type,
+                    ..Default::default()
+                },
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(MessagePayload {
+        message: Message { schema_version: "2.0".to_owned(), role: Role::Assistant, content, channel: None },
+    })
+}
+
+pub(crate) fn resource_result_response(
+    mut original: ReadResourceResult,
+    payload: &MessagePayload,
+    resource_request_id: &str,
+) -> Option<ReadResourceResult> {
+    if payload.message.role != Role::Assistant || payload.message.content.len() != original.contents.len() {
+        return None;
+    }
+
+    for (original, modified) in original.contents.iter_mut().zip(&payload.message.content) {
+        let ContentPart::Resource { content } = modified else {
+            return None;
+        };
+        if content.resource_request_id != resource_request_id
+            || !matches!(content.resource_type, ResourceType::Uri)
+            || content.name.is_some()
+            || content.description.is_some()
+            || content.blob.is_some()
+            || content.size_bytes.is_some()
+            || !content.annotations.is_empty()
+            || content.version.is_some()
+        {
+            return None;
+        }
+        match original {
+            ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+                if content.uri != *uri || content.mime_type != *mime_type {
+                    return None;
+                }
+                *text = content.content.clone()?;
+            },
+            ResourceContents::BlobResourceContents { uri, mime_type, .. } => {
+                if content.uri != *uri || content.mime_type != *mime_type || content.content.is_some() {
+                    return None;
+                }
+            },
+            _ => return None,
+        }
+    }
+    Some(original)
 }
 
 pub(crate) fn tool_result_payload(tool_name: &str, response: &CallToolResult, tool_call_id: &str) -> MessagePayload {
@@ -346,6 +459,48 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_request_rejects_uri_mutation() {
+        let mut payload = resource_request_payload("file:///password.env", "resource-1");
+        let ContentPart::ResourceRef { content } = &mut payload.message.content[0] else {
+            panic!("expected resource reference");
+        };
+        content.uri = "file:///other.env".to_owned();
+
+        assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
+    }
+
+    #[test]
+    fn resource_result_response_applies_only_text_changes() {
+        let original =
+            ReadResourceResult::new(vec![ResourceContents::text("AWS_ACCESS_KEY_ID=secret", "file:///password.env")]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
+        let ContentPart::Resource { content } = &mut payload.message.content[0] else {
+            panic!("expected resource content");
+        };
+        content.content = Some("AWS_ACCESS_KEY_ID=[redacted]".to_owned());
+
+        let result = resource_result_response(original, &payload, "resource-1").expect("text edit applies");
+
+        let ResourceContents::TextResourceContents { text, uri, .. } = &result.contents[0] else {
+            panic!("expected text resource");
+        };
+        assert_eq!("AWS_ACCESS_KEY_ID=[redacted]", text);
+        assert_eq!("file:///password.env", uri);
+    }
+
+    #[test]
+    fn resource_result_response_rejects_uri_mutation() {
+        let original = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
+        let ContentPart::Resource { content } = &mut payload.message.content[0] else {
+            panic!("expected resource content");
+        };
+        content.uri = "file:///other.env".to_owned();
+
+        assert!(resource_result_response(original, &payload, "resource-1").is_none());
+    }
 
     fn text_prompt() -> GetPromptResult {
         GetPromptResult::new(vec![PromptMessage::new_text(McpRole::User, "review of weather")])

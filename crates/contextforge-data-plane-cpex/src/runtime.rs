@@ -14,20 +14,22 @@ use cpex::cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult},
+    model::{CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult, ReadResourceResult},
     serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::sync::Mutex;
 
 use crate::{
     cmf::{
-        prompt_request_payload, prompt_result_payload, tool_call_payload, tool_json_result_payload, tool_result_payload,
+        prompt_request_payload, prompt_result_payload, resource_request_payload, resource_result_payload,
+        tool_call_payload, tool_json_result_payload, tool_result_payload,
     },
     error::GatewayPluginRuntimeError,
-    hooks::{PromptPreFetchResult, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
+    hooks::{PromptPreFetchResult, ResourcePreFetchResult, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
     pipeline::{
-        effective_post_json, effective_post_prompt_result, effective_post_result, effective_pre_args,
-        effective_pre_prompt_args, log_pipeline_errors, plugin_denied_error,
+        effective_post_json, effective_post_prompt_result, effective_post_resource_result, effective_post_result,
+        effective_pre_args, effective_pre_prompt_args, log_pipeline_errors, plugin_denied_error,
+        validate_pre_resource_result,
     },
 };
 
@@ -41,6 +43,7 @@ struct HookPair {
 struct HookPresence {
     tool: HookPair,
     prompt: HookPair,
+    resource: HookPair,
 }
 
 #[derive(Default)]
@@ -82,6 +85,19 @@ fn new_prompt_call_state(context_table: PluginContextTable, prompt_request_id: S
     Arc::new(PromptCallState { context_table, prompt_request_id })
 }
 
+struct ResourceCallState {
+    context_table: Option<PluginContextTable>,
+    resource_request_id: String,
+}
+
+fn next_resource_request_id() -> String {
+    format!("gateway-resource-request-{}", CORRELATION_ID.fetch_add(1, Ordering::Relaxed))
+}
+
+fn new_resource_call_state(context_table: Option<PluginContextTable>, resource_request_id: String) -> RuntimeHookState {
+    Arc::new(ResourceCallState { context_table, resource_request_id })
+}
+
 impl GatewayPluginRuntime {
     pub(crate) fn has_post_hook(&self) -> bool {
         self.hooks.tool.post
@@ -89,6 +105,10 @@ impl GatewayPluginRuntime {
 
     pub(crate) fn has_prompt_post_hook(&self) -> bool {
         self.hooks.prompt.post
+    }
+
+    pub(crate) fn has_resource_post_hook(&self) -> bool {
+        self.hooks.resource.post
     }
 
     pub(crate) async fn from_config(
@@ -105,6 +125,10 @@ impl GatewayPluginRuntime {
             prompt: HookPair {
                 pre: declares(&config, cmf_hook_names::PROMPT_PRE_FETCH),
                 post: declares(&config, cmf_hook_names::PROMPT_POST_FETCH),
+            },
+            resource: HookPair {
+                pre: declares(&config, cmf_hook_names::RESOURCE_PRE_FETCH),
+                post: declares(&config, cmf_hook_names::RESOURCE_POST_FETCH),
             },
         };
         let manager = PluginManager::from_config(config, factories)
@@ -128,11 +152,13 @@ impl Drop for GatewayPluginRuntime {
     }
 }
 
-const SUPPORTED_HOOKS: [&str; 4] = [
+const SUPPORTED_HOOKS: [&str; 6] = [
     cmf_hook_names::TOOL_PRE_INVOKE,
     cmf_hook_names::TOOL_POST_INVOKE,
     cmf_hook_names::PROMPT_PRE_FETCH,
     cmf_hook_names::PROMPT_POST_FETCH,
+    cmf_hook_names::RESOURCE_PRE_FETCH,
+    cmf_hook_names::RESOURCE_POST_FETCH,
 ];
 
 fn declares(config: &CpexConfig, hook_name: &str) -> bool {
@@ -270,6 +296,51 @@ impl GatewayPluginRuntime {
         Ok(PromptPreFetchResult { arguments, state })
     }
 
+    async fn invoke_resource_pre(&self, payload: MessagePayload) -> PipelineResult {
+        let (result, background_tasks) = self
+            .manager
+            .invoke_named::<CmfHook>(cmf_hook_names::RESOURCE_PRE_FETCH, payload, Extensions::default(), None)
+            .await;
+        log_pipeline_errors(cmf_hook_names::RESOURCE_PRE_FETCH, &result);
+        drop(background_tasks);
+        result
+    }
+
+    async fn invoke_resource_post(
+        &self,
+        payload: MessagePayload,
+        context_table: Option<PluginContextTable>,
+    ) -> PipelineResult {
+        let (result, background_tasks) = self
+            .manager
+            .invoke_named::<CmfHook>(cmf_hook_names::RESOURCE_POST_FETCH, payload, Extensions::default(), context_table)
+            .await;
+        log_pipeline_errors(cmf_hook_names::RESOURCE_POST_FETCH, &result);
+        drop(background_tasks);
+        result
+    }
+
+    pub(crate) async fn before_read_resource(&self, resource_uri: &str) -> Result<ResourcePreFetchResult, ErrorData> {
+        let resource_request_id = next_resource_request_id();
+        if !self.hooks.resource.pre {
+            let state = self.hooks.resource.post.then(|| new_resource_call_state(None, resource_request_id));
+            return Ok(ResourcePreFetchResult { state });
+        }
+
+        let payload = resource_request_payload(resource_uri, &resource_request_id);
+        let pre_result = self.invoke_resource_pre(payload).await;
+        if pre_result.is_denied() {
+            return Err(plugin_denied_error("resource", pre_result));
+        }
+        validate_pre_resource_result(&pre_result, resource_uri, &resource_request_id)?;
+        let state = self
+            .hooks
+            .resource
+            .post
+            .then(|| new_resource_call_state(Some(pre_result.context_table), resource_request_id));
+        Ok(ResourcePreFetchResult { state })
+    }
+
     pub(crate) async fn after_get_prompt(
         &self,
         prompt_name: &str,
@@ -290,6 +361,26 @@ impl GatewayPluginRuntime {
         }
 
         effective_post_prompt_result(response, &post_result, prompt_name, &state.prompt_request_id)
+    }
+
+    pub(crate) async fn after_read_resource(
+        &self,
+        response: ReadResourceResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        if !self.hooks.resource.post {
+            return Ok(response);
+        }
+
+        let state = state.and_then(|state| state.downcast::<ResourceCallState>().ok());
+        let Some(state) = state else { return Ok(response) };
+        let payload = resource_result_payload(&response, &state.resource_request_id)
+            .ok_or_else(|| ErrorData::internal_error("Resource response contains an unsupported content type", None))?;
+        let post_result = self.invoke_resource_post(payload, state.context_table.clone()).await;
+        if post_result.is_denied() {
+            return Err(plugin_denied_error("resource", post_result));
+        }
+        effective_post_resource_result(response, &post_result, &state.resource_request_id)
     }
 
     pub(crate) async fn after_tool_call(

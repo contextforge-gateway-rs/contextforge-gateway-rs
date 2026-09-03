@@ -1,3 +1,4 @@
+use contextforge_data_plane_cpex::ResourcePreFetchResult;
 use rmcp::{
     ErrorData, RoleServer,
     model::{
@@ -39,6 +40,11 @@ pub(super) async fn read_resource(
         data: None,
     })?;
 
+    let pre_result = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        plugin_runtime.before_read_resource(&resource_uri).await?
+    } else {
+        ResourcePreFetchResult::unchanged()
+    };
     let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
     let mut routed_request = request;
 
@@ -48,6 +54,11 @@ pub(super) async fn read_resource(
         tracing::warn!("read_resource: backend cleanup failed backend_name = {backend_name} error = {error:?}");
     }
     let response = response.map_err(|error| backend_forward_error("read_resource", &backend_name, &error))?;
+    let response = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        plugin_runtime.after_read_resource(response, pre_result.state).await?
+    } else {
+        response
+    };
 
     info!("read_resource: backend {backend_name} returned {} contents", response.contents.len());
 

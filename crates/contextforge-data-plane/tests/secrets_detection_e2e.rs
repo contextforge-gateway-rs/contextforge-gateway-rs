@@ -16,7 +16,7 @@ use std::{
 use contextforge_data_plane_apis::{
     User,
     runtime_plugin_config::{RUNTIME_PLUGIN_CONFIG_KEY, RUNTIME_PLUGIN_CONFIG_VERSION},
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, ServiceRoute, UserConfig, VirtualHost},
 };
 use http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -25,7 +25,8 @@ use rmcp::{
     ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ContentBlock, ErrorCode,
-        Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities,
+        Implementation, InitializeRequestParams, InitializeResult, ReadResourceRequestParams, ReadResourceResponse,
+        ReadResourceResult, ResourceContents, ServerCapabilities,
     },
     service::{RequestContext, ServiceError},
     transport::{
@@ -43,6 +44,7 @@ const TEST_USER_EMAIL: &str = "admin@example.com";
 const TEST_VIRTUAL_HOST_ID: &str = "vh-secrets-e2e";
 const TEST_TOKEN_TTL_SECS: u64 = 60 * 60;
 const REDACTED: &str = "[redacted]";
+const BACKEND_RESOURCE_SECRET: &str = "AWS_ACCESS_KEY_ID=AKIAFAKE12345EXAMPLE"; // pragma: allowlist secret
 
 #[derive(Clone, Debug)]
 struct BackendObservation {
@@ -66,8 +68,16 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
             .with_server_info(Implementation::new("secrets-e2e-backend", "0.1.0")))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(BACKEND_RESOURCE_SECRET, request.uri)]).into())
     }
 
     async fn call_tool(
@@ -177,7 +187,7 @@ struct E2eEnvironment {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "spawns redis-server and the contextforge-data-plane binary"]
-async fn binary_e2e_redacts_tool_arguments_and_results() {
+async fn binary_e2e_redacts_tool_arguments_results_and_resources() {
     let backend = start_backend().await;
     let env = start_environment(
         backend,
@@ -211,6 +221,17 @@ async fn binary_e2e_redacts_tool_arguments_and_results() {
         .expect("secret result is redacted and call succeeds");
 
     assert_eq!(REDACTED, tool_text(&result));
+
+    let result = service
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect("resource is returned");
+    let Some(ResourceContents::TextResourceContents { text, uri, .. }) = result.contents.first() else {
+        panic!("expected text resource contents");
+    };
+    assert_eq!("file:///password.env", uri);
+    assert_ne!(BACKEND_RESOURCE_SECRET, text);
+    assert!(text.contains(REDACTED));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -389,7 +410,13 @@ async fn write_redis_config(redis_port: u16, backend: &RunningBackend) {
                     },
                 )]),
                 tools: HashMap::new(),
-                resources: HashMap::new(),
+                resources: HashMap::from([(
+                    "file:///password.env".to_owned(),
+                    ServiceRoute {
+                        backend_name: "backend".to_owned(),
+                        upstream_name: "file:///password.env".to_owned(),
+                    },
+                )]),
                 resource_templates: HashMap::new(),
                 prompts: HashMap::new(),
             },
@@ -416,7 +443,7 @@ async fn write_runtime_plugin_config(redis_port: u16, plugin_config: Value) {
             "plugins": [{
                 "name": "secrets-detection",
                 "kind": "validator/secrets-detection",
-                "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke"],
+                "hooks": ["cmf.tool_pre_invoke", "cmf.tool_post_invoke", "cmf.resource_post_fetch"],
                 "config": plugin_config,
             }]
         }
