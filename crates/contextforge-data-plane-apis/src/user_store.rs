@@ -36,6 +36,7 @@ pub struct BackendMCPGateway {
     #[serde(default)]
     pub completion: HashMap<String, String>,
     /// Input schemas keyed by the original upstream tool name.
+    #[serde(default)]
     pub tool_schemas: HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 

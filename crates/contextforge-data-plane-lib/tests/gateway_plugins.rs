@@ -435,11 +435,31 @@ async fn stateless_tool_call_with_mismatched_parameter_header_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stateless_tool_call_without_published_schema_fails_closed() {
-    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+async fn stateless_tool_call_without_required_parameter_headers_is_rejected() {
+    let gateway =
+        start_gateway_with_parameter_headers(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
     let service = support::connect_modern_client(
         gateway.gateway_url(),
         support::create_client(TEST_USER_ID),
+        support::modern_client_info(),
+    )
+    .await;
+
+    let error = service.call_tool(sum_request("sum", 1, 2)).await.expect_err("missing annotated headers are rejected");
+    let rmcp::service::ServiceError::McpError(error) = error else {
+        panic!("expected backend MCP error, got {error:?}");
+    };
+
+    assert_eq!(ErrorCode::HEADER_MISMATCH, error.code);
+    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn stateless_tool_call_without_published_schema_reaches_backend() {
+    let gateway = start_gateway(TEST_USER_ID, false, Arc::new(CpexRuntimeRegistry::default())).await;
+    let service = support::connect_modern_client(
+        gateway.gateway_url(),
+        client_with_parameter_headers("1", "2"),
         support::modern_client_info(),
     )
     .await;
@@ -447,8 +467,14 @@ async fn stateless_tool_call_without_published_schema_fails_closed() {
     let rmcp::service::ServiceError::McpError(error) = error else {
         panic!("expected backend MCP error, got {error:?}");
     };
-    assert_eq!(ErrorCode::HEADER_MISMATCH, error.code);
-    assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
+
+    assert_eq!(ErrorCode::METHOD_NOT_FOUND, error.code);
+    let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
+    assert_eq!("missing_schema_tool", backend_calls[0].tool_name);
+    drop(backend_calls);
+    let headers = last_backend_request_headers(&gateway);
+    assert_eq!("1", headers["Mcp-Param-A"]);
+    assert_eq!("2", headers["Mcp-Param-B"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

@@ -77,15 +77,15 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": true
-          }
+          },
+          "default": {}
         }
       },
       "required": [
         "name",
         "url",
         "mcp_protocol_version",
-        "passthrough_headers",
-        "tool_schemas"
+        "passthrough_headers"
       ]
     },
     "ProtocolVersion": {
