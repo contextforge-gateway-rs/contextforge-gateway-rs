@@ -212,11 +212,13 @@ Writing plugin edits back follows three rules:
 
 MCP prompt results carry no error flag, so a plugin setting `is_error` on the CMF prompt result is rejecting the prompt rather than describing it. The gateway turns that into an MCP error carrying the plugin's `error_message`, and the rendered content never reaches the client. This differs from tools, where `is_error` is a field on `CallToolResult` and is forwarded as a successful response.
 
-Binary resource blobs reach plugins as decoded CMF bytes and are encoded back to MCP base64 after an edit. Unchanged blobs retain the backend's exact wire representation.
+Binary resource blobs reach plugins as decoded CMF bytes and are encoded back to MCP base64 after an edit. Unchanged blobs retain the backend's exact wire representation. Invalid embedded blobs or unsupported prompt content fail the entire prompt before post hooks; they must never disappear from the policy payload while remaining in the client response.
 
 ### Resource Read Hook Behavior
 
-For `resources/read`, the pre hook runs after routing and may allow or deny the canonical backend-local URI, but cannot change it. The post hook can redact text resources, transform binary resources, or deny the response. URI, MIME type, item count, CMF schema version, and channel must remain stable; unsupported or lossy edits and invalid hook lifecycle state fail closed.
+For `resources/read`, the pre hook runs after routing and may allow or deny the canonical backend-local URI, but cannot change it. The post hook can redact text resources, transform binary resources, or deny the response. URI, MIME type, item count, CMF schema version, and channel must remain stable; unsupported or lossy edits fail closed.
+
+The pre call returns an opaque, concrete `ResourceHookState` consumed by the post call. It captures both the runtime and the decision to run or skip post hooks before backend I/O. A reload only affects subsequent requests, including when it enables or disables resource hooks. Callers cannot construct missing or mismatched active state, and requests without a post hook allocate no correlation state.
 
 ### Demo Plugin Workflow
 

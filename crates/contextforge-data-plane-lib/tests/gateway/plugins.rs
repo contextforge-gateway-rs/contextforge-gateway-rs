@@ -8,7 +8,7 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ContentBlock, ErrorCode,
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, ProgressNotificationParam,
-        Request, ResourceContents, Role as McpRole, ServerResult,
+        ReadResourceRequestParams, Request, ResourceContents, Role as McpRole, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
@@ -861,4 +861,87 @@ async fn prompt_pre_and_post_hooks_share_gateway_call_context() {
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(1, observations.pre_calls);
     assert_eq!(1, observations.post_calls);
+}
+
+#[tokio::test]
+async fn resource_hooks_inspect_canonical_uris_and_redact_direct_and_aliased_reads() {
+    let plugin = Arc::new(
+        TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_PRE_FETCH, cmf_hook_names::RESOURCE_POST_FETCH])
+            .with_post_rewrite(),
+    );
+    let observations = plugin.observations();
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    for uri in ["file:///password.env", "file:///password.bin"] {
+        for requested in [uri.to_owned(), format!("{}-{uri}", gateway.backend_name)] {
+            let result =
+                service.read_resource(ReadResourceRequestParams::new(requested)).await.expect("resource is returned");
+            match &result.contents[0] {
+                ResourceContents::TextResourceContents { text, uri: returned, .. } => {
+                    assert_eq!("post:[redacted]", text);
+                    assert_eq!(uri, returned);
+                },
+                ResourceContents::BlobResourceContents { blob, uri: returned, .. } => {
+                    use base64::{Engine as _, prelude::BASE64_STANDARD};
+                    assert_eq!(b"post:[redacted]", BASE64_STANDARD.decode(blob).expect("valid base64").as_slice());
+                    assert_eq!(uri, returned);
+                },
+                _ => panic!("expected text or blob resource"),
+            }
+            assert_eq!(Some(uri), observations.lock().expect("observations lock").pre_resource_uri.as_deref());
+        }
+    }
+    let observed = observations.lock().expect("observations lock");
+    assert_eq!(4, observed.pre_calls);
+    assert_eq!(4, observed.post_calls);
+    assert_eq!(
+        ["file:///password.env", "file:///password.env", "file:///password.bin", "file:///password.bin"],
+        gateway.backend_state.resources.lock().expect("resource calls lock").as_slice()
+    );
+}
+
+#[tokio::test]
+async fn resource_pre_hook_denies_before_the_backend_read() {
+    let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_PRE_FETCH]).with_pre_deny());
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("resource policy denies");
+    assert_eq!(ErrorCode(PRE_DENY_ERROR_CODE), error_code(error));
+    assert!(gateway.backend_state.resources.lock().expect("resource calls lock").is_empty());
+}
+
+#[tokio::test]
+async fn resource_post_hook_denies_the_backend_response() {
+    let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]).with_post_deny());
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_post(plugin).await).await;
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("resource policy denies");
+    let (_, message) = error_parts(error);
+    assert!(message.contains("Plugin denied resource"), "{message}");
+    assert_eq!(1, gateway.backend_state.resources.lock().expect("resource calls lock").len());
+}
+
+#[tokio::test]
+async fn invalid_prompt_blob_is_rejected_before_post_policy() {
+    let plugin = Arc::new(PromptTestPlugin::new("prompt", vec![cmf_hook_names::PROMPT_POST_FETCH]));
+    let observations = plugin.observations();
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_prompt_plugin(plugin).await).await;
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .get_prompt(GetPromptRequestParams::new("review_invalid_blob"))
+        .await
+        .expect_err("invalid content fails closed");
+    let (code, message) = error_parts(error);
+    assert_eq!(ErrorCode::INTERNAL_ERROR, code);
+    assert_eq!("Prompt response contains unsupported or invalid content", message);
+    assert_eq!(0, observations.lock().expect("observations lock").post_calls);
 }

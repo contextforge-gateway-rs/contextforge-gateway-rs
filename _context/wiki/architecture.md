@@ -162,6 +162,8 @@ The binary sets `tikv_jemallocator` as the global allocator. jemalloc holds up b
 - Targeted tool, prompt, and resource calls run configured pre/post plugin hooks after backend routing. `call_tool` creates a fresh per-request backend connection via `connect_backend_for_request`, then explicitly closes it before returning.
 - `call_tool` watches the downstream cancellation token and forwards a cancel to the backend if the client gives up first; backend progress notifications are forwarded downstream while the call is in flight.
 
+Resource reads carry a concrete, request-owned hook state across backend I/O. It pins the runtime selected before the read, or records that no post hook was configured. Post processing consumes that state without type erasure, downcasts, or a second registry lookup.
+
 ## Startup And Response Flow
 
 Startup sequence (`main.rs` → `Gateway::run_gateway`):

@@ -23,11 +23,8 @@ use tokio::task::JoinHandle;
 use crate::{
     config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config},
     error::GatewayPluginRuntimeError,
-    hooks::{
-        PromptPreFetchResult, ResourceHookState, ResourcePreFetchResult, RuntimeHookError, RuntimeHookState,
-        ToolPreCallResult, invalid_resource_hook_state_error,
-    },
-    runtime::GatewayPluginRuntime,
+    hooks::{PromptPreFetchResult, RuntimeHookError, RuntimeHookState, ToolPreCallResult},
+    runtime::{GatewayPluginRuntime, ResourceCallState},
 };
 
 const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_mins(10);
@@ -52,7 +49,19 @@ struct RegistryCallState {
 
 struct RegistryResourceCallState {
     runtime: Arc<GatewayPluginRuntime>,
-    state: RuntimeHookState,
+    state: ResourceCallState,
+}
+
+/// Captures the resource post-hook decision and runtime for one request.
+pub struct ResourceHookState(Option<RegistryResourceCallState>);
+
+impl ResourceHookState {
+    pub async fn after_read_resource(self, response: ReadResourceResult) -> Result<ReadResourceResult, ErrorData> {
+        match self.0 {
+            Some(call) => call.runtime.after_read_resource(response, call.state).await,
+            None => Ok(response),
+        }
+    }
 }
 
 enum RuntimeState {
@@ -290,18 +299,17 @@ impl GatewayPluginRuntimeHandle {
         Ok(result)
     }
 
-    pub async fn before_read_resource(&self, resource_uri: &str) -> Result<ResourcePreFetchResult, ErrorData> {
+    pub async fn before_read_resource(&self, resource_uri: &str) -> Result<ResourceHookState, ErrorData> {
         let state = self.current();
         let RuntimeState::Active(runtime) = state.as_ref() else {
             return Err(runtime_failed_error(state.as_ref()));
         };
-        match runtime.before_read_resource(resource_uri).await?.state.into_inner() {
-            Some(state) => Ok(ResourcePreFetchResult::with_post_state(Arc::new(RegistryResourceCallState {
-                runtime: Arc::clone(runtime),
-                state,
-            }))),
-            None => Ok(ResourcePreFetchResult::unchanged()),
-        }
+        Ok(ResourceHookState(
+            runtime
+                .before_read_resource(resource_uri)
+                .await?
+                .map(|state| RegistryResourceCallState { runtime: Arc::clone(runtime), state }),
+        ))
     }
 
     pub async fn after_get_prompt(
@@ -313,25 +321,6 @@ impl GatewayPluginRuntimeHandle {
         match state.and_then(|state| state.downcast::<RegistryCallState>().ok()) {
             Some(state) => state.runtime.after_get_prompt(prompt_name, response, state.state.clone()).await,
             None => Ok(response),
-        }
-    }
-
-    pub async fn after_read_resource(
-        &self,
-        response: ReadResourceResult,
-        state: ResourceHookState,
-    ) -> Result<ReadResourceResult, ErrorData> {
-        let Some(state) = state.into_inner() else {
-            let current = self.current();
-            return match current.as_ref() {
-                RuntimeState::Active(runtime) if !runtime.has_resource_post_hook() => Ok(response),
-                RuntimeState::Active(_) => Err(invalid_resource_hook_state_error()),
-                failed @ RuntimeState::Failed(_) => Err(runtime_failed_error(failed)),
-            };
-        };
-        match state.downcast::<RegistryResourceCallState>() {
-            Ok(state) => state.runtime.after_read_resource(response, Arc::clone(&state.state)).await,
-            Err(_) => Err(invalid_resource_hook_state_error()),
         }
     }
 
@@ -832,35 +821,28 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn resource_post_hook_rejects_missing_lifecycle_state() {
+    async fn resource_without_post_hook_keeps_its_decision_across_reload() {
         let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]));
+        let observations = plugin.observations();
         let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
-        let response = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
-
-        let error = runtime
-            .handle()
-            .after_read_resource(response, ResourcePreFetchResult::unchanged().state)
-            .await
-            .expect_err("missing state fails closed");
-
-        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
-        assert_eq!("Resource post-hook state is missing or invalid", error.message);
+        runtime.apply_config(None).await.expect("disable hooks");
+        let state = runtime.handle().before_read_resource("file:///password.env").await.expect("request starts");
+        assert!(state.0.is_none(), "no post-hook state allocation");
+        runtime.apply_config(Some(plugin_config(&[plugin]).cpex)).await.expect("enable hooks");
+        let response = ReadResourceResult::new(vec![ResourceContents::text("original", "file:///password.env")]);
+        state.after_read_resource(response).await.expect("in-flight decision survives reload");
+        assert_eq!(0, observations.lock().expect("observations lock poisoned").post_calls);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn resource_post_hook_rejects_invalid_lifecycle_state() {
-        let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]));
+    async fn resource_post_hook_keeps_its_runtime_across_reload() {
+        let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]).with_post_deny());
         let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+        let state = runtime.handle().before_read_resource("file:///password.env").await.expect("request starts");
+        runtime.apply_config(None).await.expect("disable hooks");
         let response = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
-
-        let error = runtime
-            .handle()
-            .after_read_resource(response, ResourceHookState::active(Arc::new(())))
-            .await
-            .expect_err("invalid state fails closed");
-
-        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
-        assert_eq!("Resource post-hook state is missing or invalid", error.message);
+        let error = state.after_read_resource(response).await.expect_err("captured policy still denies");
+        assert_eq!("Plugin denied resource", error.message);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -874,11 +856,7 @@ mod tests {
         let pre = runtime.handle().before_read_resource("file:///password.env").await.expect("resource pre hook runs");
         let response = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
 
-        runtime
-            .handle()
-            .after_read_resource(response, pre.state)
-            .await
-            .expect("resource post hook receives pre context");
+        pre.after_read_resource(response).await.expect("resource post hook receives pre context");
 
         let observations = observations.lock().expect("observations lock poisoned");
         assert_eq!(1, observations.pre_calls);

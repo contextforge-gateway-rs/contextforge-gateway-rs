@@ -20,7 +20,8 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, GetPromptRequestParams,
         GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, NumberOrString,
-        ProgressNotificationParam, ProgressToken, PromptMessage, ResourceContents, Role, ServerCapabilities,
+        ProgressNotificationParam, ProgressToken, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
+        ReadResourceResult, ResourceContents, Role, ServerCapabilities,
     },
     service::{RequestContext, Service},
     transport::{
@@ -48,6 +49,7 @@ pub(crate) struct BackendState {
     pub(crate) calls: Arc<StdMutex<Vec<BackendObservation>>>,
     pub(crate) request_headers: Arc<StdMutex<Vec<HeaderMap>>>,
     pub(crate) prompts: Arc<StdMutex<Vec<BackendObservation>>>,
+    pub(crate) resources: Arc<StdMutex<Vec<String>>>,
     pub(crate) cancellations: Arc<StdMutex<Vec<String>>>,
     pub(crate) events: Arc<StdMutex<Vec<&'static str>>>,
     parameter_headers: bool,
@@ -90,8 +92,24 @@ impl ServerHandler for TestBackend {
         _request: InitializeRequestParams,
         _cx: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
-        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_prompts().build())
-            .with_server_info(Implementation::new("test-backend", "0.1.0")))
+        Ok(InitializeResult::new(
+            ServerCapabilities::builder().enable_tools().enable_prompts().enable_resources().build(),
+        )
+        .with_server_info(Implementation::new("test-backend", "0.1.0")))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        self.state.resources.lock().expect("resource calls lock poisoned").push(request.uri.clone());
+        let content = if request.uri == "file:///password.bin" {
+            ResourceContents::blob("c2VjcmV0", request.uri)
+        } else {
+            ResourceContents::text("secret", request.uri)
+        };
+        Ok(ReadResourceResult::new(vec![content]).into())
     }
 
     async fn get_prompt(
@@ -106,6 +124,13 @@ impl ServerHandler for TestBackend {
             .push(BackendObservation { tool_name: request.name.clone(), args: request.arguments.clone() });
         self.state.events.lock().expect("backend events lock poisoned").push("backend");
 
+        if request.name == "review_invalid_blob" {
+            return Ok(GetPromptResult::new(vec![PromptMessage::new(
+                Role::User,
+                ContentBlock::resource(ResourceContents::blob("not base64!", "file:///blocked.env")),
+            )])
+            .into());
+        }
         let topic = request
             .arguments
             .as_ref()
@@ -235,8 +260,8 @@ pub const TOOL_NAMES: &[&str] = &[
     "reflect_text",
     "wait_for_cancellation",
 ];
-pub const RESOURCE_URIS: &[&str] = &[""];
-pub const PROMPT_NAMES: &[&str] = &["review_bundle", "review"];
+pub const RESOURCE_URIS: &[&str] = &["file:///password.env", "file:///password.bin"];
+pub const PROMPT_NAMES: &[&str] = &["review_bundle", "review", "review_invalid_blob"];
 
 pub(crate) struct RunningGateway {
     pub(crate) backend_state: BackendState,
@@ -396,6 +421,13 @@ async fn start_gateway_with_state(
         format!("{backend_name}-sum"),
         ServiceRoute { backend_name: backend_name.clone(), upstream_name: "sum".to_owned() },
     );
+    let mut resources = construct_services(&backend_name, RESOURCE_URIS);
+    for uri in RESOURCE_URIS {
+        resources.insert(
+            format!("{backend_name}-{uri}"),
+            ServiceRoute { backend_name: backend_name.clone(), upstream_name: (*uri).to_owned() },
+        );
+    }
     let user_store = MemoryUserConfigStore::default();
     user_store
         .set_config(
@@ -418,7 +450,7 @@ async fn start_gateway_with_state(
                             },
                         )]),
                         tools,
-                        resources: construct_services(&backend_name, RESOURCE_URIS),
+                        resources,
                         resource_templates: HashMap::new(),
                         prompts: construct_services(&backend_name, PROMPT_NAMES),
                     },
