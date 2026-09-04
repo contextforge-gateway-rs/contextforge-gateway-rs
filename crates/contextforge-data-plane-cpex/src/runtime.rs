@@ -29,8 +29,8 @@ use crate::{
     hooks::{PromptPreFetchResult, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult},
     pipeline::{
         effective_post_json, effective_post_prompt_result, effective_post_resource_result, effective_post_result,
-        effective_pre_args, effective_pre_prompt_args, log_pipeline_errors, plugin_denied_error,
-        validate_pre_resource_result,
+        effective_pre_args, effective_pre_prompt_args, effective_pre_resource_uri, log_pipeline_errors,
+        plugin_denied_error,
     },
 };
 
@@ -248,14 +248,17 @@ impl GatewayPluginRuntime {
     pub(crate) async fn before_read_resource(
         &self,
         resource_uri: &str,
-    ) -> Result<Option<ResourceCallState>, ErrorData> {
+    ) -> Result<(Option<String>, Option<ResourceCallState>), ErrorData> {
         if !self.hooks.resource.pre && !self.hooks.resource.post {
-            return Ok(None);
+            return Ok((None, None));
         }
 
         let resource_request_id = next_resource_request_id();
         if !self.hooks.resource.pre {
-            return Ok(Some(ResourceCallState { context_table: PluginContextTable::default(), resource_request_id }));
+            return Ok((
+                None,
+                Some(ResourceCallState { context_table: PluginContextTable::default(), resource_request_id }),
+            ));
         }
 
         let payload = resource_request_payload(resource_uri, &resource_request_id);
@@ -263,12 +266,14 @@ impl GatewayPluginRuntime {
         if pre_result.is_denied() {
             return Err(plugin_denied_error("resource", pre_result));
         }
-        validate_pre_resource_result(&pre_result, resource_uri, &resource_request_id)?;
-        Ok(self
-            .hooks
-            .resource
-            .post
-            .then_some(ResourceCallState { context_table: pre_result.context_table, resource_request_id }))
+        let uri = effective_pre_resource_uri(&pre_result)?;
+        Ok((
+            uri,
+            self.hooks
+                .resource
+                .post
+                .then_some(ResourceCallState { context_table: pre_result.context_table, resource_request_id }),
+        ))
     }
 
     pub(crate) async fn after_get_prompt(
@@ -284,9 +289,7 @@ impl GatewayPluginRuntime {
         let state = state.and_then(|state| state.downcast::<PromptCallState>().ok());
         let Some(state) = state else { return Ok(response) };
 
-        let payload = prompt_result_payload(&response, prompt_name, &state.prompt_request_id).ok_or_else(|| {
-            ErrorData::internal_error("Prompt response contains unsupported or invalid content", None)
-        })?;
+        let payload = prompt_result_payload(&response, prompt_name, &state.prompt_request_id);
         let post_result =
             self.invoke_cmf_hook(cmf_hook_names::PROMPT_POST_FETCH, payload, Some(state.context_table.clone())).await;
         if post_result.is_denied() {
@@ -308,7 +311,7 @@ impl GatewayPluginRuntime {
         if post_result.is_denied() {
             return Err(plugin_denied_error("resource", post_result));
         }
-        effective_post_resource_result(response, &post_result, &state.resource_request_id)
+        effective_post_resource_result(response, &post_result)
     }
 
     pub(crate) async fn after_tool_call(

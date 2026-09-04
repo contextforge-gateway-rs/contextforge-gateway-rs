@@ -53,11 +53,18 @@ struct RegistryResourceCallState {
 }
 
 /// Captures the resource post-hook decision and runtime for one request.
-pub struct ResourceHookState(Option<RegistryResourceCallState>);
+pub struct ResourceHookState {
+    rewritten_uri: Option<String>,
+    call: Option<RegistryResourceCallState>,
+}
 
 impl ResourceHookState {
+    pub fn rewritten_uri(&self) -> Option<&str> {
+        self.rewritten_uri.as_deref()
+    }
+
     pub async fn after_read_resource(self, response: ReadResourceResult) -> Result<ReadResourceResult, ErrorData> {
-        match self.0 {
+        match self.call {
             Some(call) => call.runtime.after_read_resource(response, call.state).await,
             None => Ok(response),
         }
@@ -304,12 +311,11 @@ impl GatewayPluginRuntimeHandle {
         let RuntimeState::Active(runtime) = state.as_ref() else {
             return Err(runtime_failed_error(state.as_ref()));
         };
-        Ok(ResourceHookState(
-            runtime
-                .before_read_resource(resource_uri)
-                .await?
-                .map(|state| RegistryResourceCallState { runtime: Arc::clone(runtime), state }),
-        ))
+        let (rewritten_uri, call) = runtime.before_read_resource(resource_uri).await?;
+        Ok(ResourceHookState {
+            rewritten_uri,
+            call: call.map(|state| RegistryResourceCallState { runtime: Arc::clone(runtime), state }),
+        })
     }
 
     pub async fn after_get_prompt(
@@ -827,7 +833,7 @@ mod tests {
         let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
         runtime.apply_config(None).await.expect("disable hooks");
         let state = runtime.handle().before_read_resource("file:///password.env").await.expect("request starts");
-        assert!(state.0.is_none(), "no post-hook state allocation");
+        assert!(state.call.is_none(), "no post-hook state allocation");
         runtime.apply_config(Some(plugin_config(&[plugin]).cpex)).await.expect("enable hooks");
         let response = ReadResourceResult::new(vec![ResourceContents::text("original", "file:///password.env")]);
         state.after_read_resource(response).await.expect("in-flight decision survives reload");

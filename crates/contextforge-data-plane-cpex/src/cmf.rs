@@ -55,24 +55,6 @@ pub(crate) fn resource_request_payload(resource_uri: &str, resource_request_id: 
     }
 }
 
-pub(crate) fn resource_request_matches(
-    payload: &MessagePayload,
-    resource_uri: &str,
-    resource_request_id: &str,
-) -> bool {
-    let [ContentPart::ResourceRef { content }] = payload.message.content.as_slice() else {
-        return false;
-    };
-    canonical_message_envelope(payload, Role::User)
-        && content.resource_request_id == resource_request_id
-        && content.uri == resource_uri
-        && matches!(content.resource_type, ResourceType::Uri)
-        && content.name.is_none()
-        && content.range_start.is_none()
-        && content.range_end.is_none()
-        && content.selector.is_none()
-}
-
 pub(crate) fn resource_result_payload(
     response: &ReadResourceResult,
     resource_request_id: &str,
@@ -113,54 +95,45 @@ fn cmf_resource_content(content: &ResourceContents, resource_request_id: &str) -
 pub(crate) fn resource_result_response(
     mut original: ReadResourceResult,
     payload: &MessagePayload,
-    resource_request_id: &str,
 ) -> Option<ReadResourceResult> {
-    if !canonical_message_envelope(payload, Role::Assistant) || payload.message.content.len() != original.contents.len()
-    {
+    // Resource post hooks replace each resource's content, not the read envelope.
+    if payload.message.content.len() != original.contents.len() {
         return None;
     }
-
     for (original, modified) in original.contents.iter_mut().zip(&payload.message.content) {
-        let ContentPart::Resource { content } = modified else {
-            return None;
+        let ContentPart::Resource { content } = modified else { return None };
+        let meta = match original {
+            ResourceContents::TextResourceContents { meta, .. }
+            | ResourceContents::BlobResourceContents { meta, .. } => meta.clone(),
+            _ => return None,
         };
-        if content.resource_request_id != resource_request_id
-            || !matches!(content.resource_type, ResourceType::Uri)
-            || content.name.is_some()
-            || content.description.is_some()
-            || content.size_bytes.is_some()
-            || !content.annotations.is_empty()
-            || content.version.is_some()
-        {
-            return None;
-        }
-        match original {
-            ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
-                if content.uri != *uri || content.mime_type != *mime_type || content.blob.is_some() {
-                    return None;
-                }
-                *text = content.content.clone()?;
+        *original = match (&content.content, &content.blob) {
+            (Some(text), _) => ResourceContents::TextResourceContents {
+                uri: content.uri.clone(),
+                mime_type: content.mime_type.clone(),
+                text: text.clone(),
+                meta,
             },
-            ResourceContents::BlobResourceContents { uri, mime_type, blob, .. } => {
-                if content.uri != *uri || content.mime_type != *mime_type || content.content.is_some() {
-                    return None;
-                }
-                let modified_blob = content.blob.as_ref()?;
-                let original_blob = BASE64_STANDARD.decode(blob.as_bytes()).ok()?;
-                if modified_blob != &original_blob {
-                    *blob = BASE64_STANDARD.encode(modified_blob);
+            (None, Some(bytes)) => {
+                let blob = match original {
+                    ResourceContents::BlobResourceContents { blob, .. }
+                        if BASE64_STANDARD.decode(blob.as_bytes()).ok().as_ref() == Some(bytes) =>
+                    {
+                        blob.clone()
+                    },
+                    _ => BASE64_STANDARD.encode(bytes),
+                };
+                ResourceContents::BlobResourceContents {
+                    uri: content.uri.clone(),
+                    mime_type: content.mime_type.clone(),
+                    blob,
+                    meta,
                 }
             },
             _ => return None,
-        }
+        };
     }
     Some(original)
-}
-
-fn canonical_message_envelope(payload: &MessagePayload, role: Role) -> bool {
-    payload.message.schema_version == SCHEMA_VERSION
-        && payload.message.role == role
-        && payload.message.channel.is_none()
 }
 
 pub(crate) fn tool_result_payload(tool_name: &str, response: &CallToolResult, tool_call_id: &str) -> MessagePayload {
@@ -292,16 +265,13 @@ pub(crate) fn prompt_result_payload(
     response: &GetPromptResult,
     prompt_name: &str,
     prompt_request_id: &str,
-) -> Option<MessagePayload> {
-    let messages = response
-        .messages
-        .iter()
-        .map(|message| cmf_prompt_message(message, prompt_request_id))
-        .collect::<Option<Vec<_>>>()?;
+) -> MessagePayload {
+    let messages =
+        response.messages.iter().map(|message| cmf_prompt_message(message, prompt_request_id)).collect::<Vec<_>>();
 
-    Some(MessagePayload {
+    MessagePayload {
         message: Message {
-            schema_version: SCHEMA_VERSION.to_owned(),
+            schema_version: "2.0".to_owned(),
             role: Role::Assistant,
             content: vec![ContentPart::PromptResult {
                 content: PromptResult {
@@ -315,7 +285,7 @@ pub(crate) fn prompt_result_payload(
             }],
             channel: None,
         },
-    })
+    }
 }
 
 fn prompt_result(payload: &MessagePayload) -> Option<&PromptResult> {
@@ -351,13 +321,13 @@ pub(crate) fn prompt_result_response(
     }
 
     for (message, edited) in original.messages.iter_mut().zip(&result.messages) {
-        let projected = cmf_prompt_message(message, prompt_request_id)?;
+        let projected = cmf_prompt_message(message, prompt_request_id);
         if serde_json::to_value(&projected).ok()? == serde_json::to_value(edited).ok()? {
             continue;
         }
 
         let rebuilt = mcp_prompt_message(edited)?;
-        if serde_json::to_value(cmf_prompt_message(&rebuilt, prompt_request_id)?).ok()?
+        if serde_json::to_value(cmf_prompt_message(&rebuilt, prompt_request_id)).ok()?
             != serde_json::to_value(edited).ok()?
         {
             return None;
@@ -368,16 +338,16 @@ pub(crate) fn prompt_result_response(
     Some(original)
 }
 
-fn cmf_prompt_message(message: &PromptMessage, prompt_request_id: &str) -> Option<Message> {
-    Some(Message {
-        schema_version: SCHEMA_VERSION.to_owned(),
+fn cmf_prompt_message(message: &PromptMessage, prompt_request_id: &str) -> Message {
+    Message {
+        schema_version: "2.0".to_owned(),
         role: match message.role {
             McpRole::Assistant => Role::Assistant,
             McpRole::User => Role::User,
         },
-        content: vec![cmf_content_part(&message.content, prompt_request_id)?],
+        content: cmf_content_part(&message.content, prompt_request_id).into_iter().collect(),
         channel: None,
-    })
+    }
 }
 
 fn cmf_content_part(block: &ContentBlock, prompt_request_id: &str) -> Option<ContentPart> {
@@ -399,7 +369,28 @@ fn cmf_content_part(block: &ContentBlock, prompt_request_id: &str) -> Option<Con
             },
         },
         ContentBlock::Resource(resource) => {
-            ContentPart::Resource { content: cmf_resource_content(&resource.resource, prompt_request_id)? }
+            let (uri, mime_type, content) = match &resource.resource {
+                ResourceContents::TextResourceContents { uri, mime_type, text, .. } => {
+                    (uri.clone(), mime_type.clone(), Some(text.clone()))
+                },
+                ResourceContents::BlobResourceContents { uri, mime_type, .. } => (uri.clone(), mime_type.clone(), None),
+                _ => return None,
+            };
+            ContentPart::Resource {
+                content: CmfResource {
+                    resource_request_id: prompt_request_id.to_owned(),
+                    uri,
+                    name: None,
+                    description: None,
+                    resource_type: ResourceType::Uri,
+                    content,
+                    blob: None,
+                    mime_type,
+                    size_bytes: None,
+                    annotations: HashMap::new(),
+                    version: None,
+                },
+            }
         },
         ContentBlock::ResourceLink(link) => ContentPart::ResourceRef {
             content: ResourceReference {
@@ -440,7 +431,12 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
         ContentPart::Audio { content } => {
             ContentBlock::audio(inline_media_data(&content.source_type, &content.data)?, content.media_type.clone()?)
         },
-        ContentPart::Resource { content } => ContentBlock::resource(mcp_resource_content(content)?),
+        ContentPart::Resource { content } => ContentBlock::resource(ResourceContents::TextResourceContents {
+            uri: content.uri.clone(),
+            mime_type: content.mime_type.clone(),
+            text: content.content.clone()?,
+            meta: None,
+        }),
         ContentPart::ResourceRef { content } => {
             ContentBlock::ResourceLink(McpResource::new(content.uri.clone(), content.name.clone()?))
         },
@@ -450,56 +446,12 @@ fn mcp_prompt_message(message: &Message) -> Option<PromptMessage> {
     Some(PromptMessage::new(role, content))
 }
 
-fn mcp_resource_content(content: &CmfResource) -> Option<ResourceContents> {
-    match (&content.content, &content.blob) {
-        (Some(text), None) => Some(ResourceContents::TextResourceContents {
-            uri: content.uri.clone(),
-            mime_type: content.mime_type.clone(),
-            text: text.clone(),
-            meta: None,
-        }),
-        (None, Some(blob)) => Some(ResourceContents::BlobResourceContents {
-            uri: content.uri.clone(),
-            mime_type: content.mime_type.clone(),
-            blob: BASE64_STANDARD.encode(blob),
-            meta: None,
-        }),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use cpex::cpex_core::cmf::Channel;
-
     use super::*;
 
     #[test]
-    fn resource_request_rejects_uri_mutation() {
-        let mut payload = resource_request_payload("file:///password.env", "resource-1");
-        let ContentPart::ResourceRef { content } = &mut payload.message.content[0] else {
-            panic!("expected resource reference");
-        };
-        content.uri = "file:///other.env".to_owned();
-
-        assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
-    }
-
-    #[test]
-    fn resource_request_rejects_modified_envelope() {
-        let mut payload = resource_request_payload("file:///password.env", "resource-1");
-        payload.message.schema_version = "3.0".to_owned();
-
-        assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
-
-        let mut payload = resource_request_payload("file:///password.env", "resource-1");
-        payload.message.channel = Some(Channel::Analysis);
-
-        assert!(!resource_request_matches(&payload, "file:///password.env", "resource-1"));
-    }
-
-    #[test]
-    fn resource_result_response_applies_only_text_changes() {
+    fn resource_result_response_applies_text_changes() {
         let original =
             ReadResourceResult::new(vec![ResourceContents::text("AWS_ACCESS_KEY_ID=secret", "file:///password.env")]);
         let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
@@ -508,25 +460,13 @@ mod tests {
         };
         content.content = Some("AWS_ACCESS_KEY_ID=[redacted]".to_owned());
 
-        let result = resource_result_response(original, &payload, "resource-1").expect("text edit applies");
+        let result = resource_result_response(original, &payload).expect("text edit applies");
 
         let ResourceContents::TextResourceContents { text, uri, .. } = &result.contents[0] else {
             panic!("expected text resource");
         };
         assert_eq!("AWS_ACCESS_KEY_ID=[redacted]", text);
         assert_eq!("file:///password.env", uri);
-    }
-
-    #[test]
-    fn resource_result_response_rejects_uri_mutation() {
-        let original = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
-        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
-        let ContentPart::Resource { content } = &mut payload.message.content[0] else {
-            panic!("expected resource content");
-        };
-        content.uri = "file:///other.env".to_owned();
-
-        assert!(resource_result_response(original, &payload, "resource-1").is_none());
     }
 
     #[test]
@@ -543,7 +483,7 @@ mod tests {
         assert_eq!(Some(b"AWS_ACCESS_KEY_ID=secret".as_slice()), content.blob.as_deref());
         content.blob = Some(b"AWS_ACCESS_KEY_ID=[redacted]".to_vec());
 
-        let result = resource_result_response(original, &payload, "resource-1").expect("blob edit applies");
+        let result = resource_result_response(original, &payload).expect("blob edit applies");
 
         let ResourceContents::BlobResourceContents { blob, uri, .. } = &result.contents[0] else {
             panic!("expected blob resource");
@@ -559,7 +499,7 @@ mod tests {
         let original = ReadResourceResult::new(vec![ResourceContents::blob(&wire_blob, "file:///image.bin")]);
         let payload = resource_result_payload(&original, "resource-1").expect("valid blob is supported");
 
-        let result = resource_result_response(original, &payload, "resource-1").expect("unchanged blob applies");
+        let result = resource_result_response(original, &payload).expect("unchanged blob applies");
 
         let ResourceContents::BlobResourceContents { blob, .. } = &result.contents[0] else {
             panic!("expected blob resource");
@@ -575,17 +515,81 @@ mod tests {
     }
 
     #[test]
-    fn resource_result_response_rejects_modified_envelope() {
-        let original = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
-        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
-        payload.message.schema_version = "3.0".to_owned();
+    fn resource_result_allows_mime_uri_and_content_type_changes() {
+        let original: ReadResourceResult = serde_json::from_value(serde_json::json!({
+            "_meta": {"response": "preserved"},
+            "contents": [
+                {"uri": "file:///a", "mimeType": "text/plain", "text": "original", "_meta": {"item": 1}},
+                {"uri": "file:///b", "mimeType": "application/octet-stream", "blob": "YmluYXJ5", "_meta": {"item": 2}}
+            ]
+        }))
+        .expect("valid resource response");
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource payload");
+        for (index, part) in payload.message.content.iter_mut().enumerate() {
+            let ContentPart::Resource { content } = part else { panic!("resource content") };
+            content.uri = format!("file:///changed-{index}");
+            if index == 0 {
+                content.content = None;
+                content.blob = Some(b"binary edit".to_vec());
+                content.mime_type = Some("application/octet-stream".to_owned());
+            } else {
+                content.blob = None;
+                content.content = Some("text edit".to_owned());
+                content.mime_type = Some("text/plain".to_owned());
+            }
+        }
+        let actual = serde_json::to_value(resource_result_response(original, &payload).expect("valid changes apply"))
+            .expect("response serializes");
+        assert_eq!(serde_json::json!({"response": "preserved"}), actual["_meta"]);
+        assert_eq!("file:///changed-0", actual["contents"][0]["uri"]);
+        assert_eq!("application/octet-stream", actual["contents"][0]["mimeType"]);
+        assert_eq!(BASE64_STANDARD.encode(b"binary edit"), actual["contents"][0]["blob"]);
+        assert_eq!(1, actual["contents"][0]["_meta"]["item"]);
+        assert_eq!("file:///changed-1", actual["contents"][1]["uri"]);
+        assert_eq!("text/plain", actual["contents"][1]["mimeType"]);
+        assert_eq!("text edit", actual["contents"][1]["text"]);
+        assert_eq!(2, actual["contents"][1]["_meta"]["item"]);
+    }
 
-        assert!(resource_result_response(original.clone(), &payload, "resource-1").is_none());
+    #[test]
+    fn resource_result_ignores_cmf_fields_that_are_not_mcp_content() {
+        let original = ReadResourceResult::new(vec![ResourceContents::text("original", "file:///a")]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource payload");
+        payload.message.schema_version = "plugin value".to_owned();
+        payload.message.role = Role::User;
+        payload.message.channel = Some(cpex::cpex_core::cmf::Channel::Analysis);
+        let ContentPart::Resource { content } = &mut payload.message.content[0] else { panic!("resource content") };
+        content.resource_request_id = "plugin value".to_owned();
+        content.name = Some("display name".to_owned());
+        content.description = Some("description".to_owned());
+        content.size_bytes = Some(8);
+        content.version = Some("v2".to_owned());
+        content.annotations.insert("note".to_owned(), serde_json::json!("annotation"));
+        content.content = Some("redacted".to_owned());
+        let result = resource_result_response(original, &payload).expect("MCP content remains usable");
+        let ResourceContents::TextResourceContents { text, .. } = &result.contents[0] else { panic!("text content") };
+        assert_eq!("redacted", text);
+    }
 
-        let mut payload = resource_result_payload(&original, "resource-1").expect("resource result is supported");
-        payload.message.channel = Some(Channel::Final);
+    #[test]
+    fn resource_result_prefers_text_when_both_content_fields_are_present() {
+        let original = ReadResourceResult::new(vec![ResourceContents::blob("YmluYXJ5", "file:///a")]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource payload");
+        let ContentPart::Resource { content } = &mut payload.message.content[0] else { panic!("resource content") };
+        content.content = Some("text replacement".to_owned());
+        let result =
+            resource_result_response(original, &payload).expect("text takes precedence, as in the built-in serializer");
+        let ResourceContents::TextResourceContents { text, .. } = &result.contents[0] else { panic!("text resource") };
+        assert_eq!("text replacement", text);
+    }
 
-        assert!(resource_result_response(original, &payload, "resource-1").is_none());
+    #[test]
+    fn resource_result_rejects_content_without_a_valid_mcp_representation() {
+        let original = ReadResourceResult::new(vec![ResourceContents::text("original", "file:///a")]);
+        let mut payload = resource_result_payload(&original, "resource-1").expect("resource payload");
+        let ContentPart::Resource { content } = &mut payload.message.content[0] else { panic!("resource content") };
+        content.content = None;
+        assert!(resource_result_response(original, &payload).is_none());
     }
 
     fn text_prompt() -> GetPromptResult {
@@ -611,7 +615,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_added_message() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let extra = edited_messages(&mut payload).first().cloned().expect("one message");
         edited_messages(&mut payload).push(extra);
 
@@ -621,7 +625,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_extra_prompt_result() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let duplicate = payload.message.content[0].clone();
         payload.message.content.push(duplicate);
 
@@ -631,7 +635,7 @@ mod tests {
     #[test]
     fn prompt_result_rejection_reports_the_plugin_error_message() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let result = prompt_result_mut(&mut payload);
         result.is_error = true;
         result.error_message = Some("blocked by policy".to_owned());
@@ -642,7 +646,7 @@ mod tests {
     #[test]
     fn prompt_result_rejection_falls_back_when_the_plugin_gives_no_message() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         prompt_result_mut(&mut payload).is_error = true;
 
         assert_eq!(Some("Plugin rejected the rendered prompt".to_owned()), prompt_result_rejection(&payload));
@@ -651,7 +655,7 @@ mod tests {
     #[test]
     fn prompt_result_rejection_is_absent_for_a_normal_result() {
         let original = text_prompt();
-        let payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let payload = prompt_result_payload(&original, "review", "prompt-1");
 
         assert_eq!(None, prompt_result_rejection(&payload));
     }
@@ -720,7 +724,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_envelope_content_edit() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         prompt_result_mut(&mut payload).content = Some("[REDACTED]".to_owned());
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -729,7 +733,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_renamed_prompt() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         prompt_result_mut(&mut payload).prompt_name = "other".to_owned();
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -738,7 +742,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_recorrelated_result() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         prompt_result_mut(&mut payload).prompt_request_id = "prompt-2".to_owned();
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -747,7 +751,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_error_message_without_error_flag() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         prompt_result_mut(&mut payload).error_message = Some("blocked".to_owned());
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -763,7 +767,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_resource_type_edit() {
         let original = resource_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected a resource part");
         };
@@ -775,7 +779,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_dropped_resource_metadata() {
         let original = resource_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected a resource part");
         };
@@ -791,7 +795,7 @@ mod tests {
     #[test]
     fn prompt_result_response_round_trips_an_image_edit() {
         let original = media_prompt(ContentBlock::image("aW1hZ2U=", "image/png"));
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Image { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected an image part");
         };
@@ -807,7 +811,7 @@ mod tests {
     #[test]
     fn prompt_result_response_round_trips_an_audio_edit() {
         let original = media_prompt(ContentBlock::audio("YXVkaW8=", "audio/mp3"));
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Audio { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("audio reaches the plugin as a CMF audio part");
         };
@@ -823,7 +827,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_url_sourced_audio() {
         let original = media_prompt(ContentBlock::audio("YXVkaW8=", "audio/mp3"));
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Audio { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected an audio part");
         };
@@ -836,7 +840,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_audio_without_media_type() {
         let original = media_prompt(ContentBlock::audio("YXVkaW8=", "audio/mp3"));
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Audio { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected an audio part");
         };
@@ -848,7 +852,7 @@ mod tests {
     #[test]
     fn prompt_result_response_round_trips_a_resource_link_edit() {
         let original = media_prompt(ContentBlock::ResourceLink(McpResource::new("file:///app.env", "app-env")));
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::ResourceRef { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected a resource reference part");
         };
@@ -864,7 +868,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_resource_with_removed_text() {
         let original = resource_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected a resource part");
         };
@@ -876,7 +880,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_multiple_content_parts() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         edited_messages(&mut payload)[0].content.push(ContentPart::Text { text: "extra".to_owned() });
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -885,7 +889,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_a_cmf_only_content_part() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         edited_messages(&mut payload)[0].content = vec![ContentPart::Thinking { text: "reasoning".to_owned() }];
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -894,7 +898,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_a_payload_without_a_prompt_result() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         payload.message.content.clear();
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -912,7 +916,7 @@ mod tests {
     fn prompt_result_response_rejects_url_sourced_image() {
         let original =
             GetPromptResult::new(vec![PromptMessage::new(McpRole::User, ContentBlock::image("aW1hZ2U=", "image/png"))]);
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Image { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected an image part");
         };
@@ -926,7 +930,7 @@ mod tests {
     fn prompt_result_response_rejects_image_without_media_type() {
         let original =
             GetPromptResult::new(vec![PromptMessage::new(McpRole::User, ContentBlock::image("aW1hZ2U=", "image/png"))]);
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::Image { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected an image part");
         };
@@ -941,7 +945,7 @@ mod tests {
             McpRole::User,
             ContentBlock::ResourceLink(McpResource::new("file:///app.env", "app-env")),
         )]);
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::ResourceRef { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected a resource reference part");
         };
@@ -956,7 +960,7 @@ mod tests {
             McpRole::User,
             ContentBlock::ResourceLink(McpResource::new("file:///app.env", "app-env")),
         )]);
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         let ContentPart::ResourceRef { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("expected a resource reference part");
         };
@@ -968,7 +972,7 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_removed_message() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         edited_messages(&mut payload).clear();
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
@@ -977,28 +981,16 @@ mod tests {
     #[test]
     fn prompt_result_response_rejects_unmappable_role() {
         let original = text_prompt();
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
         edited_messages(&mut payload)[0].role = Role::System;
 
         assert!(prompt_result_response(original, &payload, "review", "prompt-1").is_none());
     }
 
     #[test]
-    fn prompt_result_payload_rejects_invalid_embedded_blob() {
-        let original = GetPromptResult::new(vec![
-            PromptMessage::new_text(McpRole::User, "ordinary text"),
-            PromptMessage::new(
-                McpRole::User,
-                ContentBlock::resource(ResourceContents::blob("not base64!", "file:///blocked.env")),
-            ),
-        ]);
-        assert!(prompt_result_payload(&original, "review", "prompt-1").is_none());
-    }
-
-    #[test]
     fn prompt_result_response_preserves_unmodified_messages() {
         let original = text_prompt();
-        let payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let payload = prompt_result_payload(&original, "review", "prompt-1");
 
         let result = prompt_result_response(original.clone(), &payload, "review", "prompt-1")
             .expect("unmodified payload applies");
@@ -1015,7 +1007,7 @@ mod tests {
             McpRole::User,
             ContentBlock::resource(ResourceContents::text("token=secret", "file:///app.env")),
         )]);
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
+        let mut payload = prompt_result_payload(&original, "review", "prompt-1");
 
         let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
             panic!("embedded resource reaches the plugin as a CMF resource part");
@@ -1033,31 +1025,6 @@ mod tests {
         };
         assert_eq!("token=[REDACTED]", text);
         assert_eq!("file:///app.env", uri);
-    }
-
-    #[test]
-    fn prompt_result_response_round_trips_embedded_blob_resource() {
-        let original = GetPromptResult::new(vec![PromptMessage::new(
-            McpRole::User,
-            ContentBlock::resource(ResourceContents::blob(BASE64_STANDARD.encode(b"token=secret"), "file:///app.bin")),
-        )]);
-        let mut payload = prompt_result_payload(&original, "review", "prompt-1").expect("supported prompt content");
-        let ContentPart::Resource { content } = &mut edited_messages(&mut payload)[0].content[0] else {
-            panic!("embedded resource reaches the plugin as a CMF resource part");
-        };
-        assert_eq!(Some(b"token=secret".as_slice()), content.blob.as_deref());
-        content.blob = Some(b"token=[REDACTED]".to_vec());
-
-        let result = prompt_result_response(original, &payload, "review", "prompt-1").expect("resource edit applies");
-
-        let ContentBlock::Resource(resource) = &result.messages[0].content else {
-            panic!("expected an embedded resource");
-        };
-        let ResourceContents::BlobResourceContents { blob, uri, .. } = &resource.resource else {
-            panic!("expected blob resource contents");
-        };
-        assert_eq!(b"token=[REDACTED]", BASE64_STANDARD.decode(blob).expect("valid base64").as_slice());
-        assert_eq!("file:///app.bin", uri);
     }
 
     #[test]

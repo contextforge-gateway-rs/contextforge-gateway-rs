@@ -930,18 +930,81 @@ async fn resource_post_hook_denies_the_backend_response() {
 }
 
 #[tokio::test]
-async fn invalid_prompt_blob_is_rejected_before_post_policy() {
-    let plugin = Arc::new(PromptTestPlugin::new("prompt", vec![cmf_hook_names::PROMPT_POST_FETCH]));
+async fn resource_plugins_can_rewrite_a_published_target_and_convert_the_result() {
+    let plugin = Arc::new(
+        TestPlugin::new(
+            "resource-rewrite",
+            vec![cmf_hook_names::RESOURCE_PRE_FETCH, cmf_hook_names::RESOURCE_POST_FETCH],
+        )
+        .with_resource_uri("file:///password.bin")
+        .with_resource_text(),
+    );
     let observations = plugin.observations();
-    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_prompt_plugin(plugin).await).await;
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    for uri in ["file:///password.env".to_owned(), format!("{}-file:///password.env", gateway.backend_name)] {
+        let result =
+            service.read_resource(ReadResourceRequestParams::new(uri)).await.expect("published target rewrite applies");
+        let ResourceContents::TextResourceContents { text, uri, mime_type, .. } = &result.contents[0] else {
+            panic!("blob was converted to text");
+        };
+        assert_eq!("converted", text);
+        assert_eq!("file:///converted.txt", uri);
+        assert_eq!(Some("text/plain"), mime_type.as_deref());
+    }
+    assert_eq!(
+        ["file:///password.bin", "file:///password.bin"],
+        gateway.backend_state.resources.lock().expect("resource calls lock").as_slice()
+    );
+    assert_eq!(2, observations.lock().expect("observations lock").post_calls);
+}
+
+#[tokio::test]
+async fn resource_plugin_cannot_route_to_an_unpublished_target() {
+    let plugin = Arc::new(
+        TestPlugin::new("resource-rewrite", vec![cmf_hook_names::RESOURCE_PRE_FETCH])
+            .with_resource_uri("file:///unpublished"),
+    );
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
     let error = gateway
         .connect(TEST_USER_ID)
         .await
-        .get_prompt(GetPromptRequestParams::new("review_invalid_blob"))
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
         .await
-        .expect_err("invalid content fails closed");
+        .expect_err("target is outside the published resource routes");
+    assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
+    assert!(gateway.backend_state.resources.lock().expect("resource calls lock").is_empty());
+}
+
+#[tokio::test]
+async fn resource_plugin_rejects_a_target_shared_by_different_backends() {
+    use contextforge_data_plane_apis::{User, user_store::ServiceRoute};
+    use contextforge_data_plane_lib::UserConfigStore;
+
+    let plugin = Arc::new(
+        TestPlugin::new("resource-rewrite", vec![cmf_hook_names::RESOURCE_PRE_FETCH])
+            .with_resource_uri("file:///password.bin"),
+    );
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let user = User::new(TEST_USER_ID);
+    let mut config = gateway.user_store.get_config(&user).await.expect("published config");
+    let host = config.virtual_hosts.values_mut().next().expect("virtual host");
+    let backend = host.backends[&gateway.backend_name].clone();
+    host.backends.insert("second-backend".to_owned(), backend);
+    host.resources.insert(
+        "second-file".to_owned(),
+        ServiceRoute { backend_name: "second-backend".to_owned(), upstream_name: "file:///password.bin".to_owned() },
+    );
+    gateway.user_store.set_config(&user, &config).await.expect("updated config");
+
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("rewritten URI is ambiguous");
     let (code, message) = error_parts(error);
-    assert_eq!(ErrorCode::INTERNAL_ERROR, code);
-    assert_eq!("Prompt response contains unsupported or invalid content", message);
-    assert_eq!(0, observations.lock().expect("observations lock").post_calls);
+    assert_eq!(ErrorCode::INVALID_PARAMS, code);
+    assert_eq!("Plugin resource target is ambiguous", message);
+    assert!(gateway.backend_state.resources.lock().expect("resource calls lock").is_empty());
 }

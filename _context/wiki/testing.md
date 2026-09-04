@@ -37,7 +37,7 @@ backends without recompiling a shared support tree for every feature file.
 | Area | Covers |
 | --- | --- |
 | `gateway/{tools,prompts,resources,subscriptions}.rs` | Active routed operations and exact routing failures. |
-| `gateway/plugins.rs` | Gateway-owned CPEX ordering, mutation, denial, progress, and prompt seams using deterministic recording plugins. Resource coverage includes direct and aliased URIs, text/blob redaction, canonical pre-hook URIs, pre/post denial, and invalid embedded prompt blobs. Concrete plugin behavior stays in each plugin crate. |
+| `gateway/plugins.rs` | Gateway-owned CPEX ordering, mutation, denial, progress, and prompt seams using deterministic recording plugins. Resource coverage includes direct and aliased URIs, text/blob conversion, canonical pre-hook URIs, published-target rewrites, rejection of unpublished targets, metadata preservation, and pre/post denial. Concrete plugin behavior stays in each plugin crate. |
 | `gateway/harness/` | Authentication, modern and compatibility clients, in-memory configuration, concrete mock backends, and owned server fixtures. |
 | `gateway/future_contracts/` | Deferred fanout, pagination, TLS, completions, subscriptions, and cancellation contracts. |
 

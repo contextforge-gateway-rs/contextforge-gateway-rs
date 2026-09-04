@@ -10,8 +10,8 @@ use tracing::warn;
 use crate::{
     PromptArgumentsUpdate, ToolArgumentsUpdate,
     cmf::{
-        prompt_request_arguments, prompt_result_rejection, prompt_result_response, resource_request_matches,
-        resource_result_response, tool_call_arguments, tool_result_content, tool_result_response,
+        prompt_request_arguments, prompt_result_rejection, prompt_result_response, resource_result_response,
+        tool_call_arguments, tool_result_content, tool_result_response,
     },
 };
 
@@ -97,30 +97,22 @@ pub(crate) fn effective_post_prompt_result(
     })
 }
 
-pub(crate) fn validate_pre_resource_result(
-    result: &PipelineResult,
-    resource_uri: &str,
-    resource_request_id: &str,
-) -> Result<(), ErrorData> {
-    let Some(payload) = modified_message_payload(result) else {
-        return Ok(());
+pub(crate) fn effective_pre_resource_uri(result: &PipelineResult) -> Result<Option<String>, ErrorData> {
+    let Some(payload) = modified_message_payload(result) else { return Ok(None) };
+    let [cpex::cpex_core::cmf::ContentPart::ResourceRef { content }] = payload.message.content.as_slice() else {
+        return Err(ErrorData::internal_error("Plugin returned an invalid resource request", None));
     };
-    if resource_request_matches(payload, resource_uri, resource_request_id) {
-        Ok(())
-    } else {
-        Err(ErrorData::internal_error("Plugin attempted to modify the canonical resource route", None))
-    }
+    Ok(Some(content.uri.clone()))
 }
 
 pub(crate) fn effective_post_resource_result(
     original: ReadResourceResult,
     result: &PipelineResult,
-    resource_request_id: &str,
 ) -> Result<ReadResourceResult, ErrorData> {
     let Some(payload) = modified_message_payload(result) else {
         return Ok(original);
     };
-    resource_result_response(original, payload, resource_request_id)
+    resource_result_response(original, payload)
         .ok_or_else(|| ErrorData::internal_error("Plugin returned a resource result the gateway cannot apply", None))
 }
 

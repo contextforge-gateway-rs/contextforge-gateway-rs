@@ -40,6 +40,7 @@ pub(crate) struct Observations {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) enum PreBehavior {
+    ResourceUri(&'static str),
     #[default]
     Allow,
     Rewrite,
@@ -50,6 +51,7 @@ pub(crate) enum PreBehavior {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) enum PostBehavior {
+    ResourceText,
     #[default]
     Allow,
     Rewrite,
@@ -80,6 +82,16 @@ impl TestPlugin {
             pre_behavior: PreBehavior::Allow,
             post_behavior: PostBehavior::Allow,
         }
+    }
+
+    pub(crate) fn with_resource_uri(mut self, uri: &'static str) -> Self {
+        self.pre_behavior = PreBehavior::ResourceUri(uri);
+        self
+    }
+
+    pub(crate) fn with_resource_text(mut self) -> Self {
+        self.post_behavior = PostBehavior::ResourceText;
+        self
     }
 
     pub(crate) fn with_pre_rewrite(mut self) -> Self {
@@ -180,10 +192,17 @@ impl HookHandler<CmfHook> for TestPlugin {
         if is_post {
             match self.post_behavior {
                 PostBehavior::Allow => PluginResult::allow(),
-                PostBehavior::Rewrite => {
+                PostBehavior::Rewrite | PostBehavior::ResourceText => {
                     let mut modified = payload.clone();
                     for part in &mut modified.message.content {
                         if let ContentPart::Resource { content } = part {
+                            if matches!(self.post_behavior, PostBehavior::ResourceText) {
+                                content.content = Some("converted".to_owned());
+                                content.blob = None;
+                                content.mime_type = Some("text/plain".to_owned());
+                                "file:///converted.txt".clone_into(&mut content.uri);
+                                continue;
+                            }
                             if let Some(text) = &mut content.content {
                                 "post:[redacted]".clone_into(text);
                             }
@@ -260,6 +279,13 @@ impl HookHandler<CmfHook> for TestPlugin {
             }
         } else {
             match self.pre_behavior {
+                PreBehavior::ResourceUri(uri) => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::ResourceRef { content }) = modified.message.content.first_mut() {
+                        uri.clone_into(&mut content.uri);
+                    }
+                    PluginResult::modify_payload(modified)
+                },
                 PreBehavior::Allow => PluginResult::allow(),
                 PreBehavior::Rewrite => {
                     let mut modified = payload.clone();

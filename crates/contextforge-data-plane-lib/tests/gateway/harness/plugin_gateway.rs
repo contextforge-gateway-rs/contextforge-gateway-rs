@@ -124,13 +124,6 @@ impl ServerHandler for TestBackend {
             .push(BackendObservation { tool_name: request.name.clone(), args: request.arguments.clone() });
         self.state.events.lock().expect("backend events lock poisoned").push("backend");
 
-        if request.name == "review_invalid_blob" {
-            return Ok(GetPromptResult::new(vec![PromptMessage::new(
-                Role::User,
-                ContentBlock::resource(ResourceContents::blob("not base64!", "file:///blocked.env")),
-            )])
-            .into());
-        }
         let topic = request
             .arguments
             .as_ref()
@@ -261,9 +254,10 @@ pub const TOOL_NAMES: &[&str] = &[
     "wait_for_cancellation",
 ];
 pub const RESOURCE_URIS: &[&str] = &["file:///password.env", "file:///password.bin"];
-pub const PROMPT_NAMES: &[&str] = &["review_bundle", "review", "review_invalid_blob"];
+pub const PROMPT_NAMES: &[&str] = &["review_bundle", "review"];
 
 pub(crate) struct RunningGateway {
+    pub(crate) user_store: MemoryUserConfigStore,
     pub(crate) backend_state: BackendState,
     pub(crate) backend_name: String,
     gateway_url: String,
@@ -466,7 +460,7 @@ async fn start_gateway_with_state(
             runtime_plugins_enabled: Some(runtime_plugins_enabled),
             ..create_default_config()
         },
-        user_store,
+        user_store: user_store.clone(),
         user_id: user.to_owned(),
         virtual_host_id: virtual_host_id.to_owned(),
         backends: vec![backend],
@@ -476,5 +470,5 @@ async fn start_gateway_with_state(
     .expect("gateway starts");
     let gateway_url = fixture.gateway_url();
 
-    RunningGateway { backend_state, backend_name, gateway_url, fixture }
+    RunningGateway { user_store, backend_state, backend_name, gateway_url, fixture }
 }

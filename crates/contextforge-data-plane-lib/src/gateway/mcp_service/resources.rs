@@ -22,7 +22,7 @@ pub(super) async fn read_resource(
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let downstream_name = request.uri.clone();
 
-    let Some(route) = virtual_host.resources.get(&downstream_name) else {
+    let Some(mut route) = virtual_host.resources.get(&downstream_name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... resource not found".into(),
@@ -30,20 +30,31 @@ pub(super) async fn read_resource(
         });
     };
 
+    let resource_hook = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        Some(plugin_runtime.before_read_resource(&route.upstream_name).await?)
+    } else {
+        None
+    };
+    if let Some(uri) = resource_hook.as_ref().and_then(|hook| hook.rewritten_uri())
+        && uri != route.upstream_name
+    {
+        let mut candidates = virtual_host.resources.values().filter(|candidate| candidate.upstream_name == uri);
+        let rewritten = candidates.next().ok_or_else(|| {
+            ErrorData::invalid_params("Plugin resource target is not available in this virtual host", None)
+        })?;
+        if candidates.any(|candidate| candidate.backend_name != rewritten.backend_name) {
+            return Err(ErrorData::invalid_params("Plugin resource target is ambiguous", None));
+        }
+        route = rewritten;
+    }
     let backend_name = route.backend_name.clone();
     let resource_uri = route.upstream_name.clone();
-
     let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
         code: ErrorCode::INVALID_PARAMS,
         message: "Routing problem... backend not found".into(),
         data: None,
     })?;
 
-    let resource_hook = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
-        Some(plugin_runtime.before_read_resource(&resource_uri).await?)
-    } else {
-        None
-    };
     let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
     let mut routed_request = request;
 
