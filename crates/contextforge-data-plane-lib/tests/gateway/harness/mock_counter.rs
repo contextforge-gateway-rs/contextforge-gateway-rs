@@ -1,18 +1,10 @@
 #![allow(clippy::pedantic)]
-#![allow(dead_code)]
 
 use std::{sync::Arc, time::Duration};
 
 use rmcp::{
-    ErrorData as McpError, RoleServer, ServerHandler,
-    handler::server::{
-        router::{prompt::PromptRouter, tool::ToolRouter},
-        wrapper::Parameters,
-    },
-    model::*,
-    prompt, prompt_handler, prompt_router, schemars,
-    service::RequestContext,
-    tool, tool_handler, tool_router,
+    ErrorData as McpError, RoleServer, ServerHandler, handler::server::wrapper::Parameters, model::*, prompt,
+    prompt_handler, prompt_router, schemars, service::RequestContext, tool, tool_handler, tool_router,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -41,19 +33,12 @@ pub struct CounterAnalysisArgs {
 #[derive(Clone)]
 pub struct Counter {
     counter: Arc<Mutex<i32>>,
-    tool_router: ToolRouter<Counter>,
-    prompt_router: PromptRouter<Counter>,
 }
 
 #[tool_router]
 impl Counter {
-    #[allow(dead_code)]
     pub fn new() -> Self {
-        Self {
-            counter: Arc::new(Mutex::new(0)),
-            tool_router: Self::tool_router(),
-            prompt_router: Self::prompt_router(),
-        }
+        Self { counter: Arc::new(Mutex::new(0)) }
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
@@ -179,7 +164,7 @@ impl ServerHandler for Counter {
                 .build(),
         )
         .with_server_info(Implementation::from_build_env())
-        .with_protocol_version(ProtocolVersion::V_2024_11_05)
+        .with_protocol_version(ProtocolVersion::V_2026_07_28)
         .with_instructions("This server provides counter tools and prompts. Tools: increment, decrement, get_value, say_hello, echo, sum. Prompts: example_prompt (takes a message), counter_analysis (analyzes counter state with a goal).".to_owned())
     }
 

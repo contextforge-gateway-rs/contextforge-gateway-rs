@@ -25,7 +25,7 @@ then follow only the links that are relevant.
 
 - **Repo**: `contextforge-data-plane` — the Rust ContextForge external dataplane.
 - **Core invariant**: the ContextForge external dataplane is pure routing logic. No IAM, UI, or metrics storage.
-- **Protocol target**: the ContextForge external dataplane supports MCP `2026-07-28` and `2025-11-25` over Streamable HTTP. Both use stateless request handling; `initialize` remains supported but does not establish external-dataplane session state. Legacy SSE paths are being removed from the external dataplane.
+- **Protocol target**: new external-dataplane behavior targets MCP `2026-07-28` over Streamable HTTP with `server/discover` and per-request client metadata. The remaining `2025-11-25`/`initialize` paths are temporary compatibility coverage, not an expansion surface. Legacy SSE is outside the external dataplane.
 - **Status convention**: project, architecture, routing, and operations pages
   describe the current implementation. The page under **Upcoming** describes
   the tentative ContextForge 2.0 target and migration roadmap.

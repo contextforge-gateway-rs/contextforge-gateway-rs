@@ -59,8 +59,6 @@ with_tools = []
 [dev-dependencies]
 opentelemetry_sdk.workspace = true
 cpex.workspace = true
-openport.workspace = true
-cpex-secrets-detection.workspace = true
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 

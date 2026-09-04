@@ -1,19 +1,22 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex as StdMutex, OnceLock},
+    sync::{Arc, Mutex as StdMutex},
     time::{Duration, Instant},
 };
 
+use super::{
+    GatewayFixture, GatewayTestConfig, MemoryUserConfigStore, TestServer, connect_client_with_protocol, create_client,
+    create_default_config, modern_client_info, test_gateways::construct_services, token,
+};
 use contextforge_data_plane_apis::{
     User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, ServiceRoute, UserConfig, VirtualHost},
 };
 use contextforge_data_plane_cpex::CpexRuntimeRegistry;
-use contextforge_data_plane_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
-use futures::FutureExt;
+use contextforge_data_plane_lib::{Config, UpstreamConnectionMode, UserConfigStore};
 use http::{HeaderMap, HeaderValue, request::Parts};
 use rmcp::{
-    ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
+    ErrorData, RoleClient, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, GetPromptRequestParams,
         GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, NumberOrString,
@@ -27,18 +30,11 @@ use rmcp::{
     },
 };
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex as TokioMutex;
-
-use crate::support::{self, create_default_config, test_gateways::construct_services};
-
-use super::{MemoryUserConfigStore, token};
 
 pub(crate) const BACKEND_PROMPT_RESOURCE: &str = "token=secret";
 pub(crate) const BACKEND_PROMPT_IMAGE: &str = "aW1hZ2UtYnl0ZXM=";
 
-static GATEWAY_PORT_LOCK: OnceLock<Arc<TokioMutex<()>>> = OnceLock::new();
 const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const GATEWAY_PORT_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
@@ -246,7 +242,7 @@ pub(crate) struct RunningGateway {
     pub(crate) backend_state: BackendState,
     pub(crate) backend_name: String,
     gateway_url: String,
-    handle: Option<tokio::task::JoinHandle<Vec<contextforge_data_plane_lib::Result<()>>>>,
+    fixture: GatewayFixture,
 }
 
 impl RunningGateway {
@@ -258,7 +254,20 @@ impl RunningGateway {
         &self,
         user: &str,
     ) -> rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams> {
-        self.connect_with_handler(user, InitializeRequestParams::default()).await
+        self.connect_with_handler(user, modern_client_info()).await
+    }
+
+    pub(crate) async fn connect_legacy(
+        &self,
+        user: &str,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams> {
+        connect_client_with_protocol(
+            self.gateway_url.clone(),
+            create_client(user),
+            rmcp::model::ProtocolVersion::V_2025_11_25,
+        )
+        .await
+        .expect("legacy compatibility client connects")
     }
 
     pub(crate) async fn connect_with_handler<S>(
@@ -281,7 +290,15 @@ impl RunningGateway {
                 client,
                 StreamableHttpClientTransportConfig::with_uri(self.gateway_url.clone()),
             );
-            match handler.clone().serve(transport).await {
+            match rmcp::service::serve_client_with_lifecycle(
+                handler.clone(),
+                transport,
+                rmcp::ClientLifecycleMode::Discover {
+                    preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+                },
+            )
+            .await
+            {
                 Ok(service) => return service,
                 Err(error) if Instant::now() < deadline => {
                     let _ = error;
@@ -291,13 +308,9 @@ impl RunningGateway {
             }
         }
     }
-}
 
-impl Drop for RunningGateway {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-        }
+    pub(crate) async fn shutdown(self) -> contextforge_data_plane_lib::Result<()> {
+        self.fixture.shutdown().await
     }
 }
 
@@ -363,12 +376,7 @@ async fn start_gateway_with_state(
     json_backend_responses: bool,
     backend_state: BackendState,
 ) -> RunningGateway {
-    let port_lock = Arc::clone(GATEWAY_PORT_LOCK.get_or_init(|| Arc::new(TokioMutex::new(()))));
-    let port_guard = port_lock.lock().await;
-    let gateway_port = openport::pick_random_unused_port().expect("gateway port");
-    let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("backend binds");
-    let backend_port = backend_listener.local_addr().expect("backend address").port();
-    let backend_name = format!("backend-{backend_port}");
+    let backend_name = "00000000-0000-0000-0000-000000000001".to_owned();
     let virtual_host_id = "vh-cpex-test";
     let parameter_headers = backend_state.parameter_headers;
 
@@ -381,7 +389,13 @@ async fn start_gateway_with_state(
         StreamableHttpServerConfig::default().with_json_response(json_backend_responses),
     );
     let backend_router = axum::Router::new().route_service("/mcp", backend_service);
+    let backend = TestServer::start_http(backend_router).await.expect("backend starts");
 
+    let mut tools = construct_services(&backend_name, TOOL_NAMES);
+    tools.insert(
+        format!("{backend_name}-sum"),
+        ServiceRoute { backend_name: backend_name.clone(), upstream_name: "sum".to_owned() },
+    );
     let user_store = MemoryUserConfigStore::default();
     user_store
         .set_config(
@@ -393,7 +407,7 @@ async fn start_gateway_with_state(
                         backends: HashMap::from([(
                             backend_name.clone(),
                             BackendMCPGateway {
-                                url: format!("http://127.0.0.1:{backend_port}/mcp").parse().expect("backend URL"),
+                                url: backend.url("/mcp").parse().expect("backend URL"),
                                 name: String::new(),
                                 mcp_protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
                                 passthrough_headers: Vec::new(),
@@ -403,7 +417,7 @@ async fn start_gateway_with_state(
                                 completion: HashMap::new(),
                             },
                         )]),
-                        tools: construct_services(&backend_name, TOOL_NAMES),
+                        tools,
                         resources: construct_services(&backend_name, RESOURCE_URIS),
                         resource_templates: HashMap::new(),
                         prompts: construct_services(&backend_name, PROMPT_NAMES),
@@ -414,48 +428,21 @@ async fn start_gateway_with_state(
         .await
         .expect("user config is stored");
 
-    let gateway = Gateway::builder()
-        .with_config(Config {
-            address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+    let fixture = GatewayFixture::start(GatewayTestConfig {
+        config: Config {
             upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
             runtime_plugins_enabled: Some(runtime_plugins_enabled),
             ..create_default_config()
-        })
-        .with_session_manager(Arc::new(LocalSessionManager::default()))
-        .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(user_store)))
-        .with_plugin_runtime(runtime_plugins_enabled.then(|| plugin_runtime.handle()))
-        .with_authorization_service(Arc::new(support::auth::AlwaysAllowAuthorizatioService::new(user.to_owned())))
-        .build();
+        },
+        user_store,
+        user_id: user.to_owned(),
+        virtual_host_id: virtual_host_id.to_owned(),
+        backends: vec![backend],
+        plugin_runtime: runtime_plugins_enabled.then(|| plugin_runtime.handle()),
+    })
+    .await
+    .expect("gateway starts");
+    let gateway_url = fixture.gateway_url();
 
-    let gateway = async move { gateway.run_gateway().await }.boxed();
-    let backend = async move {
-        axum::serve(backend_listener, backend_router).await.expect("backend serves");
-        Ok(())
-    }
-    .boxed();
-
-    let handle = tokio::spawn(futures::future::join_all(vec![gateway, backend]));
-    wait_for_gateway_port(gateway_port).await;
-    drop(port_guard);
-
-    RunningGateway {
-        backend_state,
-        backend_name,
-        gateway_url: format!("http://127.0.0.1:{gateway_port}/contextforge-rs/servers/{virtual_host_id}/mcp"),
-        handle: Some(handle),
-    }
-}
-
-async fn wait_for_gateway_port(port: u16) {
-    let deadline = Instant::now() + GATEWAY_PORT_READY_TIMEOUT;
-    loop {
-        match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
-            Ok(_) => return,
-            Err(error) if Instant::now() < deadline => {
-                let _ = error;
-                tokio::time::sleep(TEST_POLL_INTERVAL).await;
-            },
-            Err(error) => panic!("gateway TCP listener starts: {error:?}"),
-        }
-    }
+    RunningGateway { backend_state, backend_name, gateway_url, fixture }
 }

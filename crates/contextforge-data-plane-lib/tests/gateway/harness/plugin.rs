@@ -81,15 +81,6 @@ impl TestPlugin {
         }
     }
 
-    pub(crate) fn rewrite_from_config(config: PluginConfig) -> Self {
-        Self {
-            config,
-            observations: Arc::new(Mutex::new(Observations::default())),
-            pre_behavior: PreBehavior::Rewrite,
-            post_behavior: PostBehavior::Allow,
-        }
-    }
-
     pub(crate) fn with_pre_rewrite(mut self) -> Self {
         self.pre_behavior = PreBehavior::Rewrite;
         self

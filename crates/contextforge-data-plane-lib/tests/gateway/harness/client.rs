@@ -1,15 +1,13 @@
 use std::time::{Duration, Instant};
 
-use contextforge_data_plane_lib::Result;
 use http::{HeaderMap, HeaderValue};
 use rmcp::{
-    ServiceExt,
-    model::{InitializeRequestParams, ProtocolVersion},
+    model::InitializeRequestParams,
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
 use tracing::warn;
 
-use super::auth::token;
+use super::auth::token; // pragma: allowlist secret
 
 pub(crate) const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -35,59 +33,6 @@ fn auth_headers(user: &str) -> HeaderMap {
         HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
     );
     default_headers
-}
-
-pub(crate) async fn connect_client(
-    gateway_url: String,
-    client: reqwest::Client,
-) -> Result<rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams>> {
-    connect_client_with_handler(
-        gateway_url,
-        client,
-        InitializeRequestParams::default().with_protocol_version(ProtocolVersion::V_2026_07_28),
-    )
-    .await
-}
-
-pub(crate) async fn connect_client_with_protocol(
-    gateway_url: String,
-    client: reqwest::Client,
-    protocol_version: ProtocolVersion,
-) -> Result<rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams>> {
-    connect_client_with_handler(
-        gateway_url,
-        client,
-        InitializeRequestParams::default().with_protocol_version(protocol_version),
-    )
-    .await
-}
-
-/// Connects any `ClientHandler` to the gateway, retrying until `CLIENT_CONNECT_TIMEOUT`.
-pub(crate) async fn connect_client_with_handler<H>(
-    gateway_url: String,
-    client: reqwest::Client,
-    handler: H,
-) -> Result<rmcp::service::RunningService<rmcp::RoleClient, H>>
-where
-    H: rmcp::ClientHandler + Clone,
-{
-    let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
-    loop {
-        let config = StreamableHttpClientTransportConfig::with_uri(gateway_url.clone());
-        let transport = StreamableHttpClientTransport::with_client(client.clone(), config);
-
-        match handler.clone().serve(transport).await {
-            Ok(running_service) => return Ok(running_service),
-            Err(error) if Instant::now() < deadline => {
-                warn!("No Service {error:?}");
-                tokio::time::sleep(TEST_POLL_INTERVAL).await;
-            },
-            Err(error) => {
-                warn!("No Service {error:?}");
-                return Err("Couldn't get a service".into());
-            },
-        }
-    }
 }
 
 pub(crate) fn modern_client_info() -> InitializeRequestParams {

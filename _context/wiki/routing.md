@@ -12,7 +12,7 @@ The control plane builds and publishes the routing tables to Redis; the dataplan
 
 ## Routing table shape
 
-```rust
+```text
 VirtualHost { backends: HashMap<String, BackendMCPGateway>,
               tools: HashMap<String, ServiceRoute>,
               resources: HashMap<String, ServiceRoute>,

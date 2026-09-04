@@ -1,12 +1,13 @@
-#![allow(dead_code, unused_imports, reason = "shared CPEX test fixture is used by separate integration test targets")]
-
-pub mod auth;
+mod auth;
 mod client;
+mod compatibility;
+mod gateway_fixture;
 pub(crate) mod mock_counter;
 pub(crate) mod paginating_mock;
 mod plugin;
 mod plugin_gateway;
 mod runtime;
+mod server;
 mod test_gateways;
 mod tool;
 mod user_config_store;
@@ -17,12 +18,14 @@ pub(crate) const TEST_USER_EMAIL: &str = "admin@example.com";
 #[cfg(feature = "with_tools")]
 use std::{path::PathBuf, str::FromStr};
 
-pub(crate) use auth::token;
+pub(crate) use auth::token; // pragma: allowlist secret
 pub(crate) use client::{
-    CLIENT_CONNECT_TIMEOUT, TEST_POLL_INTERVAL, connect_client, connect_client_with_handler,
-    connect_client_with_protocol, connect_modern_client, create_client, create_tls_client, modern_client_info,
+    CLIENT_CONNECT_TIMEOUT, TEST_POLL_INTERVAL, connect_modern_client, create_client, create_tls_client,
+    modern_client_info,
 };
+pub(crate) use compatibility::connect_client_with_protocol;
 use contextforge_data_plane_lib::{Config, RedisConnectionMode};
+pub(crate) use gateway_fixture::{GatewayFixture, GatewayTestConfig};
 pub(crate) use plugin::{
     POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, PROMPT_ERROR_MESSAGE, PROMPT_POST_DENY_ERROR_CODE, PromptBehavior,
     PromptTestPlugin, REWRITTEN_PROMPT_RESOURCE, REWRITTEN_PROMPT_TEXT, REWRITTEN_PROMPT_TOPIC, REWRITTEN_SUM_A,
@@ -33,9 +36,9 @@ pub(crate) use plugin_gateway::{
     start_gateway_with_json_backend_responses, start_gateway_with_parameter_headers,
 };
 pub(crate) use runtime::{runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, runtime_with_prompt_plugin};
+pub(crate) use server::TestServer;
 pub(crate) use test_gateways::{
-    ListToolsGatewaySettings, create_gateway_with_four_counters, create_gateway_with_four_legacy_counters,
-    create_ports, create_tls_gateway_with_four_tls_counters, plaintext_config,
+    start_counter_gateway, start_counter_gateway_with_backends, start_legacy_counter_gateway, start_tls_counter_gateway,
 };
 pub(crate) use tool::{error_code, error_parts, sum_request, text};
 pub(crate) use user_config_store::MemoryUserConfigStore;
