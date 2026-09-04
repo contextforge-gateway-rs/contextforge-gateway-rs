@@ -21,22 +21,17 @@ pub(super) async fn complete(
     let mcp_call_validator = AuthorizedCallValidator::new("complete", &cx);
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
 
-    let Some(downstream_name) = (match &request.r#ref {
-        Reference::Prompt(_) => request.r#ref.as_prompt_name(),
-        Reference::Resource(_) => request.r#ref.as_resource_uri(),
+    let route = match &request.r#ref {
+        Reference::Prompt(prompt) => virtual_host.prompts.get(&prompt.name),
+        Reference::Resource(resource) => {
+            virtual_host.resource_templates.get(&resource.uri).or_else(|| virtual_host.resources.get(&resource.uri))
+        },
         _ => None,
-    }) else {
+    };
+    let Some(route) = route else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... completion not found".into(),
-            data: None,
-        });
-    };
-
-    let Some(route) = virtual_host.tools.get(downstream_name) else {
-        return Err(ErrorData {
-            code: ErrorCode::INVALID_PARAMS,
-            message: "Routing problem... tool not found".into(),
             data: None,
         });
     };
@@ -54,7 +49,11 @@ pub(super) async fn complete(
     let mut backend_service = connect_backend_for_request(mcp_service, &backend_name, backend, &cx).await?;
 
     let mut routed_request = request;
-    routed_request.argument.name = completion_name;
+    match &mut routed_request.r#ref {
+        Reference::Prompt(prompt) => prompt.name = completion_name,
+        Reference::Resource(resource) => resource.uri = completion_name,
+        _ => {},
+    }
 
     let response = backend_service.complete(routed_request).await;
 
