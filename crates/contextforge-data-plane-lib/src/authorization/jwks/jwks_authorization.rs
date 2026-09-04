@@ -352,9 +352,12 @@ mod test {
         claims.exp = 0;
         let token = get_hmac_token_for_claims(&claims);
 
+        let decoding_key = DecodingKey::from_secret(HMAC_SECRET);
+        let verfication_key = VerificationKey::new(Some("HS256".to_owned()), decoding_key);
+
         let state = ContextForgeDataPlaneAppState {
             authorization_service: Arc::new(
-                JwtAuthorizationService::from_keys(vec![]).await.expect("this should work"),
+                JwtAuthorizationService::from_keys(vec![verfication_key]).await.expect("this should work"),
             ),
             config_store: Arc::new(MockedUserConfigStore {}),
             config: Config::default(),
