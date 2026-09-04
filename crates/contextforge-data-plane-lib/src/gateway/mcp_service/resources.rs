@@ -22,7 +22,7 @@ pub(super) async fn read_resource(
     let (virtual_host, _claims) = mcp_call_validator.validate_stateless()?;
     let downstream_name = request.uri.clone();
 
-    let Some(route) = virtual_host.resources.get(&downstream_name) else {
+    let Some(mut route) = virtual_host.resources.get(&downstream_name) else {
         return Err(ErrorData {
             code: ErrorCode::INVALID_PARAMS,
             message: "Routing problem... resource not found".into(),
@@ -30,9 +30,25 @@ pub(super) async fn read_resource(
         });
     };
 
+    let resource_hook = if let Some(plugin_runtime) = &mcp_service.plugin_runtime {
+        Some(plugin_runtime.before_read_resource(&route.upstream_name).await?)
+    } else {
+        None
+    };
+    if let Some(uri) = resource_hook.as_ref().and_then(|hook| hook.rewritten_uri())
+        && uri != route.upstream_name
+    {
+        let mut candidates = virtual_host.resources.values().filter(|candidate| candidate.upstream_name == uri);
+        let rewritten = candidates.next().ok_or_else(|| {
+            ErrorData::invalid_params("Plugin resource target is not available in this virtual host", None)
+        })?;
+        if candidates.any(|candidate| candidate.backend_name != rewritten.backend_name) {
+            return Err(ErrorData::invalid_params("Plugin resource target is ambiguous", None));
+        }
+        route = rewritten;
+    }
     let backend_name = route.backend_name.clone();
     let resource_uri = route.upstream_name.clone();
-
     let backend = virtual_host.backends.get(&backend_name).ok_or_else(|| ErrorData {
         code: ErrorCode::INVALID_PARAMS,
         message: "Routing problem... backend not found".into(),
@@ -48,6 +64,11 @@ pub(super) async fn read_resource(
         tracing::warn!("read_resource: backend cleanup failed backend_name = {backend_name} error = {error:?}");
     }
     let response = response.map_err(|error| backend_forward_error("read_resource", &backend_name, &error))?;
+    let response = if let Some(resource_hook) = resource_hook {
+        resource_hook.after_read_resource(response).await?
+    } else {
+        response
+    };
 
     info!("read_resource: backend {backend_name} returned {} contents", response.contents.len());
 

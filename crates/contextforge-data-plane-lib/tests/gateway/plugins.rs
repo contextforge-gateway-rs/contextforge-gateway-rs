@@ -8,7 +8,7 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientRequest, ContentBlock, ErrorCode,
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, ProgressNotificationParam,
-        Request, ResourceContents, Role as McpRole, ServerResult,
+        ReadResourceRequestParams, Request, ResourceContents, Role as McpRole, ServerResult,
     },
     service::{NotificationContext, PeerRequestOptions, RequestHandle, RoleClient, RunningService},
 };
@@ -861,4 +861,150 @@ async fn prompt_pre_and_post_hooks_share_gateway_call_context() {
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(1, observations.pre_calls);
     assert_eq!(1, observations.post_calls);
+}
+
+#[tokio::test]
+async fn resource_hooks_inspect_canonical_uris_and_redact_direct_and_aliased_reads() {
+    let plugin = Arc::new(
+        TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_PRE_FETCH, cmf_hook_names::RESOURCE_POST_FETCH])
+            .with_post_rewrite(),
+    );
+    let observations = plugin.observations();
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    for uri in ["file:///password.env", "file:///password.bin"] {
+        for requested in [uri.to_owned(), format!("{}-{uri}", gateway.backend_name)] {
+            let result =
+                service.read_resource(ReadResourceRequestParams::new(requested)).await.expect("resource is returned");
+            match &result.contents[0] {
+                ResourceContents::TextResourceContents { text, uri: returned, .. } => {
+                    assert_eq!("post:[redacted]", text);
+                    assert_eq!(uri, returned);
+                },
+                ResourceContents::BlobResourceContents { blob, uri: returned, .. } => {
+                    use base64::{Engine as _, prelude::BASE64_STANDARD};
+                    assert_eq!(b"post:[redacted]", BASE64_STANDARD.decode(blob).expect("valid base64").as_slice());
+                    assert_eq!(uri, returned);
+                },
+                _ => panic!("expected text or blob resource"),
+            }
+            assert_eq!(Some(uri), observations.lock().expect("observations lock").pre_resource_uri.as_deref());
+        }
+    }
+    let observed = observations.lock().expect("observations lock");
+    assert_eq!(4, observed.pre_calls);
+    assert_eq!(4, observed.post_calls);
+    assert_eq!(
+        ["file:///password.env", "file:///password.env", "file:///password.bin", "file:///password.bin"],
+        gateway.backend_state.resources.lock().expect("resource calls lock").as_slice()
+    );
+}
+
+#[tokio::test]
+async fn resource_pre_hook_denies_before_the_backend_read() {
+    let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_PRE_FETCH]).with_pre_deny());
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("resource policy denies");
+    assert_eq!(ErrorCode(PRE_DENY_ERROR_CODE), error_code(error));
+    assert!(gateway.backend_state.resources.lock().expect("resource calls lock").is_empty());
+}
+
+#[tokio::test]
+async fn resource_post_hook_denies_the_backend_response() {
+    let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]).with_post_deny());
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_post(plugin).await).await;
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("resource policy denies");
+    let (_, message) = error_parts(error);
+    assert!(message.contains("Plugin denied resource"), "{message}");
+    assert_eq!(1, gateway.backend_state.resources.lock().expect("resource calls lock").len());
+}
+
+#[tokio::test]
+async fn resource_plugins_can_rewrite_a_published_target_and_convert_the_result() {
+    let plugin = Arc::new(
+        TestPlugin::new(
+            "resource-rewrite",
+            vec![cmf_hook_names::RESOURCE_PRE_FETCH, cmf_hook_names::RESOURCE_POST_FETCH],
+        )
+        .with_resource_uri("file:///password.bin")
+        .with_resource_text(),
+    );
+    let observations = plugin.observations();
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let service = gateway.connect(TEST_USER_ID).await;
+    for uri in ["file:///password.env".to_owned(), format!("{}-file:///password.env", gateway.backend_name)] {
+        let result =
+            service.read_resource(ReadResourceRequestParams::new(uri)).await.expect("published target rewrite applies");
+        let ResourceContents::TextResourceContents { text, uri, mime_type, .. } = &result.contents[0] else {
+            panic!("blob was converted to text");
+        };
+        assert_eq!("converted", text);
+        assert_eq!("file:///converted.txt", uri);
+        assert_eq!(Some("text/plain"), mime_type.as_deref());
+    }
+    assert_eq!(
+        ["file:///password.bin", "file:///password.bin"],
+        gateway.backend_state.resources.lock().expect("resource calls lock").as_slice()
+    );
+    assert_eq!(2, observations.lock().expect("observations lock").post_calls);
+}
+
+#[tokio::test]
+async fn resource_plugin_cannot_route_to_an_unpublished_target() {
+    let plugin = Arc::new(
+        TestPlugin::new("resource-rewrite", vec![cmf_hook_names::RESOURCE_PRE_FETCH])
+            .with_resource_uri("file:///unpublished"),
+    );
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("target is outside the published resource routes");
+    assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
+    assert!(gateway.backend_state.resources.lock().expect("resource calls lock").is_empty());
+}
+
+#[tokio::test]
+async fn resource_plugin_rejects_a_target_shared_by_different_backends() {
+    use contextforge_data_plane_apis::{User, user_store::ServiceRoute};
+    use contextforge_data_plane_lib::UserConfigStore;
+
+    let plugin = Arc::new(
+        TestPlugin::new("resource-rewrite", vec![cmf_hook_names::RESOURCE_PRE_FETCH])
+            .with_resource_uri("file:///password.bin"),
+    );
+    let gateway = start_gateway(TEST_USER_ID, true, runtime_with_pre(plugin).await).await;
+    let user = User::new(TEST_USER_ID);
+    let mut config = gateway.user_store.get_config(&user).await.expect("published config");
+    let host = config.virtual_hosts.values_mut().next().expect("virtual host");
+    let backend = host.backends[&gateway.backend_name].clone();
+    host.backends.insert("second-backend".to_owned(), backend);
+    host.resources.insert(
+        "second-file".to_owned(),
+        ServiceRoute { backend_name: "second-backend".to_owned(), upstream_name: "file:///password.bin".to_owned() },
+    );
+    gateway.user_store.set_config(&user, &config).await.expect("updated config");
+
+    let error = gateway
+        .connect(TEST_USER_ID)
+        .await
+        .read_resource(ReadResourceRequestParams::new("file:///password.env"))
+        .await
+        .expect_err("rewritten URI is ambiguous");
+    let (code, message) = error_parts(error);
+    assert_eq!(ErrorCode::INVALID_PARAMS, code);
+    assert_eq!("Plugin resource target is ambiguous", message);
+    assert!(gateway.backend_state.resources.lock().expect("resource calls lock").is_empty());
 }

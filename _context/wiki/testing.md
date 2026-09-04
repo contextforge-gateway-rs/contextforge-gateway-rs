@@ -37,7 +37,7 @@ backends without recompiling a shared support tree for every feature file.
 | Area | Covers |
 | --- | --- |
 | `gateway/{tools,prompts,resources,subscriptions}.rs` | Active routed operations and exact routing failures. |
-| `gateway/plugins.rs` | Gateway-owned CPEX ordering, mutation, denial, progress, and prompt seams using deterministic recording plugins. Concrete plugin behavior stays in each plugin crate. |
+| `gateway/plugins.rs` | Gateway-owned CPEX ordering, mutation, denial, progress, and prompt seams using deterministic recording plugins. Resource coverage includes direct and aliased URIs, text/blob conversion, canonical pre-hook URIs, published-target rewrites, rejection of unpublished targets, metadata preservation, and pre/post denial. Concrete plugin behavior stays in each plugin crate. |
 | `gateway/harness/` | Authentication, modern and compatibility clients, in-memory configuration, concrete mock backends, and owned server fixtures. |
 | `gateway/future_contracts/` | Deferred fanout, pagination, TLS, completions, subscriptions, and cancellation contracts. |
 
@@ -56,7 +56,7 @@ cargo nextest list --locked --workspace --all-features --run-ignored only
 ```
 
 The two binary E2E tests and `tests/conformance/` remain separate infrastructure
-boundaries. Active in-process tests run with no Docker or Redis dependency.
+boundaries. Active in-process tests run with no Docker or Redis dependency. Resource policy coverage belongs in this active harness, not in ignored binary tests or new legacy-client cases. Runtime unit tests verify that enabling or disabling hooks during a resource read preserves its original policy decision.
 
 Parameter-header integration tests verify that calls without a published tool
 schema skip local `Mcp-Param-*` validation and still reach the backend. Unit and

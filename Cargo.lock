@@ -582,6 +582,7 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "base64 0.22.1",
  "contextforge-data-plane-apis",
  "cpex",
  "redis",

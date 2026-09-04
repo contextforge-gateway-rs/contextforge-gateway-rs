@@ -185,8 +185,8 @@ RuntimePluginConfigDocument
   cpex: CpexConfig
 ```
 
-Supported: `cmf.tool_pre_invoke`, `cmf.tool_post_invoke`, `cmf.prompt_pre_fetch`, `cmf.prompt_post_fetch` only.
-Rejected: routing-based selection, plugin dirs, global policies, resource and LLM hooks, plugin conditions.
+Supported: tool, prompt, and resource pre/post CMF hooks.
+Rejected: routing-based selection, plugin dirs, global policies, LLM hooks, plugin conditions.
 Config validation and `CmfPluginFactory` registration must agree on that list: a hook accepted by validation but not registered leaves the plugin loaded and silently inert.
 Reload watcher: 10-minute interval. Invalid reload → runtime marked failed.
 
@@ -212,7 +212,15 @@ Writing plugin edits back follows three rules:
 
 MCP prompt results carry no error flag, so a plugin setting `is_error` on the CMF prompt result is rejecting the prompt rather than describing it. The gateway turns that into an MCP error carrying the plugin's `error_message`, and the rendered content never reaches the client. This differs from tools, where `is_error` is a field on `CallToolResult` and is forwarded as a successful response.
 
-Binary resource blobs reach plugins by URI and MIME type but not by content: CMF stores decoded bytes while MCP sends base64. A plugin can deny such a message; editing one fails the write-back.
+Binary resources embedded in prompts reach plugins by URI and MIME type but not by content. A plugin can deny such a message; editing one fails the write-back. Resource-read hooks below have their own binary conversion.
+
+### Resource Read Hook Behavior
+
+For `resources/read`, the pre hook receives the canonical backend-local URI and may allow, deny or rewrite it. A rewritten URI must resolve unambiguously through the caller's published virtual-host resources before a backend connection is opened. Aliases for the same backend target do not create ambiguity.
+
+The post hook may replace each returned resource's text or binary content, URI and MIME type, including converting text to a blob or a blob to text. Existing MCP `_meta` is preserved. CMF-only envelope and descriptive fields do not restrict these changes. Each resource still needs a valid MCP content representation; binary resource reads are decoded for CPEX and re-encoded after edits, while unchanged blob bytes retain their original wire value. This resource path does not add prompt-wide payload validation.
+
+The pre call returns an opaque, concrete `ResourceHookState` consumed by the post call. It captures both the runtime and the decision to run or skip post hooks before backend I/O. A reload only affects subsequent requests, including when it enables or disables resource hooks. Callers cannot construct missing or mismatched active state, and requests without a post hook allocate no correlation state.
 
 ### Demo Plugin Workflow
 

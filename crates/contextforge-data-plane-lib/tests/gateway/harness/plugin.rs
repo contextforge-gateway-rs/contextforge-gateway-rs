@@ -32,6 +32,7 @@ pub(crate) struct Observations {
     pub(crate) pre_payload_namespace: Option<String>,
     pub(crate) pre_payload_role: Option<Role>,
     pub(crate) pre_tool_call_id: Option<String>,
+    pub(crate) pre_resource_uri: Option<String>,
     pub(crate) post_payload_name: Option<String>,
     pub(crate) post_tool_call_ids: Vec<String>,
     pub(crate) post_result_text: Option<String>,
@@ -39,6 +40,7 @@ pub(crate) struct Observations {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) enum PreBehavior {
+    ResourceUri(&'static str),
     #[default]
     Allow,
     Rewrite,
@@ -49,6 +51,7 @@ pub(crate) enum PreBehavior {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) enum PostBehavior {
+    ResourceText,
     #[default]
     Allow,
     Rewrite,
@@ -79,6 +82,16 @@ impl TestPlugin {
             pre_behavior: PreBehavior::Allow,
             post_behavior: PostBehavior::Allow,
         }
+    }
+
+    pub(crate) fn with_resource_uri(mut self, uri: &'static str) -> Self {
+        self.pre_behavior = PreBehavior::ResourceUri(uri);
+        self
+    }
+
+    pub(crate) fn with_resource_text(mut self) -> Self {
+        self.post_behavior = PostBehavior::ResourceText;
+        self
     }
 
     pub(crate) fn with_pre_rewrite(mut self) -> Self {
@@ -152,7 +165,8 @@ impl HookHandler<CmfHook> for TestPlugin {
         _extensions: &Extensions,
         ctx: &mut PluginContext,
     ) -> PluginResult<MessagePayload> {
-        let is_post = payload.message.role == Role::Tool;
+        let is_post = payload.message.role == Role::Tool
+            || payload.message.content.iter().any(|part| matches!(part, ContentPart::Resource { .. }));
         let mut observations = self.observations.lock().expect("observations lock poisoned");
         if is_post {
             observations.post_calls += 1;
@@ -163,6 +177,9 @@ impl HookHandler<CmfHook> for TestPlugin {
             observations.post_result_text = Some(cmf_result_text(payload));
         } else {
             observations.pre_calls += 1;
+            if let Some(ContentPart::ResourceRef { content }) = payload.message.content.first() {
+                observations.pre_resource_uri = Some(content.uri.clone());
+            }
             if let Some(call) = payload.message.get_tool_calls().first() {
                 observations.pre_payload_name = Some(call.name.clone());
                 observations.pre_payload_namespace.clone_from(&call.namespace);
@@ -175,8 +192,25 @@ impl HookHandler<CmfHook> for TestPlugin {
         if is_post {
             match self.post_behavior {
                 PostBehavior::Allow => PluginResult::allow(),
-                PostBehavior::Rewrite => {
+                PostBehavior::Rewrite | PostBehavior::ResourceText => {
                     let mut modified = payload.clone();
+                    for part in &mut modified.message.content {
+                        if let ContentPart::Resource { content } = part {
+                            if matches!(self.post_behavior, PostBehavior::ResourceText) {
+                                content.content = Some("converted".to_owned());
+                                content.blob = None;
+                                content.mime_type = Some("text/plain".to_owned());
+                                "file:///converted.txt".clone_into(&mut content.uri);
+                                continue;
+                            }
+                            if let Some(text) = &mut content.content {
+                                "post:[redacted]".clone_into(text);
+                            }
+                            if let Some(blob) = &mut content.blob {
+                                *blob = b"post:[redacted]".to_vec();
+                            }
+                        }
+                    }
                     let result_text = cmf_result_text(payload);
                     if let Some(ContentPart::ToolResult { content }) =
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolResult { .. }))
@@ -245,6 +279,13 @@ impl HookHandler<CmfHook> for TestPlugin {
             }
         } else {
             match self.pre_behavior {
+                PreBehavior::ResourceUri(uri) => {
+                    let mut modified = payload.clone();
+                    if let Some(ContentPart::ResourceRef { content }) = modified.message.content.first_mut() {
+                        uri.clone_into(&mut content.uri);
+                    }
+                    PluginResult::modify_payload(modified)
+                },
                 PreBehavior::Allow => PluginResult::allow(),
                 PreBehavior::Rewrite => {
                     let mut modified = payload.clone();
@@ -507,21 +548,22 @@ impl PluginFactory for TestPluginFactory {
             pre_behavior: self.pre_behavior,
             post_behavior: self.post_behavior,
         });
-        let mut handlers = Vec::new();
-        if config.hooks.iter().any(|hook| hook == cmf_hook_names::TOOL_PRE_INVOKE) {
-            handlers.push((
-                cmf_hook_names::TOOL_PRE_INVOKE,
+        let handlers = [
+            cmf_hook_names::TOOL_PRE_INVOKE,
+            cmf_hook_names::TOOL_POST_INVOKE,
+            cmf_hook_names::RESOURCE_PRE_FETCH,
+            cmf_hook_names::RESOURCE_POST_FETCH,
+        ]
+        .into_iter()
+        .filter(|hook| config.hooks.iter().any(|configured| configured == hook))
+        .map(|hook| {
+            (
+                hook,
                 Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
                     as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
-            ));
-        }
-        if config.hooks.iter().any(|hook| hook == cmf_hook_names::TOOL_POST_INVOKE) {
-            handlers.push((
-                cmf_hook_names::TOOL_POST_INVOKE,
-                Arc::new(TypedHandlerAdapter::<CmfHook, _>::new(Arc::clone(&plugin)))
-                    as Arc<dyn cpex::cpex_core::registry::AnyHookHandler>,
-            ));
-        }
+            )
+        })
+        .collect();
         Ok(PluginInstance { plugin: Arc::<TestPlugin>::clone(&plugin), handlers })
     }
 }

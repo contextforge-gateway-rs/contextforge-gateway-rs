@@ -13,7 +13,9 @@ use cpex::cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult, ErrorCode, GetPromptRequestParams, GetPromptResult},
+    model::{
+        CallToolRequestParams, CallToolResult, ErrorCode, GetPromptRequestParams, GetPromptResult, ReadResourceResult,
+    },
     serde::{Serialize, de::DeserializeOwned},
 };
 use tokio::task::JoinHandle;
@@ -22,7 +24,7 @@ use crate::{
     config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config},
     error::GatewayPluginRuntimeError,
     hooks::{PromptPreFetchResult, RuntimeHookError, RuntimeHookState, ToolPreCallResult},
-    runtime::GatewayPluginRuntime,
+    runtime::{GatewayPluginRuntime, ResourceCallState},
 };
 
 const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_mins(10);
@@ -43,6 +45,30 @@ pub struct GatewayPluginRuntimeHandle {
 struct RegistryCallState {
     runtime: Arc<GatewayPluginRuntime>,
     state: Option<RuntimeHookState>,
+}
+
+struct RegistryResourceCallState {
+    runtime: Arc<GatewayPluginRuntime>,
+    state: ResourceCallState,
+}
+
+/// Captures the resource post-hook decision and runtime for one request.
+pub struct ResourceHookState {
+    rewritten_uri: Option<String>,
+    call: Option<RegistryResourceCallState>,
+}
+
+impl ResourceHookState {
+    pub fn rewritten_uri(&self) -> Option<&str> {
+        self.rewritten_uri.as_deref()
+    }
+
+    pub async fn after_read_resource(self, response: ReadResourceResult) -> Result<ReadResourceResult, ErrorData> {
+        match self.call {
+            Some(call) => call.runtime.after_read_resource(response, call.state).await,
+            None => Ok(response),
+        }
+    }
 }
 
 enum RuntimeState {
@@ -280,6 +306,18 @@ impl GatewayPluginRuntimeHandle {
         Ok(result)
     }
 
+    pub async fn before_read_resource(&self, resource_uri: &str) -> Result<ResourceHookState, ErrorData> {
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
+        let (rewritten_uri, call) = runtime.before_read_resource(resource_uri).await?;
+        Ok(ResourceHookState {
+            rewritten_uri,
+            call: call.map(|state| RegistryResourceCallState { runtime: Arc::clone(runtime), state }),
+        })
+    }
+
     pub async fn after_get_prompt(
         &self,
         prompt_name: &str,
@@ -324,7 +362,7 @@ impl GatewayPluginRuntimeHandle {
 
 fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
     if let RuntimeState::Failed(error) = state {
-        tracing::warn!(%error, "rejecting tool call because CPEX runtime is failed");
+        tracing::warn!(%error, "rejecting MCP call because CPEX runtime is failed");
     }
     ErrorData { code: ErrorCode::INTERNAL_ERROR, message: "Runtime plugin reload failed".into(), data: None }
 }
@@ -342,7 +380,7 @@ mod tests {
 
     use async_trait::async_trait;
     use cpex::cpex_core::{
-        cmf::{CmfHook, ContentPart, MessagePayload, Role},
+        cmf::{CmfHook, ContentPart, MessagePayload},
         context::PluginContext,
         error::{PluginError, PluginViolation},
         factory::{PluginFactory, PluginInstance},
@@ -352,6 +390,7 @@ mod tests {
     };
     use rmcp::model::{
         CallToolRequestParams, CallToolResult, ContentBlock, NumberOrString, ProgressNotificationParam, ProgressToken,
+        ReadResourceResult, ResourceContents,
     };
     use serde_json::{Value, json};
     use tokio::sync::Mutex as TokioMutex;
@@ -517,7 +556,12 @@ mod tests {
             _extensions: &Extensions,
             ctx: &mut PluginContext,
         ) -> PluginResult<MessagePayload> {
-            let is_post = payload.message.role == Role::Tool;
+            let is_post = payload.message.content.iter().any(|part| {
+                matches!(
+                    part,
+                    ContentPart::ToolResult { .. } | ContentPart::PromptResult { .. } | ContentPart::Resource { .. }
+                )
+            });
             let mut observations = self.observations.lock().expect("observations lock poisoned");
             if is_post {
                 observations.post_calls += 1;
@@ -640,6 +684,8 @@ mod tests {
                     let hook = match hook.as_str() {
                         cmf_hook_names::TOOL_PRE_INVOKE => cmf_hook_names::TOOL_PRE_INVOKE,
                         cmf_hook_names::TOOL_POST_INVOKE => cmf_hook_names::TOOL_POST_INVOKE,
+                        cmf_hook_names::RESOURCE_PRE_FETCH => cmf_hook_names::RESOURCE_PRE_FETCH,
+                        cmf_hook_names::RESOURCE_POST_FETCH => cmf_hook_names::RESOURCE_POST_FETCH,
                         _ => return None,
                     };
                     Some((
@@ -767,6 +813,60 @@ mod tests {
         let plugin = Arc::new(TestPlugin::new("prompt", vec![cmf_hook_names::PROMPT_PRE_FETCH]));
         // runtime_with_plugin initializes and expects success
         runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn resource_pre_hook_runs_for_a_canonical_uri() {
+        let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_PRE_FETCH]));
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+
+        runtime.handle().before_read_resource("file:///password.env").await.expect("resource pre hook runs");
+
+        assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn resource_without_post_hook_keeps_its_decision_across_reload() {
+        let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]));
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+        runtime.apply_config(None).await.expect("disable hooks");
+        let state = runtime.handle().before_read_resource("file:///password.env").await.expect("request starts");
+        assert!(state.call.is_none(), "no post-hook state allocation");
+        runtime.apply_config(Some(plugin_config(&[plugin]).cpex)).await.expect("enable hooks");
+        let response = ReadResourceResult::new(vec![ResourceContents::text("original", "file:///password.env")]);
+        state.after_read_resource(response).await.expect("in-flight decision survives reload");
+        assert_eq!(0, observations.lock().expect("observations lock poisoned").post_calls);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn resource_post_hook_keeps_its_runtime_across_reload() {
+        let plugin = Arc::new(TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_POST_FETCH]).with_post_deny());
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+        let state = runtime.handle().before_read_resource("file:///password.env").await.expect("request starts");
+        runtime.apply_config(None).await.expect("disable hooks");
+        let response = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
+        let error = state.after_read_resource(response).await.expect_err("captured policy still denies");
+        assert_eq!("Plugin denied resource", error.message);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn resource_hooks_preserve_context_across_the_backend_call() {
+        let plugin = Arc::new(
+            TestPlugin::new("resource", vec![cmf_hook_names::RESOURCE_PRE_FETCH, cmf_hook_names::RESOURCE_POST_FETCH])
+                .with_context_roundtrip(),
+        );
+        let observations = plugin.observations();
+        let runtime = runtime_with_plugin(&plugin, plugin_config(&[Arc::clone(&plugin)])).await;
+        let pre = runtime.handle().before_read_resource("file:///password.env").await.expect("resource pre hook runs");
+        let response = ReadResourceResult::new(vec![ResourceContents::text("secret", "file:///password.env")]);
+
+        pre.after_read_resource(response).await.expect("resource post hook receives pre context");
+
+        let observations = observations.lock().expect("observations lock poisoned");
+        assert_eq!(1, observations.pre_calls);
+        assert_eq!(1, observations.post_calls);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
