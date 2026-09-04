@@ -44,7 +44,8 @@ conformance: ## Run strict modern MCP conformance against the committed data-pla
 	"$(CF_INTEGRATION)" conformance run \
 		--client-era modern \
 		--server-era modern \
-		--lane external-data-plane \
+		--lane external \
+		--standalone \
 		--baseline-dir "$(CONFORMANCE_BASELINE_DIR)" \
 		--output-dir "$(CF_INTEGRATION_DIR)/reports"
 
@@ -63,7 +64,8 @@ conformance-bless: ## Run strict modern conformance and atomically update its ba
 	"$(CF_INTEGRATION)" conformance run \
 		--client-era modern \
 		--server-era modern \
-		--lane external-data-plane \
+		--lane external \
+		--standalone \
 		--baseline-dir "$(CONFORMANCE_BASELINE_DIR)" \
 		--output-dir "$(CF_INTEGRATION_DIR)/reports" \
 		--bless
