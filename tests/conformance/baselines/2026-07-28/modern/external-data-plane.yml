@@ -71,10 +71,6 @@ findings:
   check: sep-2322-respect-client-capabilities
   name: RespectClientCapabilities
   status: FAILURE
-- scenario: input-required-result-ignore-extra-params
-  check: sep-2322-ignore-unexpected-params
-  name: IgnoreUnexpectedParams
-  status: WARNING
 - scenario: input-required-result-missing-input-response
   check: sep-2322-missing-response-rerequests
   name: InputRequiredResultMissingResponseRerequests
@@ -132,20 +128,8 @@ findings:
   name: HttpServerNoIndependentRequestsOnStream
   status: FAILURE
 - scenario: server-stateless
-  check: sep-2575-missing-capability-http-400
-  name: MissingCapabilityHttp400
-  status: FAILURE
-- scenario: server-stateless
   check: sep-2575-server-declares-prompts-in-discover
   name: ServerDeclaresPromptsInDiscover
-  status: FAILURE
-- scenario: server-stateless
-  check: sep-2575-server-no-log-without-loglevel
-  name: ServerNoLogWithoutLogLevel
-  status: FAILURE
-- scenario: server-stateless
-  check: sep-2575-server-rejects-undeclared-capability
-  name: ServerRejectsUndeclaredCapability
   status: FAILURE
 - scenario: tools-call-with-progress
   check: tools-call-with-progress

@@ -76,11 +76,15 @@ Comment exactly `/conformance` on a pull request to run the **Conformance**
 Actions workflow. Only repository owners, members, and collaborators can start
 it. The workflow acknowledges the command, tests the pull request merge commit,
 and reports the final result back to the pull request. It runs the modern client
-and modern server eras through the external dataplane. Selecting that lane also
-runs the fixture-direct server leg and the scoped external-dataplane client leg:
+and modern server eras through the external dataplane in standalone mode. This
+starts Redis, the dataplane, nginx, and the official fixture without the control
+plane. The harness discovers the fixture's tools, resources, templates, and
+prompts and publishes their routes and actual tool schemas through the
+dataplane serializer. Selecting that lane also runs the fixture-direct server
+leg and the scoped external-dataplane client leg:
 
 ```bash
-cargo binstall cf-integration@0.1.0 --no-confirm
+cargo binstall cf-integration@0.3.1 --no-confirm
 make conformance
 ```
 
@@ -106,3 +110,14 @@ use `fixture-direct.yml` and `external-data-plane.yml`; scoped client findings
 use `client/external-data-plane.yml`. Operational failures are always failures
 and cannot be blessed. Runtime checkouts, logs, results, and reports remain
 beneath `.integration/`.
+
+A strict baseline match means the observed findings have not changed; it does
+not mean complete protocol coverage. Inspect the report's individual checks
+before blessing changes. In particular, the external dataplane deliberately
+rejects catalog list methods owned by the control plane. Scenarios that need
+`tools/list` for setup cannot exercise the subsequent schema or parameter-header
+checks through this lane; `NotObserved` findings record missing coverage, not
+successful validation. The pinned fixture also lacks an `x-mcp-header`-annotated
+tool for the custom-header server scenario. Parameter-header validation remains
+covered by the active in-repo tests described above. Keep these setup gaps
+distinct from observed protocol failures when interpreting conformance results.
