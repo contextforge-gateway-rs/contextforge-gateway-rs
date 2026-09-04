@@ -1,17 +1,19 @@
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 
 use axum::middleware;
 use axum_otel_metrics::HttpMetricsLayerBuilder;
 use contextforge_data_plane_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
 use http::uri::Authority;
-use jsonwebtoken::DecodingKey;
+
 use rmcp::transport::{
     StreamableHttpServerConfig,
     streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
 };
+mod authorization;
 mod common;
 mod const_values;
+mod errors;
 mod gateway;
 mod layers;
 mod mcp_standard_headers;
@@ -32,22 +34,21 @@ use typed_builder::TypedBuilder;
 pub use user_config_store::RedisUserConfigStore;
 pub use user_config_store::{ConfigStoreError, UserConfigStore};
 
-pub use crate::common::{Config, LogRotation, OtlpProtocol};
+pub use crate::common::*;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
 
-use crate::{
-    common::{ContextForgeDataPlaneAppState, JwtTokenDecoders},
-    layers::{
-        claims_id::claims_layer,
-        mcp_header_limits::{McpStandardHeaderLimits, mcp_header_limits_layer},
-        mcp_origin::mcp_origin_layer,
-        user_config_store::user_config_store_layer,
-        virtual_host_config::virtual_host_config_layer,
-        virtual_host_id::virtual_host_id_layer,
-    },
+use crate::layers::{
+    claims_id::claims_layer,
+    mcp_header_limits::{StandardHeaderLimits, mcp_header_limits_layer},
+    mcp_origin::mcp_origin_layer,
+    principal_extractor::principal_extractor_layer,
+    user_config_store::user_config_store_layer,
+    virtual_host_config::virtual_host_config_layer,
+    virtual_host_id::virtual_host_id_layer,
 };
+pub use authorization::{AuthorizationClaims, AuthorizationService, get_authorization_service};
 
 #[derive(Clone)]
 pub enum UserConfigStoreType {
@@ -63,6 +64,7 @@ pub struct Gateway {
     user_config_store_type: UserConfigStoreType,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
+    authorization_service: Arc<dyn AuthorizationService + Send + Sync>,
 }
 
 impl Gateway {
@@ -97,7 +99,7 @@ impl Gateway {
     }
 
     async fn build_app(self) -> Result<axum::Router> {
-        let Gateway { config, session_manager, user_config_store_type, plugin_runtime } = self;
+        let Gateway { config, session_manager, user_config_store_type, plugin_runtime, authorization_service } = self;
         let user_config_store = match user_config_store_type {
             UserConfigStoreType::Redis => Arc::new(get_config_store(&config).await?),
             UserConfigStoreType::Test(store) => store,
@@ -130,38 +132,19 @@ impl Gateway {
 
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
-        let rs_decoding_key = config.token_verification_public_key.as_ref().map(|path| {
-            let Ok(key) =
-                fs::read(path).map_err(|e| format!("Error when creating local decoder {e:?} {}", path.display()))
-            else {
-                return Err(format!("Error when creating local decoder. Can't read path {}", path.display()));
-            };
-
-            let Ok(key) = DecodingKey::from_rsa_pem(&key) else {
-                return Err(format!("Error when creating local decoder. Can't read the key {}", path.display()));
-            };
-            Ok(key)
-        });
-
-        let mcp_add_state: ContextForgeDataPlaneAppState = ContextForgeDataPlaneAppState {
-            jwt_token_decoding_keys: JwtTokenDecoders {
-                rs: rs_decoding_key.transpose()?,
-                hmac_sha: config
-                    .token_verification_secret
-                    .as_ref()
-                    .map(|token| DecodingKey::from_secret(token.value().as_bytes())),
-            },
-
+        let mcp_gateway_state: ContextForgeDataPlaneAppState = ContextForgeDataPlaneAppState {
+            authorization_service,
             config_store: Arc::clone(&user_config_store),
             config: config.clone(),
         };
-        let mcp_standard_header_limits = McpStandardHeaderLimits::from(&config);
+        let mcp_standard_header_limits = StandardHeaderLimits::from(&config);
 
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
             .layer(middleware::from_fn(virtual_host_config_layer))
-            .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
-            .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
+            .layer(middleware::from_fn_with_state(mcp_gateway_state.clone(), user_config_store_layer))
+            .layer(middleware::from_fn(principal_extractor_layer))
+            .layer(middleware::from_fn_with_state(mcp_gateway_state.clone(), claims_layer))
             .layer(middleware::from_fn(virtual_host_id_layer))
             // Keep this outside auth/config/RMCP work so oversized MCP headers
             // are rejected before JWT validation or body parsing.
@@ -174,7 +157,7 @@ impl Gateway {
         #[cfg(feature = "with_tools")]
         let app = tools::add_tools(app);
 
-        let app = app.with_state(mcp_add_state);
+        let app = app.with_state(mcp_gateway_state);
         let app = axum::Router::new()
             .nest("/contextforge-rs", app)
             .layer(TraceLayer::new_for_http().make_span_with(telemetry::ExtractingMakeSpan))
@@ -202,7 +185,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
-        Config, Gateway, UserConfigStoreType,
+        Config, Gateway, UserConfigStoreType, get_authorization_service,
         user_config_store::{ConfigStoreError, UserConfigStore},
     };
 
@@ -224,6 +207,7 @@ mod tests {
     async fn production_router_rejects_excessive_mcp_headers_before_auth() {
         let config = Config { mcp_standard_header_max_count: 1, ..Config::default() };
         let app = Gateway::builder()
+            .with_authorization_service(get_authorization_service(&config).expect("this should not fail"))
             .with_config(config)
             .with_session_manager(Arc::new(LocalSessionManager::default()))
             .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(UnusedConfigStore)))

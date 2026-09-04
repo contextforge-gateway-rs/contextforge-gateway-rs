@@ -33,6 +33,8 @@ const DEFAULT_HTTP_TRACES_ENDPOINT: &str = "http://127.0.0.1:4318/v1/traces";
 const DEFAULT_HTTP_METRICS_ENDPOINT: &str = "http://127.0.0.1:4318/v1/metrics";
 const METRICS_EXPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
+const DEFAULT_LOGGING: &str = "debug,hyper_util=OFF,tower_http=OFF,rmcp=warn,reqwest=warn,rustls=WARN";
+
 pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std::error::Error + Send + Sync>> {
     let registry = Registry::default();
 
@@ -46,12 +48,14 @@ pub fn init_tracing_logging(configuration: &Config) -> Result<Guard, Box<dyn std
     };
 
     let (non_blocking_appender, guard) = tracing_appender::non_blocking(file_appender);
-    let file_filter =
-        tracing_subscriber::EnvFilter::new(std::env::var("RUST_FILE_LOG").unwrap_or_else(|_| "debug".to_owned()));
+    let file_filter = tracing_subscriber::EnvFilter::new(
+        std::env::var("RUST_FILE_LOG").unwrap_or_else(|_| DEFAULT_LOGGING.to_owned()),
+    );
     let console_filter =
-        tracing_subscriber::EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_owned()));
-    let tracing_filter =
-        tracing_subscriber::EnvFilter::new(std::env::var("RUST_TRACE_LOG").unwrap_or_else(|_| "info".to_owned()));
+        tracing_subscriber::EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOGGING.to_owned()));
+    let tracing_filter = tracing_subscriber::EnvFilter::new(
+        std::env::var("RUST_TRACE_LOG").unwrap_or_else(|_| DEFAULT_LOGGING.to_owned()),
+    );
 
     let console_layer = fmt::layer()
         .event_format(fmt::format().compact())

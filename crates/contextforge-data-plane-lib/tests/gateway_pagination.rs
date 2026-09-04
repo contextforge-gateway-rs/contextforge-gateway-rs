@@ -66,6 +66,9 @@ async fn start_gateway(config: Config, virtual_host_id: &str, user_config: UserC
         .with_config(config)
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(store)))
+        .with_authorization_service(Arc::new(support::auth::AlwaysAllowAuthorizatioService::new(
+            TEST_USER_ID.to_owned(),
+        )))
         .build();
 
     tokio::spawn(async move {

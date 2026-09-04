@@ -3,6 +3,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
+use contextforge_data_plane_lib::{AuthorizationClaims, AuthorizationService};
+use http::HeaderValue;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde_json::json;
 
@@ -38,4 +41,23 @@ pub(crate) fn token(user_id: &str) -> String {
         },
     });
     encode(&header, &claims, &key).expect("jwt token")
+}
+
+#[derive(Debug)]
+pub struct AlwaysAllowAuthorizatioService {
+    user: String,
+}
+
+impl AlwaysAllowAuthorizatioService {
+    pub fn new(user: String) -> AlwaysAllowAuthorizatioService {
+        Self { user }
+    }
+}
+#[async_trait]
+impl AuthorizationService for AlwaysAllowAuthorizatioService {
+    async fn authorize(&self, _: &HeaderValue) -> Option<AuthorizationClaims> {
+        let mut claims = AuthorizationClaims::default();
+        claims.sub.clone_from(&self.user);
+        Some(claims)
+    }
 }

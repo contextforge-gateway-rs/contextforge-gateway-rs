@@ -37,6 +37,7 @@ rustls.workspace = true
 [features]
 plugins = ["dep:cpex-secrets-detection"]
 test-plugins = ["dep:cpex-payload-marker", "dep:cpex-text-prefixer", "dep:cpex-tool-namespace"]
+with_tools = ["contextforge-data-plane-lib/with_tools"]
 
 [dev-dependencies]
 axum.workspace = true

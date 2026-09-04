@@ -119,5 +119,5 @@ These routes are registered **outside the authentication middleware** — unauth
 
 ## Secrets Handling
 
-- The HMAC secret is held as a `SecretString`; key and certificate material is read from disk paths at startup.
+- JWT validation keys are fetched from a remote JWKS endpoint; TLS certificate material is read from disk paths at startup.
 - Never log: tokens, authorization headers, secrets, Redis key/value bytes, full `UserConfig` documents, or backend credentials.

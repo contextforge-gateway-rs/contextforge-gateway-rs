@@ -1,11 +1,11 @@
-use axum::{body::Body, extract::State, middleware::Next, response::Response};
+use axum::{extract::State, middleware::Next, response::Response};
 use contextforge_data_plane_apis::User;
-use http::{StatusCode, header};
-//use openid::Claims;
+
 use tracing::{debug, info, warn};
 
 use crate::{
-    common::{ContextForgeClaims, ContextForgeDataPlaneAppState},
+    common::ContextForgeDataPlaneAppState,
+    errors::{bad_request, internal_server_error},
     user_config_store::ConfigStoreError,
 };
 
@@ -16,17 +16,17 @@ pub async fn user_config_store_layer(
 ) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
-    let maybe_claims = request.extensions().get::<ContextForgeClaims>();
-    if let Some(claims) = maybe_claims {
-        let subject = claims.sub.clone();
+    let maybe_principal = request.extensions().get::<super::AuthorizedPrincipal>();
+    if let Some(principal) = maybe_principal {
         debug!(
-            "user_config_store_layer - getting user config for request subject = {subject} method = {method} path = {path}"
+            "user_config_store_layer - getting user config for principal {principal:?} method = {method} path = {path}"
         );
-        match state.config_store.get_config(&User::new(&subject)).await {
+        let user = User::from(principal);
+        match state.config_store.get_config(&user).await {
             Ok(user_config) => {
                 let virtual_hosts = user_config.virtual_hosts.len();
                 info!(
-                    "user_config_store_layer - loaded user config subject = {subject} virtual_hosts = {virtual_hosts}"
+                    "user_config_store_layer - loaded user config principal = {principal:?} virtual_hosts = {virtual_hosts}"
                 );
                 request.extensions_mut().insert(user_config);
                 next.run(request).await
@@ -34,32 +34,20 @@ pub async fn user_config_store_layer(
 
             Err(ConfigStoreError::NoDataForKey) => {
                 debug!(
-                    "user_config_store_layer - user config lookup returned no data subject = {subject} method = {method} path = {path}"
+                    "user_config_store_layer - user config lookup returned no data principal = {principal:?} method = {method} path = {path}"
                 );
-                Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .header(header::CONTENT_TYPE, "text/plain")
-                    .body(Body::from("Problem occurred retrieving the configuration"))
-                    .expect("Expecting this to work")
+                bad_request("Problem occurred retrieving the configuration")
             },
 
             Err(error) => {
                 debug!(
-                    "user_config_store_layer - user config lookup failed subject = {subject} method = {method} path = {path} error = {error}"
+                    "user_config_store_layer - user config lookup failed principal = {principal:?} method = {method} path = {path} error = {error}"
                 );
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header(header::CONTENT_TYPE, "text/plain")
-                    .body(Body::from("Problem occurred retrieving the configuration"))
-                    .expect("Expecting this to work")
+                internal_server_error("Problem occurred retrieving the configuration")
             },
         }
     } else {
         warn!("user_config_store_layer - no claims found in request extensions method = {method} path = {path}");
-        Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from("No claims in the token"))
-            .expect("Expecting this to work")
+        bad_request("No claims in the token")
     }
 }

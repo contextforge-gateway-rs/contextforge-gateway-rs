@@ -3,7 +3,6 @@ use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem::PemObject};
-use secret_string::SecretString;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
@@ -16,7 +15,7 @@ use thiserror::Error;
 use typed_builder::TypedBuilder;
 use url::Url;
 
-use crate::user_config_store::UserConfigStore;
+use crate::{authorization::AuthorizationService, user_config_store::UserConfigStore};
 
 #[derive(Clone)]
 pub struct JwtTokenDecoders {
@@ -27,7 +26,7 @@ pub struct JwtTokenDecoders {
 #[allow(unused)]
 #[derive(Clone)]
 pub struct ContextForgeDataPlaneAppState {
-    pub(crate) jwt_token_decoding_keys: JwtTokenDecoders,
+    pub(crate) authorization_service: Arc<dyn AuthorizationService + Send + Sync>,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
     pub(crate) config: Config,
 }
@@ -47,22 +46,6 @@ pub struct Scopes {
     permissions: Vec<String>,
     ip_restrictions: Vec<String>,
     time_restrictions: Option<serde_json::Value>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, TypedBuilder)]
-pub struct ContextForgeClaims {
-    pub sub: String,
-    pub jti: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_use: Option<String>,
-    pub iat: Option<u64>,
-    pub iss: String,
-    pub aud: String,
-    pub exp: u64,
-    pub teams: Option<Vec<String>>,
-    pub user: User,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scopes: Option<Scopes>,
 }
 
 pub type RedisClient = redis::Client;
@@ -139,22 +122,18 @@ pub enum OtlpProtocol {
     HttpProtobuf,
 }
 
-#[derive(Debug, Clone, Parser, Default)]
+#[derive(Debug, Clone, Parser)]
 #[command(name = "contextforge-data-plane")]
 #[command(about = "Minimal, fast, experimental data plane for ContextForge")]
 pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_ADDRESS")]
     pub address: Option<SocketAddr>,
 
-    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PUBLIC_KEY")]
-    pub token_verification_public_key: Option<PathBuf>,
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_JWKS_URL")]
+    pub jwks_url: url::Url,
 
-    #[cfg(feature = "with_tools")]
-    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_TOKEN_VERIFICATION_PRIVATE_KEY")]
-    pub token_verification_private_key: PathBuf,
-
-    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_TOKEN_SECRET")]
-    pub token_verification_secret: Option<SecretString<String>>,
+    #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_JWKS_CA_PATH")]
+    pub jwks_ca_cert_path: Option<PathBuf>,
 
     #[arg(long, env = "CONTEXTFORGE_DATA_PLANE_ENABLE_OPEN_TELEMETRY")]
     pub enable_open_telemetry: Option<bool>,
@@ -286,6 +265,10 @@ pub struct Config {
         num_args = 1..
     )]
     pub mcp_allowed_hosts: Option<Vec<Authority>>,
+
+    #[cfg(feature = "with_tools")]
+    #[arg(long)]
+    pub token_verification_private_key: PathBuf,
 }
 
 pub const DEFAULT_MCP_STANDARD_HEADER_MAX_COUNT: usize = 32;
@@ -430,5 +413,57 @@ fn extract_identity(config: &Config) -> crate::Result<reqwest::Identity> {
         },
 
         _ => Err("Invalid/missing configuration".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "with_tools")]
+    use std::{path::PathBuf, str::FromStr};
+
+    use crate::Config;
+
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                address: None,
+                jwks_url: "http://127.0.0.1:8080/".parse().expect("should work"),
+                jwks_ca_cert_path: None,
+                enable_open_telemetry: None,
+                otlp_endpoint: None,
+                otlp_protocol: None,
+                otlp_headers: None,
+                otlp_service_name: None,
+                enable_otel_metrics: None,
+                otlp_metrics_endpoint: None,
+                mcp_standard_header_max_count: 10,
+                mcp_standard_header_max_value_bytes: 4096,
+                mcp_standard_header_max_total_bytes: 4096,
+                number_of_cpus: None,
+                single_runtime: None,
+                runtime_plugins_enabled: None,
+                tls_address: None,
+                server_private_key: None,
+                server_certificate: None,
+                upstream_connection_mode: None,
+                upstream_private_key: None,
+                upstream_certificate: None,
+                upstream_trust_bundle: None,
+                user_config_cache_expiry_seconds: 10,
+                redis_address: String::new(),
+                redis_port: 0,
+                redis_mode: super::RedisConnectionMode::PlainText,
+                redis_tls_trust_bundle: None,
+                redis_tls_client_private_key: None,
+                redis_tls_client_certificate: None,
+                log_name: None,
+                log_rotation: None,
+                mcp_allowed_origins: None,
+                mcp_allowed_hosts: None,
+
+                #[cfg(feature = "with_tools")]
+                token_verification_private_key: PathBuf::from_str("./assets/jwt.key").expect("This should work"),
+            }
+        }
     }
 }

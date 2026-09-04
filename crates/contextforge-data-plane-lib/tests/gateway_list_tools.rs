@@ -12,6 +12,8 @@ use support::{
     create_ports, create_tls_client, create_tls_gateway_with_four_tls_counters,
 };
 
+use crate::support::create_default_config;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
 #[ignore = "Fan out list tools is not supported at the moment. This should be enabled in 2.x"]
@@ -20,9 +22,8 @@ async fn plaintext_lists_prefixed_backend_tools() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
@@ -58,13 +59,12 @@ async fn tls_lists_prefixed_backend_tools() -> Result<()> {
         format!("127.0.0.1:{gateway_port}").parse().expect("This should work");
 
     let config = Config {
-        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         tls_address: Some(server_socket_addr),
         server_private_key: Some("../../assets/contextforgeCA/contextforge-server.key.pem".into()),
         server_certificate: Some("../../assets/contextforgeCA/contextforge-server.cert.pem".into()),
         upstream_trust_bundle: Some("../../assets/contextforgeCA/contextforge.intermediate.ca-chain.cert.pem".into()),
-        ..Default::default()
+        ..create_default_config()
     };
 
     let user = TEST_USER_ID;
